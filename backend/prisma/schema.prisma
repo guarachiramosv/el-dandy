@@ -1,0 +1,364 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ========================
+// ENUMS
+// ========================
+
+enum Role {
+  ADMIN
+  SELLER
+}
+
+enum ProductCondition {
+  NUEVO
+  USADO
+}
+
+enum ProductStatus {
+  ACTIVO
+  INACTIVO
+  DESCONTINUADO
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  QR
+  TARJETA
+}
+
+enum SaleType {
+  CONTADO
+  CREDITO
+}
+
+enum DebtStatus {
+  PENDIENTE
+  PARCIAL
+  PAGADA
+  VENCIDA
+}
+
+enum PurchaseStatus {
+  BORRADOR
+  RECIBIDA
+  ANULADA
+}
+
+enum StockMovementType {
+  VENTA
+  COMPRA
+  AJUSTE
+  TRANSFERENCIA_SALIDA
+  TRANSFERENCIA_ENTRADA
+}
+
+// ========================
+// MODELOS
+// ========================
+
+model Sucursal {
+  id        String     @id @default(uuid())
+  nombre    String
+  whatsapp  String?
+  usuarios  Usuario[]
+  productos Producto[]
+  productoStocks ProductoStockSucursal[]
+  eliminacionesProducto ProductoEliminacionHistorial[]
+  ventas    Venta[]
+  compras   Compra[]
+  cierresCaja CierreCaja[]
+  createdAt DateTime   @default(now())
+}
+
+model Categoria {
+  id        String     @id @default(uuid())
+  nombre    String @unique
+  productos Producto[]
+  createdAt DateTime   @default(now())
+}
+
+model Usuario {
+  id         String   @id @default(uuid())
+  nombre     String
+  email      String   @unique
+  password   String
+  role       Role     @default(SELLER)
+  activo     Boolean  @default(true)
+  sucursalId String
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  ventas     Venta[]
+  movimientos MovimientoStock[]
+  eliminacionesProducto ProductoEliminacionHistorial[]
+  cierresCaja CierreCaja[]
+  createdAt  DateTime @default(now())
+}
+
+model Proveedor {
+  id              String   @id @default(uuid())
+  nombre          String
+  contacto        String?
+  telefono        String?
+  email           String?
+  pais            String?
+  direccion       String?
+  notas           String?
+  deudaPendiente  Float    @default(0)
+  activo          Boolean  @default(true)
+  compras         Compra[]
+  productos       Producto[]
+  createdAt       DateTime @default(now())
+}
+
+model Cliente {
+  id        String         @id @default(uuid())
+  nombre    String
+  telefono  String?
+  email     String?        @unique
+  password  String?
+  empresa   String?
+  ciudad    String?
+  nit       String?
+  direccion String?
+  notas     String?
+  activo    Boolean        @default(true)
+  ventas    Venta[]
+  cuentas   CuentaCobrar[]
+  createdAt DateTime       @default(now())
+}
+
+model Producto {
+  id           String           @id @default(uuid())
+  codigo       String
+  descripcion  String
+  marca        String
+  condicion    ProductCondition @default(NUEVO)
+  stock        Int              @default(0)
+  stockMinimo  Int              @default(5)
+  ubicacion    String?
+  activo       Boolean          @default(true)
+  estado       ProductStatus    @default(ACTIVO)
+  precioCompra Float
+  precioVenta  Float
+  imagen       String?
+  proveedorId  String?
+  proveedor    Proveedor?       @relation(fields: [proveedorId], references: [id])
+  categoriaId  String
+  categoria    Categoria        @relation(fields: [categoriaId], references: [id])
+  sucursalId   String
+  sucursal     Sucursal         @relation(fields: [sucursalId], references: [id])
+  stockSucursales ProductoStockSucursal[]
+  imagenes     ProductoImagen[]
+  detalles     DetalleVenta[]
+  detallesCompra DetalleCompra[]
+  movimientos  MovimientoStock[]
+  eliminacionesHistorial ProductoEliminacionHistorial[]
+  alertas      AlertaStock[]
+  transferenciasOrigen TransferenciaStock[] @relation("ProductoTransferenciaOrigen")
+  transferenciasDestino TransferenciaStock[] @relation("ProductoTransferenciaDestino")
+  createdAt    DateTime         @default(now())
+
+  @@unique([codigo, sucursalId])
+}
+
+model ProductoEliminacionHistorial {
+  id             String        @id @default(uuid())
+  productoId     String
+  producto       Producto      @relation(fields: [productoId], references: [id])
+  sucursalId     String?
+  sucursal       Sucursal?     @relation(fields: [sucursalId], references: [id])
+  usuarioId      String?
+  usuario        Usuario?      @relation(fields: [usuarioId], references: [id])
+  motivo         String
+  stockAnterior  Int           @default(0)
+  estadoAnterior ProductStatus @default(ACTIVO)
+  createdAt      DateTime      @default(now())
+
+  @@index([productoId])
+  @@index([sucursalId])
+  @@index([createdAt])
+}
+
+model ProductoStockSucursal {
+  id         String   @id @default(uuid())
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sucursalId String
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  stock      Int      @default(0)
+  activo     Boolean  @default(true)
+  estado     ProductStatus @default(ACTIVO)
+  createdAt  DateTime @default(now())
+
+  @@unique([productoId, sucursalId])
+  @@index([sucursalId])
+}
+
+model ProductoImagen {
+  id         String   @id @default(uuid())
+  url        String
+  publicId   String?
+  orden      Int      @default(0)
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([productoId])
+}
+
+model Venta {
+  id         String         @id @default(uuid())
+  subtotal   Float
+  descuento  Float          @default(0.0)
+  total      Float
+  metodoPago PaymentMethod
+  tipoVenta  SaleType       @default(CONTADO)
+  usuarioId  String
+  usuario    Usuario        @relation(fields: [usuarioId], references: [id])
+  sucursalId String
+  sucursal   Sucursal       @relation(fields: [sucursalId], references: [id])
+  clienteId  String?
+  cliente    Cliente?       @relation(fields: [clienteId], references: [id])
+  detalles   DetalleVenta[]
+  cuenta     CuentaCobrar?
+  createdAt  DateTime       @default(now())
+}
+
+model DetalleVenta {
+  id             String   @id @default(uuid())
+  cantidad       Int
+  precioUnitario Float
+  subtotal       Float
+  ventaId        String
+  venta          Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto @relation(fields: [productoId], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+model Compra {
+  id          String          @id @default(uuid())
+  proveedorId String
+  proveedor   Proveedor       @relation(fields: [proveedorId], references: [id])
+  sucursalId  String
+  sucursal    Sucursal        @relation(fields: [sucursalId], references: [id])
+  usuarioId   String
+  subtotal    Float
+  total       Float
+  estado      PurchaseStatus  @default(RECIBIDA)
+  notas       String?
+  detalles    DetalleCompra[]
+  createdAt   DateTime        @default(now())
+}
+
+model DetalleCompra {
+  id             String   @id @default(uuid())
+  compraId       String
+  compra         Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  productoId     String
+  producto       Producto @relation(fields: [productoId], references: [id])
+  cantidad       Int
+  precioUnitario Float
+  subtotal       Float
+  createdAt      DateTime @default(now())
+}
+
+model MovimientoStock {
+  id             String            @id @default(uuid())
+  tipoMovimiento StockMovementType
+  productoId     String
+  producto       Producto          @relation(fields: [productoId], references: [id])
+  sucursalId      String
+  stockAnterior   Int
+  stockNuevo      Int
+  cantidad        Int
+  usuarioId       String?
+  usuario         Usuario?         @relation(fields: [usuarioId], references: [id])
+  referenciaId    String?
+  referenciaTipo  String?
+  notas           String?
+  createdAt       DateTime         @default(now())
+}
+
+model TransferenciaStock {
+  id                String   @id @default(uuid())
+  productoOrigenId  String
+  productoOrigen    Producto @relation("ProductoTransferenciaOrigen", fields: [productoOrigenId], references: [id])
+  productoDestinoId String
+  productoDestino   Producto @relation("ProductoTransferenciaDestino", fields: [productoDestinoId], references: [id])
+  sucursalOrigenId  String
+  sucursalDestinoId String
+  cantidad          Int
+  usuarioId         String
+  notas             String?
+  createdAt         DateTime @default(now())
+}
+
+model AlertaStock {
+  id        String   @id @default(uuid())
+  productoId String
+  producto  Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo      String
+  mensaje   String
+  leida     Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model CuentaCobrar {
+  id               String       @id @default(uuid())
+  clienteId        String
+  cliente          Cliente      @relation(fields: [clienteId], references: [id])
+  ventaId          String       @unique
+  venta            Venta        @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  sucursalId       String
+  montoTotal       Float
+  montoPagado      Float        @default(0)
+  saldo            Float
+  fechaVencimiento DateTime?
+  estado           DebtStatus   @default(PENDIENTE)
+  notas            String?
+  pagos            PagoCredito[]
+  createdAt        DateTime     @default(now())
+}
+
+model PagoCredito {
+  id          String        @id @default(uuid())
+  cuentaId    String
+  cuenta      CuentaCobrar  @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
+  monto       Float
+  metodoPago  PaymentMethod
+  usuarioId   String
+  notas       String?
+  createdAt   DateTime      @default(now())
+}
+
+model CierreCaja {
+  id                String   @id @default(uuid())
+  fecha             DateTime
+  usuarioId         String
+  usuario           Usuario  @relation(fields: [usuarioId], references: [id])
+  sucursalId        String
+  sucursal          Sucursal @relation(fields: [sucursalId], references: [id])
+  cantidadVentas    Int
+  totalVentas       Float
+  totalEfectivo     Float
+  totalTransferencia Float
+  totalQr           Float
+  totalTarjeta      Float
+  totalCredito      Float
+  montoDeclarado    Float
+  diferencia        Float
+  notas             String?
+  createdAt         DateTime @default(now())
+
+  @@unique([fecha, usuarioId, sucursalId])
+}

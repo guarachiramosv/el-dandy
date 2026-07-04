@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "El Dandy Móvil",
+    "slug": "el-dandy-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1120"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "El Dandy necesita la camara para tomar fotos de productos.",
+        "NSPhotoLibraryUsageDescription": "El Dandy necesita acceso a tus fotos para elegir imagenes de productos."
+      }
+    },
+    "android": {
+      "package": "com.eldandy.gestion",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "El Dandy necesita acceso a tus fotos para elegir imagenes de productos.",
+          "cameraPermission": "El Dandy necesita la camara para tomar fotos de productos."
+        }
+      ]
+    ]
+  }
+}

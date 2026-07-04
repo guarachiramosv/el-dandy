@@ -1,0 +1,1 @@
+import React from 'react'; export default function Remachado() { return <section className='p-6 text-gray-100'><h1 className='text-2xl font-bold mb-4'>Remachado</h1></section>; }
