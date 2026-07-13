@@ -18,7 +18,7 @@ export const createProduct = async (product: Omit<Product, "id" | "createdAt" | 
   return response.data.data;
 };
 
-export const updateProduct = async (id: string, product: Partial<Omit<Product, "id" | "createdAt" | "updatedAt">>) : Promise<Product> => {
+export const updateProduct = async (id: string, product: Partial<Omit<Product, "id" | "createdAt" | "updatedAt">> & { deletedImageUrls?: string[] }) : Promise<Product> => {
   const response = await api.put<{ success: boolean; data: Product }>(`/products/${id}`, product);
   if (!response.data.success) throw new Error("Failed to update product");
   return response.data.data;

@@ -9,10 +9,14 @@ import {
   Product,
   ProductInput,
   ProductStatusFilter,
+  RemachadoMedida,
+  RemachadoSummary,
+  RemachadoTrabajo,
   Session,
   StockAlert,
   Sucursal,
 } from './types';
+import type { ReceiptSale } from './thermalReceipt';
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.4:4000/api').replace(/\/$/, '');
 
@@ -125,8 +129,16 @@ export function updateProduct(token: string, id: string, input: Partial<ProductI
   );
 }
 
-export function deleteProduct(token: string, id: string) {
-  return request<Product>(`/products/${id}`, { method: 'DELETE' }, token);
+export function deleteProduct(
+  token: string,
+  id: string,
+  payload: { sucursalId?: string | null; motivo: string },
+) {
+  return request<Product>(
+    `/products/${id}`,
+    { method: 'DELETE', body: JSON.stringify(payload) },
+    token,
+  );
 }
 
 export function restoreProduct(token: string, id: string) {
@@ -223,7 +235,7 @@ export function createSale(
     items: Array<{ productoId: string; cantidad: number; descuentoItem: number }>;
   },
 ) {
-  return request<{ id: string; total: number }>(
+  return request<ReceiptSale>(
     '/sales',
     {
       method: 'POST',
@@ -231,6 +243,56 @@ export function createSale(
         usuarioId: session.user.id,
         sucursalId: session.user.sucursalId,
         clienteId: input.clienteId || null,
+        tipoVenta: 'CONTADO',
+        ...input,
+      }),
+    },
+    session.token,
+  );
+}
+
+export function getRemachadoSummary(token: string) {
+  return request<RemachadoSummary>('/remachado', {}, token);
+}
+
+export function createRemachadoMedida(
+  token: string,
+  input: {
+    medida: string;
+    descripcion?: string | null;
+    stockJuegos?: number;
+    stockMinimoJuegos?: number;
+    precioJuego: number;
+    precioMedioJuego: number;
+    remachesPorJuego?: number;
+    remachesPorMedioJuego?: number;
+  },
+) {
+  return request<RemachadoMedida>(
+    '/remachado/medidas',
+    { method: 'POST', body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function createRemachadoTrabajo(
+  session: Session,
+  input: {
+    medidaId: string;
+    remacheId?: string | null;
+    metodoPago: PaymentMethod;
+    tipoTrabajo: 'JUEGO' | 'MEDIO_JUEGO';
+    accesorios?: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>;
+    notas?: string | null;
+  },
+) {
+  return request<RemachadoTrabajo>(
+    '/remachado/trabajos',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        usuarioId: session.user.id,
+        sucursalId: session.user.sucursalId,
         tipoVenta: 'CONTADO',
         ...input,
       }),

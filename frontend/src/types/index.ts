@@ -16,9 +16,11 @@ export interface Sucursal {
 export interface Product {
   id: string;
   codigo: string;
+  codigoRepuesto?: string | null;
   descripcion: string;
   marca: string;
   condicion: string;
+  unidadVenta?: 'UNIDAD' | 'METRO';
   stock: number;
   stockMinimo?: number;
   ubicacion?: string | null;
@@ -53,7 +55,7 @@ export interface ProductBranchStock {
 export interface ProductDeletionHistory {
   id: string;
   productoId: string;
-  producto?: Pick<Product, 'id' | 'codigo' | 'descripcion' | 'marca' | 'ubicacion'>;
+  producto?: Pick<Product, 'id' | 'codigo' | 'codigoRepuesto' | 'descripcion' | 'marca' | 'ubicacion'>;
   sucursalId?: string | null;
   sucursal?: Pick<Sucursal, 'id' | 'nombre'> | null;
   usuarioId?: string | null;
@@ -149,6 +151,19 @@ export interface CreditPayment {
   createdAt: string;
 }
 
+export interface CashExpense {
+  id: string;
+  motivo: string;
+  monto: number;
+  metodoPago: 'EFECTIVO' | 'QR';
+  notas?: string | null;
+  usuarioId: string;
+  usuario?: Pick<User, 'id' | 'nombre' | 'email'>;
+  sucursalId: string;
+  sucursal?: Sucursal;
+  createdAt: string;
+}
+
 export interface CreditAccount {
   id: string;
   clienteId: string;
@@ -218,11 +233,15 @@ export interface Sale {
   cuenta?: CreditAccount | null;
   detalles?: Array<{
     id: string;
+    tipoLinea?: 'PRODUCTO' | 'REMACHADO';
+    descripcion?: string | null;
+    unidadVenta?: string | null;
     cantidad: number;
     precioUnitario: number;
     subtotal: number;
-    productoId: string;
-    producto?: Product;
+    productoId?: string | null;
+    producto?: Product | null;
+    remachadoTrabajoId?: string | null;
   }>;
   createdAt: string;
 }
@@ -240,6 +259,19 @@ export interface DailySalesSummary {
     totalTarjeta: number;
     totalCredito: number;
   };
+  gastos: {
+    totals: {
+      totalGastos: number;
+      totalEfectivo: number;
+      totalQr: number;
+    };
+    items: CashExpense[];
+  };
+  netos: {
+    totalEfectivo: number;
+    totalQr: number;
+    totalDisponible: number;
+  };
   ventas: Sale[];
 }
 
@@ -255,6 +287,11 @@ export interface CashClosing {
   totalQr: number;
   totalTarjeta: number;
   totalCredito: number;
+  gastoEfectivo: number;
+  gastoQr: number;
+  totalGastos: number;
+  netoEfectivo: number;
+  netoQr: number;
   montoDeclarado: number;
   diferencia: number;
   notas?: string | null;
@@ -296,4 +333,62 @@ export interface SaleInput {
   descuento: number;
   fechaVencimiento?: string | null;
   items: SaleItemInput[];
+}
+
+export interface RemachadoMedida {
+  id: string;
+  medida: string;
+  descripcion?: string | null;
+  stockJuegos: number;
+  stockMinimoJuegos: number;
+  precioJuego: number;
+  precioMedioJuego: number;
+  remachesPorJuego: number;
+  remachesPorMedioJuego: number;
+  activo: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RemachadoRemache {
+  id: string;
+  codigo: string;
+  nombre: string;
+  medida?: string | null;
+  stock: number;
+  stockMinimo: number;
+  activo: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RemachadoTrabajo {
+  id: string;
+  medidaId: string;
+  medida?: RemachadoMedida;
+  remacheId?: string | null;
+  remache?: RemachadoRemache | null;
+  usuarioId: string;
+  usuario?: Pick<User, 'id' | 'nombre' | 'email'>;
+  sucursalId: string;
+  sucursal?: Sucursal;
+  ventaId?: string | null;
+  venta?: Sale | null;
+  tipoTrabajo: 'JUEGO' | 'MEDIO_JUEGO';
+  cantidadJuegos: number;
+  cantidadBalatas: number;
+  cantidadRemaches: number;
+  resorteProductoId?: string | null;
+  resorteProducto?: Product | null;
+  cantidadResortes: number;
+  gomaProductoId?: string | null;
+  gomaProducto?: Product | null;
+  cantidadGomas: number;
+  seguroProductoId?: string | null;
+  seguroProducto?: Product | null;
+  cantidadSeguros: number;
+  precioUnitario: number;
+  total: number;
+  notas?: string | null;
+  createdAt: string;
 }

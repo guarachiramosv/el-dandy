@@ -111,7 +111,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
                     </Pressable>
                   ) : (
                     <View style={styles.productImageFallback}>
-                      <Text style={styles.productImageFallbackText}>{item.marca.slice(0, 2).toUpperCase()}</Text>
+                      <Text style={styles.productImageFallbackText}>{(item.marca || item.descripcion || 'PR').slice(0, 2).toUpperCase()}</Text>
                     </View>
                   )}
                   <View style={styles.cardInfo}>
@@ -125,7 +125,7 @@ export default function InventoryScreen({ session }: { session: Session }) {
                     </View>
                     <Text style={styles.productName}>{item.descripcion}</Text>
                     <Text style={styles.meta}>
-                      {item.marca} - {item.condicion} - {item.categoria?.nombre || 'Sin categoria'}
+                      {item.marca || 'Sin marca'} - {item.condicion} - {item.categoria?.nombre || 'Sin categoria'}
                     </Text>
                     <View style={styles.cardBottom}>
                       <Text style={styles.branch}>{item.sucursal?.nombre || 'Sucursal'}</Text>

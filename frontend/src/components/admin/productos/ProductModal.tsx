@@ -9,10 +9,12 @@ import { productImageUrl } from "../../../utils/images";
 type ProductFormData = {
   id?: string;
   codigo: string;
+  codigoRepuesto?: string | null;
   descripcion: string;
   categoriaId: string;
   marca: string;
   condicion: "NUEVO" | "USADO";
+  unidadVenta: "UNIDAD" | "METRO";
   stock: number;
   stockMinimo?: number;
   ubicacion?: string | null;
@@ -21,6 +23,7 @@ type ProductFormData = {
   sucursalId: string;
   imagen?: string;
   imageFiles?: File[];
+  deletedImageUrls?: string[];
 };
 
 interface ProductModalProps {
@@ -49,10 +52,12 @@ const buildInitialFormData = (
     return {
       id: product.id,
       codigo: product.codigo,
+      codigoRepuesto: product.codigoRepuesto || "",
       descripcion: product.descripcion,
       categoriaId: product.categoriaId,
       marca: product.marca,
       condicion: product.condicion === "USADO" ? "USADO" : "NUEVO",
+      unidadVenta: product.unidadVenta === "METRO" ? "METRO" : "UNIDAD",
       stock: product.stock,
       stockMinimo: product.stockMinimo || 5,
       ubicacion: product.ubicacion || "",
@@ -61,15 +66,18 @@ const buildInitialFormData = (
       sucursalId: product.sucursalId,
       imagen: product.imagen,
       imageFiles: [],
+      deletedImageUrls: [],
     };
   }
 
   return {
     codigo: "",
+    codigoRepuesto: "",
     descripcion: "",
     categoriaId: defaultCategoryId,
     marca: "Universal",
     condicion: "NUEVO",
+    unidadVenta: "UNIDAD",
     stock: 0,
     stockMinimo: 5,
     ubicacion: "",
@@ -78,6 +86,7 @@ const buildInitialFormData = (
     sucursalId: defaultSucursalId,
     imagen: undefined,
     imageFiles: [],
+    deletedImageUrls: [],
   };
 };
 
@@ -121,9 +130,10 @@ function ProductModalContent({
 
   const existingImageUrls = useMemo(() => {
     const gallery = product?.imagenes?.map((image) => image.url).filter(Boolean) || [];
-    if (gallery.length > 0) return gallery;
-    return formData.imagen ? [formData.imagen] : [];
-  }, [formData.imagen, product?.imagenes]);
+    if (gallery.length > 0) return gallery.filter(url => !formData.deletedImageUrls?.includes(url));
+    if (formData.imagen && !formData.deletedImageUrls?.includes(formData.imagen)) return [formData.imagen];
+    return [];
+  }, [formData.imagen, product?.imagenes, formData.deletedImageUrls]);
 
   useEffect(() => {
     return () => selectedPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -153,6 +163,13 @@ function ProductModalContent({
     }));
   };
 
+  const removeExistingImage = (url: string) => {
+    setFormData(prev => ({
+      ...prev,
+      deletedImageUrls: [...(prev.deletedImageUrls || []), url],
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (mode === "VIEW") {
@@ -163,12 +180,12 @@ function ProductModalContent({
     const payload = {
       ...formData,
       codigo: formData.codigo.trim(),
+      codigoRepuesto: formData.codigoRepuesto?.trim() || null,
       descripcion: formData.descripcion.trim(),
       marca: formData.marca.trim(),
       ubicacion: formData.ubicacion?.trim() || null,
     };
 
-    if (!payload.codigo) return setFormError("El codigo es obligatorio. Revisa la parte superior del formulario.");
     if (!payload.descripcion) return setFormError("La descripcion es obligatoria.");
     if (!payload.marca) return setFormError("La marca es obligatoria.");
     if (!payload.categoriaId) return setFormError("Selecciona una categoria.");
@@ -237,14 +254,25 @@ function ProductModalContent({
                   {(existingImageUrls.length > 0 || selectedPreviewUrls.length > 0) && (
                     <div className="grid grid-cols-3 gap-2">
                       {existingImageUrls.map((image, index) => (
-                        <button
-                          type="button"
-                          key={`${image}-${index}`}
-                          onClick={() => setLightboxImage({ url: productImageUrl(image)!, alt: `Foto guardada ${index + 1}` })}
-                          className="aspect-square overflow-hidden rounded-lg border border-gray-700 bg-grafito-900"
-                        >
-                          <img src={productImageUrl(image)!} alt={`Foto guardada ${index + 1}`} className="h-full w-full object-cover" />
-                        </button>
+                        <div key={`${image}-${index}`} className="relative aspect-square overflow-hidden rounded-lg border border-gray-700 bg-grafito-900">
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage({ url: productImageUrl(image)!, alt: `Foto guardada ${index + 1}` })}
+                            className="h-full w-full"
+                          >
+                            <img src={productImageUrl(image)!} alt={`Foto guardada ${index + 1}`} className="h-full w-full object-cover" />
+                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => removeExistingImage(image)}
+                              className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white hover:bg-accent"
+                              title="Quitar foto"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
                       ))}
                       {selectedPreviewUrls.map((url, index) => (
                         <div key={url} className="relative aspect-square overflow-hidden rounded-lg border border-primary/50 bg-grafito-900">
@@ -299,8 +327,12 @@ function ProductModalContent({
 
                 <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-300">Codigo</label>
-                    <input required type="text" name="codigo" value={formData.codigo} onChange={handleChange} readOnly={isReadOnly} className="premium-input" placeholder="Ej. FIL-001" />
+                    <label className="text-sm font-medium text-gray-300">Codigo interno</label>
+                    <input type="text" name="codigo" value={isCreateMode ? "Automatico" : formData.codigo} onChange={handleChange} readOnly className="premium-input" placeholder="Automatico" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-300">Codigo repuesto 2</label>
+                    <input type="text" name="codigoRepuesto" value={formData.codigoRepuesto || ""} onChange={handleChange} readOnly={isReadOnly} className="premium-input" placeholder="Ej. ALT-001" />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
                     <label className="text-sm font-medium text-gray-300">Descripcion</label>
@@ -321,6 +353,13 @@ function ProductModalContent({
                     <select name="condicion" value={formData.condicion} onChange={handleChange} disabled={isReadOnly} className="premium-input">
                       <option value="NUEVO">Nuevo</option>
                       <option value="USADO">Usado</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-300">Unidad de venta</label>
+                    <select name="unidadVenta" value={formData.unidadVenta} onChange={handleChange} disabled={isReadOnly} className="premium-input">
+                      <option value="UNIDAD">Por unidad</option>
+                      <option value="METRO">Por metro</option>
                     </select>
                   </div>
                   {isCreateMode && (
@@ -351,12 +390,12 @@ function ProductModalContent({
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">{isCreateMode ? "Stock Inicial" : "Stock Total"}</label>
-                  <input required type="number" min="0" name="stock" value={formData.stock} onChange={handleChange} readOnly={isStockReadOnly} className="premium-input" />
+                  <label className="text-sm font-medium text-gray-300">{isCreateMode ? "Stock Inicial" : "Stock Total"} {formData.unidadVenta === "METRO" ? "(m)" : ""}</label>
+                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stock" value={formData.stock} onChange={handleChange} readOnly={isStockReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Stock Minimo</label>
-                  <input required type="number" min="0" name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Precio de Compra</label>
@@ -375,7 +414,7 @@ function ProductModalContent({
                     {product?.stockSucursales?.map((item) => (
                       <div key={item.id} className="rounded-lg border border-gray-700 bg-grafito-900/40 p-3">
                         <p className="text-xs uppercase text-gray-500">{item.sucursal?.nombre || "Sucursal"}</p>
-                        <p className="mt-1 text-lg font-bold text-white">{item.stock} unidades</p>
+                        <p className="mt-1 text-lg font-bold text-white">{item.stock} {formData.unidadVenta === "METRO" ? "m" : "unidades"}</p>
                       </div>
                     ))}
                   </div>

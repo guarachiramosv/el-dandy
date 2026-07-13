@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
 import { SaleService } from '../services/sale.service';
-import { closeCashRegisterSchema, createSaleSchema } from '../validators/saleValidator';
+import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema } from '../validators/saleValidator';
 
 const service = new SaleService();
 
@@ -47,5 +47,26 @@ export const closeCashRegister = asyncHandler(async (req: Request, res: Response
   }
 
   const data = await service.closeCashRegister({ ...parsed, usuarioId, sucursalId });
+  res.status(201).json({ success: true, data });
+});
+
+export const createCashExpense = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = createCashExpenseSchema.parse(req.body);
+  const usuarioId = req.user?.role === 'SELLER'
+    ? req.user.id
+    : (parsed.usuarioId || req.user?.id || '');
+  const sucursalId = req.user?.role === 'SELLER' && req.user.sucursalId
+    ? req.user.sucursalId
+    : (parsed.sucursalId || req.user?.sucursalId || '');
+
+  if (!usuarioId || !sucursalId) {
+    return res.status(400).json({ success: false, error: 'Usuario y sucursal requeridos' });
+  }
+
+  const data = await service.createCashExpense({
+    ...parsed,
+    usuarioId,
+    sucursalId,
+  });
   res.status(201).json({ success: true, data });
 });

@@ -7,7 +7,7 @@ export const createPurchaseSchema = z.object({
   notas: z.string().optional().nullable(),
   items: z.array(z.object({
     productoId: z.string().uuid('Producto invalido'),
-    cantidad: z.number().int().positive('Cantidad debe ser mayor a cero'),
+    cantidad: z.number().positive('Cantidad debe ser mayor a cero'),
     precioUnitario: z.number().positive('Precio debe ser mayor a cero'),
   })).min(1, 'Agrega al menos un producto'),
 });

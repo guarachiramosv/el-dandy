@@ -128,7 +128,7 @@ export default function Reportes() {
           }
           #sales-print .sales-stats-grid {
             display: grid !important;
-            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
             gap: 6px !important;
             margin: 8px 0 12px 0 !important;
           }
@@ -237,12 +237,16 @@ export default function Reportes() {
           <p className="text-gray-400">Sin datos.</p>
         ) : (
           <div className="space-y-6">
-            <div className="sales-stats-grid grid gap-3 md:grid-cols-5">
+            <div className="sales-stats-grid grid gap-3 md:grid-cols-4">
               <Stat label="Ventas" value={String(report.totals.cantidadVentas)} />
-              <Stat label="Items" value={String(report.totals.cantidadItems)} />
+              <Stat label="Total" value={money(report.totals.totalVentas)} />
+              <Stat label="Gastos" value={money(report.totals.totalGastos || 0)} />
+              <Stat label="Disponible" value={money(report.totals.totalDisponible ?? report.totals.totalVentas)} />
+              <Stat label="Efectivo neto" value={money(report.totals.netoEfectivo ?? report.totals.totalEfectivo)} />
+              <Stat label="QR neto" value={money(report.totals.netoQr ?? report.totals.totalQr)} />
               <Stat label="Unidades" value={String(report.totals.unidadesVendidas)} />
               <Stat label="Descuento" value={money(report.totals.descuento)} />
-              <Stat label="Total" value={money(report.totals.totalVentas)} />
+              <Stat label="Items" value={String(report.totals.cantidadItems)} />
             </div>
 
             <div>
@@ -270,6 +274,42 @@ export default function Reportes() {
                       <td className="p-3 text-right">{money(item.total)}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Gastos registrados</h3>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
+                  <tr>
+                    <th className="p-3">Fecha</th>
+                    <th className="p-3">Vendedor</th>
+                    <th className="p-3">Sucursal</th>
+                    <th className="p-3">Motivo</th>
+                    <th className="p-3">Origen</th>
+                    <th className="p-3 text-right">Monto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800 print:divide-gray-200">
+                  {(report.gastos || []).map((expense) => (
+                    <tr key={expense.id}>
+                      <td className="p-3">{new Date(expense.createdAt).toLocaleString("es-BO")}</td>
+                      <td className="p-3">{expense.usuario?.nombre || "Usuario"}</td>
+                      <td className="p-3">{expense.sucursal?.nombre || "Sucursal"}</td>
+                      <td className="p-3">
+                        <p className="font-semibold">{expense.motivo}</p>
+                        {expense.notas && <p className="print-muted text-xs text-gray-500 print:text-gray-600">{expense.notas}</p>}
+                      </td>
+                      <td className="p-3">{expense.metodoPago}</td>
+                      <td className="p-3 text-right font-bold">{money(expense.monto)}</td>
+                    </tr>
+                  ))}
+                  {(report.gastos || []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-4 text-center text-gray-500">Sin gastos en este periodo.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

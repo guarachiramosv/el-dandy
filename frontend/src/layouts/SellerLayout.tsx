@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History } from "lucide-react";
+import { ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History, Hammer } from "lucide-react";
 import { getCurrentUser } from "../services/auth";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
@@ -41,6 +41,9 @@ export default function SellerLayout() {
           </NavLink>
           <NavLink to="/seller/inventario" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
             <Package size={20} className="mr-3" /> Inventario
+          </NavLink>
+          <NavLink to="/seller/remachado" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
+            <Hammer size={20} className="mr-3" /> Remachado
           </NavLink>
           <NavLink to="/seller/clientes" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
             <Users size={20} className="mr-3" /> Clientes

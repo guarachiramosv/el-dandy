@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as Print from 'expo-print';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { createSale, getCustomers, getProducts } from '../api';
 import { colors } from '../theme';
+import { buildThermalReceiptHtml, ReceiptSale } from '../thermalReceipt';
 import { CartItem, Customer, PaymentMethod, Product, Session } from '../types';
 
 const paymentMethods: PaymentMethod[] = ['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA'];
@@ -25,6 +27,7 @@ export default function SaleScreen({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [lastSale, setLastSale] = useState<ReceiptSale | null>(null);
 
   const loadProducts = async () => {
     setError('');
@@ -49,7 +52,7 @@ export default function SaleScreen({ session }: { session: Session }) {
     if (!term) return products.slice(0, 12);
     return products
       .filter((product) =>
-        `${product.codigo} ${product.descripcion} ${product.marca}`.toLowerCase().includes(term),
+        `${product.codigo} ${product.descripcion} ${product.marca || ''}`.toLowerCase().includes(term),
       )
       .slice(0, 20);
   }, [products, search]);
@@ -82,6 +85,20 @@ export default function SaleScreen({ session }: { session: Session }) {
     });
   };
 
+  const printReceipt = async (sale: ReceiptSale) => {
+    try {
+      await Print.printAsync({
+        html: buildThermalReceiptHtml(sale, session.user.nombre),
+        width: 227,
+      });
+    } catch (err) {
+      Alert.alert(
+        'No se pudo imprimir',
+        err instanceof Error ? err.message : 'Revisa que la impresora este disponible en el sistema.',
+      );
+    }
+  };
+
   const submit = async () => {
     if (!cartItems.length) {
       Alert.alert('Venta vacía', 'Agrega al menos un repuesto.');
@@ -99,7 +116,11 @@ export default function SaleScreen({ session }: { session: Session }) {
           descuentoItem: 0,
         })),
       });
-      Alert.alert('Venta registrada', `Total: Bs ${sale.total.toFixed(2)}`);
+      setLastSale(sale);
+      Alert.alert('Venta registrada', `Total: Bs ${sale.total.toFixed(2)}`, [
+        { text: 'Cerrar', style: 'cancel' },
+        { text: 'Imprimir ticket', onPress: () => void printReceipt(sale) },
+      ]);
       setCart({});
       setCustomerId(null);
       setSearch('');
@@ -135,7 +156,7 @@ export default function SaleScreen({ session }: { session: Session }) {
               <View style={styles.productInfo}>
                 <Text style={styles.productCode}>{product.codigo}</Text>
                 <Text numberOfLines={2} style={styles.productName}>{product.descripcion}</Text>
-                <Text style={styles.productMeta}>{product.marca} · Stock {product.stock}</Text>
+                <Text style={styles.productMeta}>{product.marca || 'Sin marca'} · Stock {product.stock}</Text>
               </View>
               <View style={styles.productRight}>
                 <Text style={styles.price}>Bs {product.precioVenta.toFixed(2)}</Text>
@@ -218,6 +239,11 @@ export default function SaleScreen({ session }: { session: Session }) {
       <Pressable disabled={saving || !cartItems.length} onPress={submit} style={[styles.submit, (!cartItems.length || saving) && styles.disabled]}>
         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Confirmar venta</Text>}
       </Pressable>
+      {lastSale && (
+        <Pressable onPress={() => void printReceipt(lastSale)} style={styles.printLast}>
+          <Text style={styles.printLastText}>Imprimir ultimo ticket 80mm</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -289,6 +315,16 @@ const styles = StyleSheet.create({
   totalLabel: { color: colors.muted, fontSize: 17 },
   total: { color: colors.text, fontSize: 28, fontWeight: '900' },
   submit: { alignItems: 'center', backgroundColor: colors.primary, borderRadius: 13, marginTop: 14, paddingVertical: 16 },
+  printLast: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 13,
+    borderWidth: 1,
+    marginTop: 10,
+    paddingVertical: 14,
+  },
+  printLastText: { color: colors.primaryLight, fontSize: 14, fontWeight: '800' },
   disabled: { opacity: 0.45 },
   submitText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 });

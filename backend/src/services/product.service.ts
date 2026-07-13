@@ -4,6 +4,7 @@ import { Prisma, ProductStatus } from '@prisma/client';
 import { StockService } from './stock.service';
 
 const stockService = new StockService();
+const DEFAULT_PRODUCT_BRAND = 'Sin marca';
 
 const productInclude = {
   categoria: true,
@@ -17,6 +18,21 @@ const productInclude = {
 };
 
 export class ProductService {
+  private formatSequentialCode(value: number) {
+    return String(value).padStart(4, '0');
+  }
+
+  private async nextSequentialCode(tx: Pick<typeof prisma, 'producto'> = prisma) {
+    const products = await tx.producto.findMany({
+      select: { codigo: true },
+    });
+    const maxCode = products.reduce((max, product) => {
+      if (!/^\d+$/.test(product.codigo)) return max;
+      return Math.max(max, Number(product.codigo));
+    }, -1);
+    return this.formatSequentialCode(maxCode + 1);
+  }
+
   private async ensureUniqueCode(codigo: string, productId?: string) {
     const existing = await prisma.producto.findFirst({
       where: {
@@ -89,6 +105,7 @@ export class ProductService {
       and.push({ OR: [
         { descripcion: { contains: search, mode: 'insensitive' } },
         { codigo: { contains: search, mode: 'insensitive' } },
+        { codigoRepuesto: { contains: search, mode: 'insensitive' } },
         { marca: { contains: search, mode: 'insensitive' } },
       ] });
     }
@@ -119,6 +136,7 @@ export class ProductService {
       where.OR = [
         { descripcion: { contains: params.search, mode: 'insensitive' } },
         { codigo: { contains: params.search, mode: 'insensitive' } },
+        { codigoRepuesto: { contains: params.search, mode: 'insensitive' } },
         { marca: { contains: params.search, mode: 'insensitive' } },
       ];
     }
@@ -128,9 +146,11 @@ export class ProductService {
       select: {
         id: true,
         codigo: true,
+        codigoRepuesto: true,
         descripcion: true,
         marca: true,
         condicion: true,
+        unidadVenta: true,
         stock: true,
         stockMinimo: true,
         ubicacion: true,
@@ -153,12 +173,15 @@ export class ProductService {
   }
 
   async create(data: Prisma.ProductoUncheckedCreateInput) {
-    if (typeof data.codigo === 'string') {
-      data.codigo = data.codigo.trim();
-      await this.ensureUniqueCode(data.codigo);
+    if (typeof data.codigoRepuesto === 'string') {
+      data.codigoRepuesto = data.codigoRepuesto.trim() || null;
     }
+    data.marca = typeof data.marca === 'string' && data.marca.trim()
+      ? data.marca.trim()
+      : DEFAULT_PRODUCT_BRAND;
     const initialStock = typeof data.stock === 'number' ? data.stock : 0;
     return prisma.$transaction(async (tx) => {
+      data.codigo = await this.nextSequentialCode(tx);
       const product = await tx.producto.create({
         data: { ...data, stock: initialStock },
         include: productInclude,
@@ -177,8 +200,8 @@ export class ProductService {
     });
   }
 
-  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput) {
-    const current = await prisma.producto.findUnique({ where: { id }, select: { codigo: true, sucursalId: true } });
+  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput & { deletedImageUrls?: string[] }) {
+    const current = await prisma.producto.findUnique({ where: { id }, select: { codigo: true, sucursalId: true, imagen: true } });
     if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
 
     const nextCodigo = typeof data.codigo === 'string' ? data.codigo.trim() : current.codigo;
@@ -186,12 +209,29 @@ export class ProductService {
     const nextStock = typeof data.stock === 'number' ? data.stock : undefined;
 
     if (typeof data.codigo === 'string') data.codigo = nextCodigo;
+    if (typeof data.codigoRepuesto === 'string') data.codigoRepuesto = data.codigoRepuesto.trim() || null;
+    if (typeof data.marca === 'string') data.marca = data.marca.trim() || DEFAULT_PRODUCT_BRAND;
+    else if (data.marca === null) data.marca = DEFAULT_PRODUCT_BRAND;
     if (nextCodigo !== current.codigo) {
       await this.ensureUniqueCode(nextCodigo, id);
     }
     return prisma.$transaction(async (tx) => {
       const updateData: any = { ...data };
       delete updateData.stock;
+      delete updateData.deletedImageUrls;
+
+      if (data.deletedImageUrls && data.deletedImageUrls.length > 0) {
+        await tx.productoImagen.deleteMany({
+          where: { productoId: id, url: { in: data.deletedImageUrls } },
+        });
+        if (current.imagen && data.deletedImageUrls.includes(current.imagen)) {
+          const remainingImages = await tx.productoImagen.findMany({
+            where: { productoId: id },
+            orderBy: { orden: 'asc' },
+          });
+          updateData.imagen = remainingImages.length > 0 ? remainingImages[0].url : null;
+        }
+      }
 
       await tx.producto.update({
         where: { id },
@@ -305,7 +345,7 @@ export class ProductService {
   async deletionHistory() {
     return prisma.productoEliminacionHistorial.findMany({
       include: {
-        producto: { select: { id: true, codigo: true, descripcion: true, marca: true, ubicacion: true } },
+        producto: { select: { id: true, codigo: true, codigoRepuesto: true, descripcion: true, marca: true, ubicacion: true } },
         sucursal: { select: { id: true, nombre: true } },
         usuario: { select: { id: true, nombre: true, email: true } },
       },

@@ -26,6 +26,7 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
   const getConditionLabel = (condition: string) => condition === "NUEVO" ? "Nuevo" : "Usado";
   const getProductStatus = (product: Product) => product.estado || (product.activo === false ? "INACTIVO" : "ACTIVO");
   const getCoverImage = (product: Product) => product.imagenes?.[0]?.url || product.imagen;
+  const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
 
   const statusStyles = {
     ACTIVO: "bg-green-500/10 text-green-300 border-green-500/25",
@@ -83,7 +84,12 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
                       )}
                     </div>
                   </td>
-                  <td className="p-4 font-mono text-sm text-gray-300">{product.codigo}</td>
+                  <td className="p-4 font-mono text-sm text-gray-300">
+                    <span className="block">{product.codigo}</span>
+                    {product.codigoRepuesto && (
+                      <span className="mt-1 block text-xs text-gray-500">Rep. {product.codigoRepuesto}</span>
+                    )}
+                  </td>
                   <td className="p-4 font-medium text-white">{product.descripcion}</td>
                   <td className="p-4 text-sm text-gray-400">
                     <span className="block">{product.categoria?.nombre || "Sin categoria"}</span>
@@ -108,14 +114,14 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
                       <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${getStockColor(product.stock)}`} />
                         <span className={`font-semibold ${product.stock === 0 ? "text-red-400" : "text-gray-200"}`}>
-                          {product.stock}
+                          {product.stock} {getUnitLabel(product)}
                         </span>
                       </div>
                       {(product.stockSucursales?.length || 0) > 0 && (
                         <div className="space-y-0.5 text-xs text-gray-500">
                           {product.stockSucursales?.map((item) => (
                             <div key={item.id} className={item.estado === "ACTIVO" || !item.estado ? "" : "text-amber-400"}>
-                              {item.sucursal?.nombre || "Sucursal"}: {item.stock}
+                              {item.sucursal?.nombre || "Sucursal"}: {item.stock} {getUnitLabel(product)}
                               {item.estado && item.estado !== "ACTIVO" ? ` (${item.estado})` : ""}
                             </div>
                           ))}

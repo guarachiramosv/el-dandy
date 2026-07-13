@@ -16,6 +16,7 @@ import purchaseRoutes from './routes/purchase.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import uploadRoutes from './routes/upload.routes';
 import reportRoutes from './routes/report.routes';
+import remachadoRoutes from './routes/remachado.routes';
 import { errorHandler } from './middlewares/errorHandler';
 import { requireAuth, requireAdmin } from './middlewares/auth';
 
@@ -55,6 +56,7 @@ app.use('/api/customers', requireAuth, customerRoutes);
 app.use('/api/providers', requireAuth, providerRoutes);
 app.use('/api/purchases', requireAuth, purchaseRoutes);
 app.use('/api/inventory', requireAuth, inventoryRoutes);
+app.use('/api/remachado', requireAuth, remachadoRoutes);
 app.use('/api/upload', requireAuth, uploadRoutes);
 app.use('/api/dashboard', requireAuth, dashboardRoutes);
 app.use('/api/reports', requireAuth, requireAdmin, reportRoutes);

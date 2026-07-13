@@ -49,6 +49,7 @@ export class DashboardService {
       // Top sold products (last 30 days)
       prisma.detalleVenta.groupBy({
         by: ['productoId'],
+        where: { productoId: { not: null } },
         _sum: { cantidad: true },
         orderBy: { _sum: { cantidad: 'desc' } },
         take: 5,
@@ -97,9 +98,9 @@ export class DashboardService {
 
     // Enrich top products with product details
     const topProductosEnriched = await Promise.all(
-      topProductos.map(async (tp) => {
+      topProductos.filter((tp) => Boolean(tp.productoId)).map(async (tp) => {
         const producto = await prisma.producto.findUnique({
-          where: { id: tp.productoId },
+          where: { id: tp.productoId! },
           select: { descripcion: true, codigo: true, imagen: true },
         });
         return { ...producto, vendidos: tp._sum.cantidad };

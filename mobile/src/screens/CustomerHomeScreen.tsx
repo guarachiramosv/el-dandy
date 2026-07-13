@@ -8,7 +8,6 @@ import {
   Modal,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -17,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL, getCustomerCatalog, getCustomerProfile } from '../api';
 import { clearCustomerSession, saveCustomerSession } from '../session';
 import { colors } from '../theme';

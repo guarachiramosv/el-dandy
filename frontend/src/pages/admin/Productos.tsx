@@ -17,6 +17,13 @@ import { fetchCategories, fetchSucursales } from "../../services/catalog";
 import { uploadProductImages } from "../../services/uploads";
 import { getErrorMessage } from "../../utils/errors";
 
+const statusFilterOptions: Array<{ value: ProductStatusFilter | "deleted"; label: string }> = [
+  { value: "active", label: "Activos" },
+  { value: "inactive", label: "Inactivos" },
+  { value: "all", label: "Todos" },
+  { value: "deleted", label: "Historial eliminados" },
+];
+
 export default function Productos() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -74,6 +81,7 @@ export default function Productos() {
     return (
       p.descripcion.toLowerCase().includes(search) ||
       p.codigo.toLowerCase().includes(search) ||
+      (p.codigoRepuesto || "").toLowerCase().includes(search) ||
       p.marca.toLowerCase().includes(search) ||
       (p.categoria?.nombre || "").toLowerCase().includes(search) ||
       (p.sucursal?.nombre || "").toLowerCase().includes(search) ||
@@ -177,7 +185,7 @@ export default function Productos() {
   const handleAddStock = async () => {
     if (!stockProduct) return;
     if (!stockSucursalId) return setSaveError("Selecciona una sucursal.");
-    if (!Number.isInteger(stockCantidad) || stockCantidad <= 0) return setSaveError("La cantidad debe ser mayor a cero.");
+    if (!Number.isFinite(stockCantidad) || stockCantidad <= 0) return setSaveError("La cantidad debe ser mayor a cero.");
 
     setSaveError(null);
     setSavingProduct(true);
@@ -273,11 +281,27 @@ export default function Productos() {
           onNewProduct={handleNew}
         />
       </div>
-      <div className="no-print glass-panel p-3 flex flex-wrap gap-2">
-        <button onClick={() => handleStatusFilterChange('active')} className={statusFilter === 'active' ? 'btn-primary' : 'btn-secondary'}>Activos</button>
-        <button onClick={() => handleStatusFilterChange('inactive')} className={statusFilter === 'inactive' ? 'btn-primary' : 'btn-secondary'}>Inactivos</button>
-        <button onClick={() => handleStatusFilterChange('all')} className={statusFilter === 'all' ? 'btn-primary' : 'btn-secondary'}>Todos</button>
-        <button onClick={() => handleStatusFilterChange('deleted')} className={statusFilter === 'deleted' ? 'btn-primary' : 'btn-secondary'}>Historial eliminados</button>
+      <div className="no-print rounded-xl border border-white/10 bg-grafito-900/80 p-3 shadow-inner">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {statusFilterOptions.map((option) => {
+            const isActive = statusFilter === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => handleStatusFilterChange(option.value)}
+                className={`flex min-h-14 items-center justify-center rounded-lg px-4 text-center text-sm font-bold transition-colors ${
+                  isActive
+                    ? "bg-primary-gradient text-white shadow-lg shadow-primary/20"
+                    : "border border-white/10 bg-grafito-800 text-gray-200 hover:border-primary/40 hover:bg-grafito-700 hover:text-white"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="no-print flex flex-1 flex-col">
@@ -397,6 +421,7 @@ function AddStockModal({
               className="premium-input"
               type="number"
               min="1"
+              step={product.unidadVenta === "METRO" ? "0.01" : "1"}
               value={cantidad}
               onChange={(event) => onCantidadChange(Number(event.target.value))}
             />
@@ -565,7 +590,12 @@ function DeletionHistoryTable({ items, loading }: { items: ProductDeletionHistor
           {items.map((item) => (
             <tr key={item.id} className="hover:bg-grafito-800/50">
               <td className="p-4 text-sm text-gray-300">{new Date(item.createdAt).toLocaleString("es-BO")}</td>
-              <td className="p-4 font-mono text-sm text-gray-300">{item.producto?.codigo || "-"}</td>
+              <td className="p-4 font-mono text-sm text-gray-300">
+                <span className="block">{item.producto?.codigo || "-"}</span>
+                {item.producto?.codigoRepuesto && (
+                  <span className="mt-1 block text-xs text-gray-500">Rep. {item.producto.codigoRepuesto}</span>
+                )}
+              </td>
               <td className="p-4">
                 <p className="font-semibold text-white">{item.producto?.descripcion || "Producto"}</p>
                 <p className="text-xs text-gray-500">{item.producto?.marca || ""}</p>

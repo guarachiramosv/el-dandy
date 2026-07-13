@@ -15,8 +15,10 @@ import Proveedores from "./pages/Proveedores";
 import Compras from "./pages/Compras";
 import Reportes from "./pages/Reportes";
 import Alertas from "./pages/Alertas";
+import Remachado from "./pages/Remachado";
 
 import AdminProductos from "./pages/admin/Productos";
+import AdminCategorias from "./pages/admin/Categorias";
 import Usuarios from "./pages/Usuarios";
 import { getCurrentUser } from "./services/auth";
 
@@ -45,10 +47,12 @@ export default function App() {
         <Route path="/admin" element={<ProtectedAdminRoute><AdminLayout /></ProtectedAdminRoute>}>
           <Route index element={<Dashboard />} />
           <Route path="productos" element={<AdminProductos />} />
+          <Route path="categorias" element={<AdminCategorias />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="proveedores" element={<Proveedores />} />
           <Route path="compras" element={<Compras />} />
           <Route path="inventario" element={<Inventario />} />
+          <Route path="remachado" element={<Remachado />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="usuarios" element={<Usuarios />} />
@@ -62,6 +66,7 @@ export default function App() {
           <Route path="ventas" element={<Ventas />} />
           <Route path="historial" element={<HistorialVentas />} />
           <Route path="inventario" element={<Inventario />} />
+          <Route path="remachado" element={<Remachado />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="cotizaciones" element={<div className="p-6"><h1 className="text-2xl text-white">Cotizaciones</h1></div>} />
         </Route>

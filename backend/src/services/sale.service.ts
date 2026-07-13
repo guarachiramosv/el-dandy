@@ -29,7 +29,20 @@ type CloseCashRegisterInput = {
   notas?: string | null;
 };
 
+type CreateCashExpenseInput = {
+  usuarioId: string;
+  sucursalId: string;
+  motivo: string;
+  monto: number;
+  metodoPago: 'EFECTIVO' | 'QR';
+  notas?: string | null;
+};
+
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
+
+type ProductWithBranchStock = Prisma.ProductoGetPayload<{
+  include: { stockSucursales: true };
+}>;
 
 function getBusinessDay(dateValue?: string | null) {
   const base = dateValue ? new Date(dateValue) : new Date();
@@ -57,6 +70,51 @@ function emptyTotals() {
     totalTarjeta: 0,
     totalCredito: 0,
   };
+}
+
+function emptyExpenseTotals() {
+  return {
+    totalGastos: 0,
+    totalEfectivo: 0,
+    totalQr: 0,
+  };
+}
+
+function getNetTotals(
+  totals: ReturnType<typeof emptyTotals>,
+  gastos: ReturnType<typeof emptyExpenseTotals>
+) {
+  const netoEfectivo = Math.max(totals.totalEfectivo - gastos.totalEfectivo, 0);
+  const netoQr = Math.max(totals.totalQr - gastos.totalQr, 0);
+  return {
+    totalEfectivo: netoEfectivo,
+    totalQr: netoQr,
+    totalDisponible:
+      netoEfectivo +
+      totals.totalTransferencia +
+      netoQr +
+      totals.totalTarjeta,
+  };
+}
+
+function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId: string) {
+  const activeBranches = producto.stockSucursales.filter((stock) => stock.estado === 'ACTIVO' && stock.activo);
+  const requestedBranch = activeBranches.find((stock) => stock.sucursalId === requestedSucursalId);
+  if (requestedBranch) {
+    return { sucursalId: requestedBranch.sucursalId, availableStock: requestedBranch.stock };
+  }
+
+  const productBranch = activeBranches.find((stock) => stock.sucursalId === producto.sucursalId);
+  if (productBranch) {
+    return { sucursalId: productBranch.sucursalId, availableStock: productBranch.stock };
+  }
+
+  const branchWithStock = activeBranches.find((stock) => stock.stock > 0) || activeBranches[0];
+  if (branchWithStock) {
+    return { sucursalId: branchWithStock.sucursalId, availableStock: branchWithStock.stock };
+  }
+
+  return { sucursalId: producto.sucursalId, availableStock: producto.stock };
 }
 
 export class SaleService {
@@ -102,23 +160,18 @@ export class SaleService {
       });
 
       const productMap = new Map(productos.map((producto) => [producto.id, producto]));
+      const saleStockMap = new Map<string, { sucursalId: string; availableStock: number }>();
 
       for (const item of data.items) {
         const producto = productMap.get(item.productoId);
         if (!producto) {
           throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
         }
-        const branchStock = producto.stockSucursales.find((stock) => stock.sucursalId === data.sucursalId && stock.estado === 'ACTIVO' && stock.activo);
-        const availableStock = branchStock?.stock ?? (producto.sucursalId === data.sucursalId ? producto.stock : 0);
-        if (!branchStock && producto.sucursalId !== data.sucursalId) {
+        const saleStock = resolveSaleStock(producto, data.sucursalId);
+        saleStockMap.set(item.productoId, saleStock);
+        if (saleStock.availableStock < item.cantidad) {
           throw Object.assign(
-            new Error(`${producto.codigo} - ${producto.descripcion} no tiene stock registrado en esta sucursal.`),
-            { status: 400 }
-          );
-        }
-        if (availableStock < item.cantidad) {
-          throw Object.assign(
-            new Error(`Stock insuficiente para ${producto.descripcion}. Disponible: ${availableStock}`),
+            new Error(`Stock insuficiente para ${producto.descripcion}. Disponible: ${saleStock.availableStock}`),
             { status: 400 }
           );
         }
@@ -128,7 +181,10 @@ export class SaleService {
         const producto = productMap.get(item.productoId)!;
         const lineSubtotal = producto.precioVenta * item.cantidad - item.descuentoItem;
         return {
+          tipoLinea: 'PRODUCTO' as const,
           productoId: item.productoId,
+          descripcion: producto.descripcion,
+          unidadVenta: producto.unidadVenta,
           cantidad: item.cantidad,
           precioUnitario: producto.precioVenta,
           subtotal: Math.max(lineSubtotal, 0),
@@ -154,15 +210,15 @@ export class SaleService {
 
       for (const item of data.items) {
         const producto = productMap.get(item.productoId)!;
-        const branchStock = producto.stockSucursales.find((stock) => stock.sucursalId === data.sucursalId && stock.estado === 'ACTIVO' && stock.activo);
-        const stockAnterior = branchStock?.stock ?? producto.stock;
+        const saleStock = saleStockMap.get(item.productoId) ?? resolveSaleStock(producto, data.sucursalId);
+        const stockAnterior = saleStock.availableStock;
         const stockNuevo = stockAnterior - item.cantidad;
         await tx.productoStockSucursal.upsert({
-          where: { productoId_sucursalId: { productoId: item.productoId, sucursalId: data.sucursalId } },
+          where: { productoId_sucursalId: { productoId: item.productoId, sucursalId: saleStock.sucursalId } },
           update: { stock: stockNuevo },
           create: {
             productoId: item.productoId,
-            sucursalId: data.sucursalId,
+            sucursalId: saleStock.sucursalId,
             stock: stockNuevo,
           },
         });
@@ -174,7 +230,7 @@ export class SaleService {
           data: {
             tipoMovimiento: 'VENTA',
             productoId: item.productoId,
-            sucursalId: data.sucursalId,
+            sucursalId: saleStock.sucursalId,
             stockAnterior,
             stockNuevo,
             cantidad: -item.cantidad,
@@ -228,7 +284,7 @@ export class SaleService {
       createdAt: { gte: businessDay.start, lt: businessDay.end },
     };
 
-    const [ventas, cierre] = await Promise.all([
+    const [ventas, cierre, gastos] = await Promise.all([
       prisma.venta.findMany({
         where,
         include: {
@@ -249,6 +305,14 @@ export class SaleService {
           },
         },
       }),
+      prisma.gastoCaja.findMany({
+        where,
+        include: {
+          usuario: { select: { id: true, nombre: true, email: true } },
+          sucursal: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     const totals = ventas.reduce((acc, venta) => {
@@ -262,6 +326,13 @@ export class SaleService {
       return acc;
     }, emptyTotals());
 
+    const gastosTotals = gastos.reduce((acc, gasto) => {
+      acc.totalGastos += gasto.monto;
+      if (gasto.metodoPago === 'EFECTIVO') acc.totalEfectivo += gasto.monto;
+      else if (gasto.metodoPago === 'QR') acc.totalQr += gasto.monto;
+      return acc;
+    }, emptyExpenseTotals());
+
     return {
       fecha: businessDay.label,
       desde: businessDay.start,
@@ -269,8 +340,45 @@ export class SaleService {
       cerrado: Boolean(cierre),
       cierre,
       totals,
+      gastos: {
+        totals: gastosTotals,
+        items: gastos,
+      },
+      netos: getNetTotals(totals, gastosTotals),
       ventas,
     };
+  }
+
+  async createCashExpense(data: CreateCashExpenseInput) {
+    const businessDay = getBusinessDay();
+    const cierre = await prisma.cierreCaja.findUnique({
+      where: {
+        fecha_usuarioId_sucursalId: {
+          fecha: businessDay.start,
+          usuarioId: data.usuarioId,
+          sucursalId: data.sucursalId,
+        },
+      },
+    });
+
+    if (cierre) {
+      throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar mas gastos.'), { status: 409 });
+    }
+
+    return prisma.gastoCaja.create({
+      data: {
+        usuarioId: data.usuarioId,
+        sucursalId: data.sucursalId,
+        motivo: data.motivo,
+        monto: data.monto,
+        metodoPago: data.metodoPago,
+        notas: data.notas || null,
+      },
+      include: {
+        usuario: { select: { id: true, nombre: true, email: true } },
+        sucursal: true,
+      },
+    });
   }
 
   async closeCashRegister(data: CloseCashRegisterInput) {
@@ -279,7 +387,7 @@ export class SaleService {
       throw Object.assign(new Error('La caja de hoy ya fue cerrada'), { status: 409 });
     }
 
-    const diferencia = data.montoDeclarado - summary.totals.totalEfectivo;
+    const diferencia = data.montoDeclarado - summary.netos.totalEfectivo;
     return prisma.cierreCaja.create({
       data: {
         fecha: new Date(summary.desde),
@@ -292,6 +400,11 @@ export class SaleService {
         totalQr: summary.totals.totalQr,
         totalTarjeta: summary.totals.totalTarjeta,
         totalCredito: summary.totals.totalCredito,
+        gastoEfectivo: summary.gastos.totals.totalEfectivo,
+        gastoQr: summary.gastos.totals.totalQr,
+        totalGastos: summary.gastos.totals.totalGastos,
+        netoEfectivo: summary.netos.totalEfectivo,
+        netoQr: summary.netos.totalQr,
         montoDeclarado: data.montoDeclarado,
         diferencia,
         notas: data.notas,

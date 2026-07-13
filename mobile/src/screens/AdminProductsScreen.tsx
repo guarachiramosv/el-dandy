@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -13,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
   createProduct,
@@ -21,6 +23,7 @@ import {
   getCategories,
   getSucursales,
   updateProduct,
+  uploadProductImage,
   uploadProductImages,
   type ProductImageUpload,
 } from '../api';
@@ -38,30 +41,38 @@ import ImageViewer from './ImageViewer';
 
 type FormState = {
   codigo: string;
+  codigoRepuesto: string;
   descripcion: string;
   marca: string;
   condicion: 'NUEVO' | 'USADO';
+  unidadVenta: 'UNIDAD' | 'METRO';
   stock: string;
   stockMinimo: string;
+  ubicacion: string;
   precioCompra: string;
   precioVenta: string;
   categoriaId: string;
   sucursalId: string;
   imagen: string;
+  deletedImageUrls: string[];
 };
 
 const emptyForm: FormState = {
   codigo: '',
+  codigoRepuesto: '',
   descripcion: '',
-  marca: 'Universal',
+  marca: '',
   condicion: 'NUEVO',
+  unidadVenta: 'UNIDAD',
   stock: '0',
   stockMinimo: '5',
+  ubicacion: '',
   precioCompra: '',
   precioVenta: '',
   categoriaId: '',
   sucursalId: '',
   imagen: '',
+  deletedImageUrls: [],
 };
 
 const statusOptions: Array<{ value: ProductStatusFilter; label: string }> = [
@@ -70,6 +81,9 @@ const statusOptions: Array<{ value: ProductStatusFilter; label: string }> = [
   { value: 'discontinued', label: 'Descontinuados' },
   { value: 'all', label: 'Todos' },
 ];
+
+const maxProductImages = 20;
+const acceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 const apiOrigin = process.env.EXPO_PUBLIC_API_URL
   ? process.env.EXPO_PUBLIC_API_URL.replace(/\/api\/?$/, '')
@@ -82,16 +96,20 @@ function money(value?: number) {
 function productToForm(product: Product): FormState {
   return {
     codigo: product.codigo,
+    codigoRepuesto: product.codigoRepuesto || '',
     descripcion: product.descripcion,
-    marca: product.marca,
+    marca: product.marca || '',
     condicion: product.condicion === 'USADO' ? 'USADO' : 'NUEVO',
+    unidadVenta: product.unidadVenta === 'METRO' ? 'METRO' : 'UNIDAD',
     stock: String(product.stock ?? 0),
     stockMinimo: String(product.stockMinimo ?? 5),
+    ubicacion: product.ubicacion || '',
     precioCompra: String(product.precioCompra ?? ''),
     precioVenta: String(product.precioVenta ?? ''),
     categoriaId: product.categoriaId || product.categoria?.id || '',
     sucursalId: product.sucursalId || product.sucursal?.id || '',
     imagen: product.imagen || '',
+    deletedImageUrls: [],
   };
 }
 
@@ -111,31 +129,58 @@ function productImageUrls(product?: Product | null) {
 function uploadFromAsset(asset: ImagePicker.ImagePickerAsset): ProductImageUpload {
   const name = asset.fileName || asset.uri.split('/').pop() || 'producto.jpg';
   const extension = name.split('.').pop()?.toLowerCase();
+  const safeName = ['jpg', 'jpeg', 'png', 'webp'].includes(extension || '')
+    ? name
+    : `${name.replace(/\.[^/.]+$/, '') || 'producto'}.jpg`;
   const fallbackType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+  const type = asset.mimeType && acceptedImageTypes.includes(asset.mimeType) ? asset.mimeType : fallbackType;
   return {
     uri: asset.uri,
-    name,
-    type: asset.mimeType || fallbackType,
+    name: safeName,
+    type,
   };
 }
 
 function formToInput(form: FormState): ProductInput {
   return {
-    codigo: form.codigo.trim(),
+    codigo: form.codigo.trim() || null,
+    codigoRepuesto: form.codigoRepuesto.trim() || null,
     descripcion: form.descripcion.trim(),
-    marca: form.marca.trim(),
+    marca: form.marca.trim() || null,
     condicion: form.condicion,
-    stock: Number(form.stock),
-    stockMinimo: Number(form.stockMinimo),
-    precioCompra: Number(form.precioCompra),
-    precioVenta: Number(form.precioVenta),
+    unidadVenta: form.unidadVenta,
+    stock: Number(form.stock.replace(',', '.')),
+    stockMinimo: Number(form.stockMinimo.replace(',', '.')),
+    ubicacion: form.ubicacion.trim() || null,
+    precioCompra: Number(form.precioCompra.replace(',', '.')),
+    precioVenta: Number(form.precioVenta.replace(',', '.')),
     categoriaId: form.categoriaId,
     sucursalId: form.sucursalId,
     imagen: form.imagen.trim() || null,
+    deletedImageUrls: form.deletedImageUrls,
   };
 }
 
+async function uploadImagesWithFallback(
+  token: string,
+  productId: string,
+  images: ProductImageUpload[],
+) {
+  try {
+    const upload = await uploadProductImages(token, productId, images);
+    return upload.product;
+  } catch (multiUploadError) {
+    let product: Product | null = null;
+    for (const image of images) {
+      const upload = await uploadProductImage(token, productId, image);
+      product = upload.product;
+    }
+    return product;
+  }
+}
+
 export default function AdminProductsScreen({ session }: { session: Session }) {
+  const { width } = useWindowDimensions();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
@@ -152,7 +197,15 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   const [selectedImages, setSelectedImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
 
+  const existingImages = useMemo(() => {
+    const urls = productImageUrls(editingProduct);
+    return urls.filter(url => !form.deletedImageUrls.includes(url));
+  }, [editingProduct, form.deletedImageUrls]);
+  const primaryFallbackImage = form.deletedImageUrls.includes(form.imagen) ? '' : form.imagen;
+  const primaryImageUrl = productImageUrl(existingImages[0] || primaryFallbackImage);
+
   const token = session.token;
+  const compactLayout = width < 380;
 
   const defaultCategoryId = categories[0]?.id || '';
   const defaultSucursalId = sucursales[0]?.id || '';
@@ -195,9 +248,19 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     [categories.length, sucursales.length],
   );
 
+  const catalogWarning = !formReady
+    ? 'Para guardar productos necesitas al menos una categoria y una sucursal cargadas.'
+    : '';
+
   const openCreate = () => {
     setEditingProduct(null);
     setSelectedImages([]);
+    setError('');
+    if (!formReady) {
+      loadCatalogs().catch((err) => {
+        setError(err instanceof Error ? err.message : 'No se pudo cargar categorias o sucursales.');
+      });
+    }
     setForm({
       ...emptyForm,
       categoriaId: defaultCategoryId,
@@ -209,6 +272,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   const openEdit = (product: Product) => {
     setEditingProduct(product);
     setSelectedImages([]);
+    setError('');
     setForm(productToForm(product));
     setModalOpen(true);
   };
@@ -230,17 +294,23 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
 
   const validate = () => {
     const input = formToInput(form);
-    if (!input.codigo || !input.descripcion || !input.marca) {
-      return 'Codigo, descripcion y marca son requeridos.';
+    if (!input.descripcion) {
+      return 'Descripcion es requerida.';
     }
     if (!input.categoriaId || !input.sucursalId) {
       return 'Selecciona categoria y sucursal.';
     }
-    if (!Number.isFinite(input.stock) || input.stock < 0 || !Number.isInteger(input.stock)) {
-      return 'Stock debe ser un numero entero mayor o igual a 0.';
+    if (!Number.isFinite(input.stock) || input.stock < 0) {
+      return 'Stock debe ser un numero mayor o igual a 0.';
     }
-    if (!Number.isFinite(input.stockMinimo) || input.stockMinimo < 0 || !Number.isInteger(input.stockMinimo)) {
-      return 'Stock minimo debe ser un numero entero mayor o igual a 0.';
+    if (input.unidadVenta !== 'METRO' && !Number.isInteger(input.stock)) {
+      return 'Stock por unidad debe ser entero. Para decimales elige venta por metro.';
+    }
+    if (!Number.isFinite(input.stockMinimo) || input.stockMinimo < 0) {
+      return 'Stock minimo debe ser un numero mayor o igual a 0.';
+    }
+    if (input.unidadVenta !== 'METRO' && !Number.isInteger(input.stockMinimo)) {
+      return 'Stock minimo por unidad debe ser entero. Para decimales elige venta por metro.';
     }
     if (!Number.isFinite(input.precioCompra) || input.precioCompra <= 0) {
       return 'Precio de compra debe ser mayor a 0.';
@@ -276,11 +346,17 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
             allowsMultipleSelection: true,
             mediaTypes: ['images'],
             quality: 0.8,
-            selectionLimit: 0,
+            selectionLimit: maxProductImages,
           });
 
     if (!result.canceled) {
-      setSelectedImages((current) => [...current, ...result.assets]);
+      setSelectedImages((current) => {
+        const nextImages = [...current, ...result.assets];
+        if (nextImages.length > maxProductImages) {
+          setError(`Puedes subir hasta ${maxProductImages} fotos por producto.`);
+        }
+        return nextImages.slice(0, maxProductImages);
+      });
     }
   };
 
@@ -302,10 +378,14 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
       let saved = editingProduct
         ? await updateProduct(token, editingProduct.id, input)
         : await createProduct(token, input);
+      let uploadError = '';
 
       if (selectedImages.length > 0) {
-        const upload = await uploadProductImages(token, saved.id, selectedImages.map(uploadFromAsset));
-        saved = upload.product;
+        try {
+          saved = await uploadImagesWithFallback(token, saved.id, selectedImages.map(uploadFromAsset)) || saved;
+        } catch (err) {
+          uploadError = err instanceof Error ? err.message : 'No se pudieron subir las fotos.';
+        }
       }
 
       setProducts((current) => {
@@ -315,6 +395,12 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
       setModalOpen(false);
       setEditingProduct(null);
       setSelectedImages([]);
+      if (uploadError) {
+        Alert.alert(
+          'Producto guardado',
+          `El producto se guardo correctamente, pero no se pudieron subir las fotos. ${uploadError}`,
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar el producto.');
     } finally {
@@ -330,7 +416,10 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         style: 'destructive',
         onPress: async () => {
           try {
-            const updated = await deleteProduct(token, product.id);
+            const updated = await deleteProduct(token, product.id, {
+              sucursalId: product.sucursalId || null,
+              motivo: 'Eliminado desde la app movil',
+            });
             setProducts((current) =>
               status === 'active'
                 ? current.filter((item) => item.id !== product.id)
@@ -353,8 +442,11 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     return (
       <View style={styles.card}>
         <View style={styles.cardTop}>
-          <View style={styles.codeBadge}>
-            <Text style={styles.code}>{item.codigo}</Text>
+          <View style={styles.codeStack}>
+            <View style={styles.codeBadge}>
+              <Text style={styles.code}>{item.codigo}</Text>
+            </View>
+            {!!item.codigoRepuesto && <Text style={styles.spareCode}>Rep. {item.codigoRepuesto}</Text>}
           </View>
           <Text style={[styles.statusText, inactive && styles.statusInactive, discontinued && styles.statusDiscontinued]}>
             {item.estado || 'ACTIVO'}
@@ -367,13 +459,13 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
             </Pressable>
           ) : (
             <View style={styles.listImageFallback}>
-              <Text style={styles.listImageFallbackText}>{item.marca.slice(0, 2).toUpperCase()}</Text>
+              <Text style={styles.listImageFallbackText}>{(item.marca || item.descripcion || 'PR').slice(0, 2).toUpperCase()}</Text>
             </View>
           )}
           <View style={styles.productSummaryText}>
             <Text style={styles.productName}>{item.descripcion}</Text>
             <Text style={styles.meta}>
-              {item.marca} - {item.condicion} - {item.categoria?.nombre || 'Sin categoria'}
+              {item.marca || 'Sin marca'} - {item.condicion} - {item.unidadVenta === 'METRO' ? 'Por metro' : 'Por unidad'} - {item.categoria?.nombre || 'Sin categoria'}
             </Text>
             <View style={styles.cardBottom}>
               <Text style={styles.branch}>{item.sucursal?.nombre || 'Sucursal'}</Text>
@@ -383,7 +475,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         </View>
         <View style={styles.stockRow}>
           <Text style={[styles.stock, lowStock && styles.stockLow]}>
-            Stock {item.stock} / min. {item.stockMinimo}
+            Stock {item.stock} {item.unidadVenta === 'METRO' ? 'm' : 'u'} / min. {item.stockMinimo}
           </Text>
           <Text style={styles.cost}>Compra {money(item.precioCompra)}</Text>
         </View>
@@ -406,32 +498,37 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.titleRow}>
-        <View style={styles.titleTextWrap}>
+      <View style={[styles.titleRow, compactLayout && styles.titleRowCompact]}>
+        <View style={[styles.titleTextWrap, compactLayout && styles.titleTextWrapCompact]}>
           <Text style={styles.heading}>Productos</Text>
           <Text style={styles.caption}>Vista admin para consulta y CRUD.</Text>
         </View>
-        <Pressable disabled={!formReady} onPress={openCreate} style={[styles.newButton, !formReady && styles.disabled]}>
+        <Pressable onPress={openCreate} style={[styles.newButton, compactLayout && styles.newButtonCompact]}>
           <Text style={styles.newButtonText}>Nuevo</Text>
         </Pressable>
       </View>
 
-      <View style={styles.searchRow}>
+      <View style={[styles.searchRow, compactLayout && styles.searchRowCompact]}>
         <TextInput
           onChangeText={setSearch}
           onSubmitEditing={submitSearch}
-          placeholder="Codigo, descripcion o marca"
+          placeholder="Codigo, repuesto 2, descripcion o marca"
           placeholderTextColor={colors.muted}
           returnKeyType="search"
-          style={styles.input}
+          style={[styles.input, compactLayout && styles.inputCompact]}
           value={search}
         />
-        <Pressable onPress={submitSearch} style={styles.searchButton}>
+        <Pressable onPress={submitSearch} style={[styles.searchButton, compactLayout && styles.searchButtonCompact]}>
           <Text style={styles.searchButtonText}>Buscar</Text>
         </Pressable>
       </View>
 
-      <ScrollView horizontal contentContainerStyle={styles.statusTabs} showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        horizontal
+        style={styles.statusTabsScroll}
+        contentContainerStyle={styles.statusTabs}
+        showsHorizontalScrollIndicator={false}
+      >
         {statusOptions.map((option) => (
           <Pressable
             key={option.value}
@@ -445,6 +542,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         ))}
       </ScrollView>
 
+      {!!catalogWarning && <Text style={styles.warning}>{catalogWarning}</Text>}
       {!!error && <Text style={styles.error}>{error}</Text>}
 
       {loading ? (
@@ -459,6 +557,9 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
             <RefreshControl
               onRefresh={() => {
                 setRefreshing(true);
+                loadCatalogs().catch((err) => {
+                  setError(err instanceof Error ? err.message : 'No se pudo cargar categorias o sucursales.');
+                });
                 loadProducts(search, status);
               }}
               refreshing={refreshing}
@@ -471,30 +572,71 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
 
       <Modal animationType="slide" transparent visible={modalOpen} onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboard}
+          >
+            <View style={styles.modalCard}>
+              <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalTitle}>{editingProduct ? 'Editar producto' : 'Nuevo producto'}</Text>
-              <Field label="Codigo" value={form.codigo} onChangeText={(value) => setForm((current) => ({ ...current, codigo: value }))} />
-              <Field label="Descripcion" value={form.descripcion} onChangeText={(value) => setForm((current) => ({ ...current, descripcion: value }))} />
-              <Field label="Marca" value={form.marca} onChangeText={(value) => setForm((current) => ({ ...current, marca: value }))} />
-
-              <Text style={styles.fieldLabel}>Condicion</Text>
-              <View style={styles.toggleRow}>
-                {(['NUEVO', 'USADO'] as const).map((condition) => (
-                  <Pressable
-                    key={condition}
-                    onPress={() => setForm((current) => ({ ...current, condicion: condition }))}
-                    style={[styles.toggleButton, form.condicion === condition && styles.toggleButtonActive]}
-                  >
-                    <Text style={[styles.toggleText, form.condicion === condition && styles.toggleTextActive]}>{condition}</Text>
+              {!formReady && <Text style={styles.modalWarning}>{catalogWarning}</Text>}
+              <Text style={styles.fieldLabel}>Imagen del Repuesto</Text>
+              <View style={styles.imageBox}>
+                {selectedImages[0]?.uri ? (
+                  <Pressable onPress={() => setViewerImage(selectedImages[0].uri)} style={styles.previewPressable}>
+                    <Image source={{ uri: selectedImages[0].uri }} style={styles.previewImage} />
                   </Pressable>
-                ))}
+                ) : primaryImageUrl ? (
+                  <Pressable onPress={() => setViewerImage(primaryImageUrl)} style={styles.previewPressable}>
+                    <Image source={{ uri: primaryImageUrl }} style={styles.previewImage} />
+                  </Pressable>
+                ) : (
+                  <View style={styles.previewFallback}>
+                    <Text style={styles.previewFallbackText}>Sin imagen</Text>
+                  </View>
+                )}
+              </View>
+              {(existingImages.length > 0 || selectedImages.length > 0) && (
+                <ScrollView horizontal contentContainerStyle={styles.thumbRow} showsHorizontalScrollIndicator={false}>
+                  {existingImages.map((image, index) => (
+                    <View key={`${image}-${index}`} style={styles.thumbWrap}>
+                      <Pressable onPress={() => setViewerImage(productImageUrl(image)!)}>
+                        <Image source={{ uri: productImageUrl(image)! }} style={styles.thumbImage} />
+                      </Pressable>
+                      <Pressable onPress={() => setForm(current => ({ ...current, deletedImageUrls: [...current.deletedImageUrls, image] }))} style={styles.removeThumb}>
+                        <Text style={styles.removeThumbText}>x</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                  {selectedImages.map((image, index) => (
+                    <View key={`${image.uri}-${index}`} style={styles.thumbWrap}>
+                      <Pressable onPress={() => setViewerImage(image.uri)}>
+                        <Image source={{ uri: image.uri }} style={styles.thumbImage} />
+                      </Pressable>
+                      <Pressable onPress={() => removeSelectedImage(index)} style={styles.removeThumb}>
+                        <Text style={styles.removeThumbText}>x</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+              <Text style={styles.imageHint}>
+                {selectedImages.length > 0
+                  ? `${selectedImages.length} foto${selectedImages.length === 1 ? '' : 's'} nueva${selectedImages.length === 1 ? '' : 's'} seleccionada${selectedImages.length === 1 ? '' : 's'}`
+                  : `Puedes subir hasta ${maxProductImages} fotos.`}
+              </Text>
+              <View style={styles.imageActions}>
+                <Pressable disabled={saving || selectedImages.length >= maxProductImages} onPress={() => pickImage('camera')} style={styles.imageButton}>
+                  <Text style={styles.imageButtonText}>Tomar foto</Text>
+                </Pressable>
+                <Pressable disabled={saving || selectedImages.length >= maxProductImages} onPress={() => pickImage('library')} style={styles.imageButton}>
+                  <Text style={styles.imageButtonText}>Galeria / archivos</Text>
+                </Pressable>
               </View>
 
-              <Field label="Stock" keyboardType="number-pad" value={form.stock} onChangeText={(value) => setForm((current) => ({ ...current, stock: value }))} />
-              <Field label="Stock minimo" keyboardType="number-pad" value={form.stockMinimo} onChangeText={(value) => setForm((current) => ({ ...current, stockMinimo: value }))} />
-              <Field label="Precio compra" keyboardType="decimal-pad" value={form.precioCompra} onChangeText={(value) => setForm((current) => ({ ...current, precioCompra: value }))} />
-              <Field label="Precio venta" keyboardType="decimal-pad" value={form.precioVenta} onChangeText={(value) => setForm((current) => ({ ...current, precioVenta: value }))} />
+              <Field label="Codigo interno" value={editingProduct ? form.codigo : 'Automatico'} onChangeText={() => {}} editable={false} />
+              <Field label="Codigo repuesto 2" value={form.codigoRepuesto} onChangeText={(value) => setForm((current) => ({ ...current, codigoRepuesto: value }))} />
+              <Field label="Descripcion" value={form.descripcion} onChangeText={(value) => setForm((current) => ({ ...current, descripcion: value }))} />
 
               <Text style={styles.fieldLabel}>Categoria</Text>
               <ScrollView horizontal contentContainerStyle={styles.choiceRow} showsHorizontalScrollIndicator={false}>
@@ -511,7 +653,38 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                 ))}
               </ScrollView>
 
-              <Text style={styles.fieldLabel}>Sucursal</Text>
+              <Field label="Marca opcional" value={form.marca} onChangeText={(value) => setForm((current) => ({ ...current, marca: value }))} />
+
+              <Text style={styles.fieldLabel}>Condicion</Text>
+              <View style={styles.toggleRow}>
+                {(['NUEVO', 'USADO'] as const).map((condition) => (
+                  <Pressable
+                    key={condition}
+                    onPress={() => setForm((current) => ({ ...current, condicion: condition }))}
+                    style={[styles.toggleButton, form.condicion === condition && styles.toggleButtonActive]}
+                  >
+                    <Text style={[styles.toggleText, form.condicion === condition && styles.toggleTextActive]}>{condition}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.fieldLabel}>Unidad de venta</Text>
+              <View style={styles.toggleRow}>
+                {([
+                  { value: 'UNIDAD' as const, label: 'Por unidad' },
+                  { value: 'METRO' as const, label: 'Por metro' },
+                ]).map((option) => (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setForm((current) => ({ ...current, unidadVenta: option.value }))}
+                    style={[styles.toggleButton, form.unidadVenta === option.value && styles.toggleButtonActive]}
+                  >
+                    <Text style={[styles.toggleText, form.unidadVenta === option.value && styles.toggleTextActive]}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.fieldLabel}>Sucursal inicial</Text>
               <ScrollView horizontal contentContainerStyle={styles.choiceRow} showsHorizontalScrollIndicator={false}>
                 {sucursales.map((sucursal) => (
                   <Pressable
@@ -526,60 +699,23 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                 ))}
               </ScrollView>
 
-              <Text style={styles.fieldLabel}>Imagen del producto</Text>
-              <View style={styles.imageBox}>
-                {selectedImages[0]?.uri ? (
-                  <Pressable onPress={() => setViewerImage(selectedImages[0].uri)} style={styles.previewPressable}>
-                    <Image source={{ uri: selectedImages[0].uri }} style={styles.previewImage} />
-                  </Pressable>
-                ) : productImageUrl(productImageUrls(editingProduct)[0] || form.imagen) ? (
-                  <Pressable onPress={() => setViewerImage(productImageUrl(productImageUrls(editingProduct)[0] || form.imagen)!)} style={styles.previewPressable}>
-                    <Image source={{ uri: productImageUrl(productImageUrls(editingProduct)[0] || form.imagen)! }} style={styles.previewImage} />
-                  </Pressable>
-                ) : (
-                  <View style={styles.previewFallback}>
-                    <Text style={styles.previewFallbackText}>Sin imagen</Text>
-                  </View>
-                )}
-              </View>
-              {(productImageUrls(editingProduct).length > 0 || selectedImages.length > 0) && (
-                <ScrollView horizontal contentContainerStyle={styles.thumbRow} showsHorizontalScrollIndicator={false}>
-                  {productImageUrls(editingProduct).map((image, index) => (
-                    <Pressable key={`${image}-${index}`} onPress={() => setViewerImage(productImageUrl(image)!)}>
-                      <Image source={{ uri: productImageUrl(image)! }} style={styles.thumbImage} />
-                    </Pressable>
-                  ))}
-                  {selectedImages.map((image, index) => (
-                    <View key={`${image.uri}-${index}`} style={styles.thumbWrap}>
-                      <Pressable onPress={() => setViewerImage(image.uri)}>
-                        <Image source={{ uri: image.uri }} style={styles.thumbImage} />
-                      </Pressable>
-                      <Pressable onPress={() => removeSelectedImage(index)} style={styles.removeThumb}>
-                        <Text style={styles.removeThumbText}>x</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-              <View style={styles.imageActions}>
-                <Pressable disabled={saving} onPress={() => pickImage('camera')} style={styles.imageButton}>
-                  <Text style={styles.imageButtonText}>Tomar foto</Text>
-                </Pressable>
-                <Pressable disabled={saving} onPress={() => pickImage('library')} style={styles.imageButton}>
-                  <Text style={styles.imageButtonText}>Galeria</Text>
-                </Pressable>
-              </View>
+              <Field label="Ubicacion / Estante" value={form.ubicacion} onChangeText={(value) => setForm((current) => ({ ...current, ubicacion: value }))} />
+              <Field label={`${editingProduct ? 'Stock Total' : 'Stock Inicial'} ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stock} onChangeText={(value) => setForm((current) => ({ ...current, stock: value }))} />
+              <Field label={`Stock Minimo ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stockMinimo} onChangeText={(value) => setForm((current) => ({ ...current, stockMinimo: value }))} />
+              <Field label="Precio de Compra" keyboardType="decimal-pad" value={form.precioCompra} onChangeText={(value) => setForm((current) => ({ ...current, precioCompra: value }))} />
+              <Field label="Precio de Venta" keyboardType="decimal-pad" value={form.precioVenta} onChangeText={(value) => setForm((current) => ({ ...current, precioVenta: value }))} />
 
               <View style={styles.modalActions}>
                 <Pressable disabled={saving} onPress={() => setModalOpen(false)} style={styles.cancelButton}>
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </Pressable>
-                <Pressable disabled={saving} onPress={saveProduct} style={[styles.saveButton, saving && styles.disabled]}>
+                <Pressable disabled={saving || !formReady} onPress={saveProduct} style={[styles.saveButton, (saving || !formReady) && styles.disabled]}>
                   {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Guardar</Text>}
                 </Pressable>
               </View>
-            </ScrollView>
-          </View>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -611,11 +747,14 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                     </ScrollView>
                   )}
                   <Detail label="Codigo" value={viewProduct.codigo} />
+                  <Detail label="Codigo repuesto 2" value={viewProduct.codigoRepuesto || 'Sin codigo'} />
                   <Detail label="Descripcion" value={viewProduct.descripcion} />
-                  <Detail label="Marca" value={viewProduct.marca} />
+                  <Detail label="Marca" value={viewProduct.marca || 'Sin marca'} />
                   <Detail label="Condicion" value={viewProduct.condicion} />
-                  <Detail label="Stock" value={`${viewProduct.stock} unidades`} />
-                  <Detail label="Stock minimo" value={`${viewProduct.stockMinimo} unidades`} />
+                  <Detail label="Unidad de venta" value={viewProduct.unidadVenta === 'METRO' ? 'Por metro' : 'Por unidad'} />
+                  <Detail label="Ubicacion / Estante" value={viewProduct.ubicacion || 'Sin ubicacion'} />
+                  <Detail label="Stock" value={`${viewProduct.stock} ${viewProduct.unidadVenta === 'METRO' ? 'metros' : 'unidades'}`} />
+                  <Detail label="Stock minimo" value={`${viewProduct.stockMinimo} ${viewProduct.unidadVenta === 'METRO' ? 'metros' : 'unidades'}`} />
                   <Detail label="Precio compra" value={money(viewProduct.precioCompra)} />
                   <Detail label="Precio venta" value={money(viewProduct.precioVenta)} />
                   <Detail label="Categoria" value={viewProduct.categoria?.nombre || 'Sin categoria'} />
@@ -660,16 +799,19 @@ function Field({
   value,
   onChangeText,
   keyboardType,
+  editable = true,
 }: {
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
+  editable?: boolean;
 }) {
   return (
     <View>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
+        editable={editable}
         keyboardType={keyboardType || 'default'}
         onChangeText={onChangeText}
         placeholderTextColor={colors.muted}
@@ -683,12 +825,24 @@ function Field({
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
   titleRow: { alignItems: 'center', flexDirection: 'row', gap: 12, justifyContent: 'space-between' },
+  titleRowCompact: { alignItems: 'stretch', flexDirection: 'column' },
   titleTextWrap: { flex: 1 },
+  titleTextWrapCompact: { flex: 0 },
   heading: { color: colors.text, fontSize: 24, fontWeight: '800' },
   caption: { color: colors.muted, marginTop: 4 },
-  newButton: { backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  newButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  newButtonCompact: { marginTop: 10 },
   newButtonText: { color: '#fff', fontWeight: '800' },
   searchRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  searchRowCompact: { flexDirection: 'column' },
   input: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -699,14 +853,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  searchButton: { backgroundColor: colors.primary, borderRadius: 12, justifyContent: 'center', paddingHorizontal: 16 },
+  inputCompact: { flex: 0 },
+  searchButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 16,
+  },
+  searchButtonCompact: { width: '100%' },
   searchButtonText: { color: '#fff', fontWeight: '800' },
-  statusTabs: { gap: 8, paddingBottom: 8, paddingTop: 12 },
+  statusTabsScroll: { flexGrow: 0, maxHeight: 58 },
+  statusTabs: { alignItems: 'center', gap: 8, paddingBottom: 8, paddingTop: 12 },
   statusTab: {
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 38,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
@@ -715,6 +882,7 @@ const styles = StyleSheet.create({
   statusTabTextActive: { color: colors.primaryLight },
   loader: { marginTop: 50 },
   error: { color: '#FCA5A5', marginTop: 10 },
+  warning: { color: '#FBBF24', fontSize: 13, marginTop: 10 },
   list: { gap: 10, paddingBottom: 24, paddingTop: 8 },
   empty: { color: colors.muted, marginTop: 40, textAlign: 'center' },
   card: {
@@ -725,8 +893,10 @@ const styles = StyleSheet.create({
     padding: 15,
   },
   cardTop: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  codeStack: { alignItems: 'flex-start', flex: 1, gap: 4, paddingRight: 8 },
   codeBadge: { backgroundColor: 'rgba(249, 115, 22, 0.16)', borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5 },
   code: { color: colors.primaryLight, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontWeight: '800' },
+  spareCode: { color: colors.muted, fontSize: 12, fontWeight: '800' },
   statusText: { color: colors.success, fontSize: 12, fontWeight: '900' },
   statusInactive: { color: '#FCA5A5' },
   statusDiscontinued: { color: '#FBBF24' },
@@ -767,6 +937,7 @@ const styles = StyleSheet.create({
   primaryAction: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
   primaryActionText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   modalOverlay: { backgroundColor: 'rgba(5, 6, 8, 0.88)', flex: 1, justifyContent: 'flex-end' },
+  modalKeyboard: { flex: 1, justifyContent: 'flex-end', width: '100%' },
   modalCard: {
     backgroundColor: colors.surface,
     borderTopColor: colors.border,
@@ -777,6 +948,17 @@ const styles = StyleSheet.create({
   },
   form: { padding: 18, paddingBottom: 28 },
   modalTitle: { color: colors.text, fontSize: 22, fontWeight: '900', marginBottom: 14 },
+  modalWarning: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    borderRadius: 12,
+    borderWidth: 1,
+    color: '#FCD34D',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 10,
+    padding: 12,
+  },
   fieldLabel: { color: colors.muted, fontSize: 13, fontWeight: '800', marginBottom: 6, marginTop: 10 },
   formInput: {
     backgroundColor: colors.surfaceSoft,
@@ -827,6 +1009,7 @@ const styles = StyleSheet.create({
   previewFallback: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   previewFallbackText: { color: colors.muted, fontSize: 16, fontWeight: '800' },
   thumbRow: { gap: 8, paddingTop: 10 },
+  imageHint: { color: colors.muted, fontSize: 12, fontWeight: '700', marginTop: 8 },
   thumbWrap: { position: 'relative' },
   thumbImage: {
     backgroundColor: colors.surfaceSoft,

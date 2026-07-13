@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
-  CreditCard,
   LockKeyhole,
   Printer,
   Receipt,
@@ -16,6 +15,7 @@ import { useProducts } from "../hooks/useProducts";
 import { createSale, fetchDailySalesSummary } from "../services/sales";
 import { getCurrentUser } from "../services/auth";
 import { createCustomer, fetchCustomers } from "../services/customers";
+import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
 
 interface CartItem {
   product: Product;
@@ -29,9 +29,26 @@ const formatDateTime = (value: string) =>
   new Date(value).toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" });
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
+const sellerPaymentOptions = ["EFECTIVO", "QR", "CREDITO"] as const;
+type SellerPaymentOption = (typeof sellerPaymentOptions)[number];
+const salePaymentLabel = (tipoVenta: "CONTADO" | "CREDITO", metodoPago: PaymentMethod) =>
+  tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
+const normalizeSearchText = (value?: string | null) =>
+  (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const productUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "unidades";
+const productStep = (product: Product) => product.unidadVenta === "METRO" ? 0.5 : 1;
+const formatQuantity = (value: number, product?: Product) => `${value.toLocaleString("es-BO", { maximumFractionDigits: 2 })} ${product ? productUnitLabel(product) : "unidades"}`;
 
 export default function Ventas() {
-  const { data: products, loading, error, refetch: refetchProducts } = useProducts();
+  const { data: products, loading, error, refetch: refetchProducts } = useProducts("active", {
+    scope: "all",
+    refreshIntervalMs: 10000,
+  });
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySalesSummary | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -64,22 +81,73 @@ export default function Ventas() {
     return () => window.clearTimeout(timer);
   }, [loadDailySummary]);
 
+  useEffect(() => {
+    if (tipoVenta === "CONTADO" && metodoPago !== "EFECTIVO" && metodoPago !== "QR") {
+      setMetodoPago("EFECTIVO");
+    }
+  }, [metodoPago, tipoVenta]);
+
+  const getAvailableStock = useCallback((product: Product) => {
+    if (!user?.sucursalId) return product.stock;
+    const activeBranchStocks = product.stockSucursales?.filter(
+      (item) => item.estado === "ACTIVO" && item.activo !== false,
+    ) || [];
+    const sellerBranchStock = activeBranchStocks.find((item) => item.sucursalId === user.sucursalId);
+    if (sellerBranchStock) return sellerBranchStock.stock;
+    const productBranchStock = activeBranchStocks.find((item) => item.sucursalId === product.sucursalId);
+    if (productBranchStock) return productBranchStock.stock;
+    return product.stock;
+  }, [user?.sucursalId]);
+
+  const hasProductSearch = normalizeSearchText(searchTerm).length > 0;
+
   const filteredProducts = useMemo(() => {
-    const search = searchTerm.toLowerCase();
-    if (!search) return products.slice(0, 8);
+    const terms = normalizeSearchText(searchTerm).split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
     return products
-      .filter(
-        (product) =>
-          product.codigo.toLowerCase().includes(search) ||
-          product.descripcion.toLowerCase().includes(search) ||
-          product.marca.toLowerCase().includes(search),
-      )
-      .slice(0, 8);
+      .map((product) => {
+        const codigo = normalizeSearchText(product.codigo);
+        const codigoRepuesto = normalizeSearchText(product.codigoRepuesto);
+        const descripcion = normalizeSearchText(product.descripcion);
+        const marca = normalizeSearchText(product.marca);
+        const categoria = normalizeSearchText(product.categoria?.nombre);
+        const haystack = [codigo, codigoRepuesto, descripcion, marca, categoria].join(" ");
+        const matches = terms.every((term) => haystack.includes(term));
+        if (!matches) return null;
+
+        const score = terms.reduce((acc, term) => {
+          if (codigo === term || codigoRepuesto === term) return acc + 100;
+          if (codigo.startsWith(term) || codigoRepuesto.startsWith(term)) return acc + 80;
+          if (codigo.includes(term) || codigoRepuesto.includes(term)) return acc + 65;
+          if (descripcion.startsWith(term)) return acc + 50;
+          if (descripcion.includes(term)) return acc + 35;
+          if (marca.includes(term) || categoria.includes(term)) return acc + 15;
+          return acc + 5;
+        }, 0);
+
+        return { product, score };
+      })
+      .filter((item): item is { product: Product; score: number } => Boolean(item))
+      .sort((a, b) => b.score - a.score || a.product.descripcion.localeCompare(b.product.descripcion))
+      .map((item) => item.product);
   }, [products, searchTerm]);
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
   const totalQuantity = cart.reduce((acc, item) => acc + item.cantidad, 0);
   const total = Math.max(subtotal - descuento, 0);
+  const selectedPaymentOption: SellerPaymentOption = tipoVenta === "CREDITO" ? "CREDITO" : metodoPago === "QR" ? "QR" : "EFECTIVO";
+
+  const selectPaymentOption = (option: SellerPaymentOption) => {
+    setMessage(null);
+    if (option === "CREDITO") {
+      setTipoVenta("CREDITO");
+      setMetodoPago("EFECTIVO");
+      return;
+    }
+    setTipoVenta("CONTADO");
+    setMetodoPago(option);
+    setFechaVencimiento("");
+  };
 
   const addToCart = (product: Product) => {
     setMessage(null);
@@ -87,22 +155,26 @@ export default function Ventas() {
       setMessage("La caja de hoy ya fue cerrada. No se pueden registrar mas ventas.");
       return;
     }
-    if (product.stock <= 0) {
-      setMessage("Producto sin stock disponible.");
+    const availableStock = getAvailableStock(product);
+    const step = productStep(product);
+    if (availableStock < step) {
+      setMessage("Producto sin stock disponible en tu sucursal.");
       return;
     }
+    const productForCart = { ...product, stock: availableStock };
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
-        if (existing.cantidad >= product.stock) {
-          setMessage(`Stock insuficiente. Disponible: ${product.stock}`);
+        const next = existing.cantidad + step;
+        if (next > availableStock) {
+          setMessage(`Stock insuficiente. Disponible: ${availableStock}`);
           return prev;
         }
         return prev.map((item) =>
-          item.product.id === product.id ? { ...item, cantidad: item.cantidad + 1 } : item,
+          item.product.id === product.id ? { ...item, cantidad: next } : item,
         );
       }
-      return [...prev, { product, cantidad: 1 }];
+      return [...prev, { product: productForCart, cantidad: step }];
     });
   };
 
@@ -110,7 +182,8 @@ export default function Ventas() {
     setCart((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const next = Math.max(1, Math.min(item.product.stock, item.cantidad + delta));
+        const step = productStep(item.product);
+        const next = Math.max(step, Math.min(item.product.stock, item.cantidad + delta * step));
         if (next === item.cantidad && delta > 0) setMessage(`Stock insuficiente. Disponible: ${item.product.stock}`);
         return { ...item, cantidad: next };
       }),
@@ -198,62 +271,10 @@ export default function Ventas() {
   };
 
   const printSale = (sale: Sale) => {
-    const printWindow = window.open("", "_blank", "width=420,height=720");
+    const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
-    const details = sale.detalles || [];
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Detalle de venta ${sale.id}</title>
-          <style>
-            body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
-            h1 { font-size: 20px; margin: 0 0 4px; }
-            .muted { color: #555; font-size: 12px; }
-            .row { display: flex; justify-content: space-between; gap: 12px; }
-            table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 12px; }
-            th, td { border-bottom: 1px solid #ddd; padding: 8px 0; text-align: left; }
-            th:last-child, td:last-child { text-align: right; }
-            .totals { margin-top: 16px; border-top: 2px solid #111; padding-top: 10px; }
-            .total { font-size: 18px; font-weight: 700; }
-          </style>
-        </head>
-        <body>
-          <h1>El Dandy - Detalle de venta</h1>
-          <div class="muted">Venta: ${sale.id}</div>
-          <div class="muted">Fecha: ${formatDateTime(sale.createdAt)}</div>
-          <div class="muted">Vendedor: ${sale.usuario?.nombre || user?.nombre || ""}</div>
-          <div class="muted">Sucursal: ${sale.sucursal?.nombre || ""}</div>
-          <div class="muted">Cliente: ${sale.cliente?.nombre || "Cliente ocasional"}</div>
-          <table>
-            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
-            <tbody>
-              ${details
-                .map(
-                  (detail) => `
-                <tr>
-                  <td>${detail.producto?.codigo || ""} - ${detail.producto?.descripcion || "Producto"}</td>
-                  <td>${detail.cantidad}</td>
-                  <td>${money(detail.precioUnitario)}</td>
-                  <td>${money(detail.subtotal)}</td>
-                </tr>
-              `,
-                )
-                .join("")}
-            </tbody>
-          </table>
-          <div class="totals">
-            <div class="row"><span>Metodo</span><strong>${sale.metodoPago}</strong></div>
-            <div class="row"><span>Tipo</span><strong>${sale.tipoVenta}</strong></div>
-            <div class="row"><span>Subtotal</span><strong>${money(sale.subtotal)}</strong></div>
-            <div class="row"><span>Descuento</span><strong>${money(sale.descuento)}</strong></div>
-            <div class="row total"><span>Total</span><span>${money(sale.total)}</span></div>
-          </div>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(buildThermalReceiptHtml(sale, user?.nombre || ""));
     printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
   };
 
   if (loading) return <div className="p-6 text-white">Cargando productos...</div>;
@@ -281,7 +302,7 @@ export default function Ventas() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
             <input
               type="text"
-              placeholder="Buscar repuesto por codigo, descripcion o marca..."
+              placeholder="Buscar por nombre o codigo..."
               className="premium-input pl-10"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -289,21 +310,22 @@ export default function Ventas() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid max-h-80 grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
           {filteredProducts.map((product) => {
             const selected = cart.find((item) => item.product.id === product.id);
+            const availableStock = getAvailableStock(product);
             return (
               <button
                 key={product.id}
                 onClick={() => addToCart(product)}
-                disabled={product.stock <= 0 || dailySummary?.cerrado}
+                disabled={availableStock <= 0 || dailySummary?.cerrado}
                 className="text-left rounded-lg border border-gray-700 bg-grafito-800/70 p-3 hover:border-primary/60 disabled:opacity-50"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="font-semibold text-white">{product.codigo} - {product.descripcion}</p>
-                    <p className="text-sm text-gray-400">{product.marca} - Stock {product.stock}</p>
-                    {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {selected.cantidad} unidades</p>}
+                    <p className="text-sm text-gray-400">{product.marca} - Stock disponible {formatQuantity(availableStock, product)}</p>
+                    {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {formatQuantity(selected.cantidad, product)}</p>}
                   </div>
                   <span className="text-primary-light font-bold">{money(product.precioVenta)}</span>
                 </div>
@@ -311,11 +333,16 @@ export default function Ventas() {
             );
           })}
         </div>
+        {filteredProducts.length === 0 && (
+          <div className="rounded-lg border border-gray-700 bg-grafito-800/60 p-6 text-center text-gray-400">
+            {hasProductSearch ? "No hay productos que coincidan con esa busqueda." : "Busca un producto por nombre o codigo para agregarlo a la venta."}
+          </div>
+        )}
 
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel flex-1 overflow-hidden flex flex-col">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel flex min-h-[360px] flex-1 flex-col overflow-hidden">
           <div className="bg-grafito-800/80 p-4 border-b border-gray-700 flex justify-between items-center">
             <h3 className="font-medium text-white">Detalle de Productos</h3>
-            <span className="text-sm text-gray-400">{cart.length} items / {totalQuantity} unidades</span>
+            <span className="text-sm text-gray-400">{cart.length} items / {totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
           </div>
           <div className="overflow-x-auto flex-1 p-4">
             <table className="w-full text-left border-collapse">
@@ -334,16 +361,19 @@ export default function Ventas() {
                 {cart.map((item) => (
                   <tr key={item.product.id}>
                     <td className="py-4 font-mono text-sm text-gray-400">{item.product.codigo}</td>
-                    <td className="py-4 font-medium text-gray-200">{item.product.descripcion}</td>
+                    <td className="py-4">
+                      <p className="font-medium text-gray-200">{item.product.descripcion}</p>
+                      <p className="mt-1 text-xs text-gray-500">Disponible: {formatQuantity(item.product.stock, item.product)}</p>
+                    </td>
                     <td className="py-4">
                       <div className="flex items-center justify-center gap-2">
                         <button onClick={() => changeQuantity(item.product.id, -1)} className="w-6 h-6 rounded-md bg-grafito-600 hover:bg-grafito-500 text-white">-</button>
-                        <span className="w-8 text-center text-white">{item.cantidad}</span>
+                        <span className="w-14 text-center text-white">{formatQuantity(item.cantidad, item.product)}</span>
                         <button onClick={() => changeQuantity(item.product.id, 1)} className="w-6 h-6 rounded-md bg-grafito-600 hover:bg-grafito-500 text-white">+</button>
                       </div>
                     </td>
                     <td className="py-4 text-right text-gray-400">{money(item.product.precioVenta)}</td>
-                    <td className="py-4 text-right text-gray-400">{item.cantidad} x {money(item.product.precioVenta)}</td>
+                    <td className="py-4 text-right text-gray-400">{formatQuantity(item.cantidad, item.product)} x {money(item.product.precioVenta)}</td>
                     <td className="py-4 text-right font-medium text-primary-light">{money(item.product.precioVenta * item.cantidad)}</td>
                     <td className="py-4 text-right">
                       <button onClick={() => removeItem(item.product.id)} className="p-2 text-gray-500 hover:text-accent hover:bg-accent/10 rounded-lg">
@@ -359,7 +389,7 @@ export default function Ventas() {
                 <div className="min-w-64 rounded-xl border border-gray-700 bg-grafito-900/40 p-4">
                   <div className="flex justify-between text-sm text-gray-400">
                     <span>Cantidad total</span>
-                    <span>{totalQuantity} unidades</span>
+                    <span>{totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="mt-2 flex justify-between text-lg font-bold text-white">
                     <span>Total carrito</span>
@@ -378,9 +408,16 @@ export default function Ventas() {
             <Receipt className="text-gray-400" size={20} /> Resumen
           </h3>
           <div className="space-y-4 flex-1">
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setTipoVenta("CONTADO")} className={`py-2.5 rounded-lg border font-medium ${tipoVenta === "CONTADO" ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}>Contado</button>
-              <button onClick={() => setTipoVenta("CREDITO")} className={`py-2.5 rounded-lg border font-medium ${tipoVenta === "CREDITO" ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}>Credito</button>
+            <div className="grid grid-cols-3 gap-3">
+              {sellerPaymentOptions.map((option) => (
+                <button
+                  key={option}
+                  onClick={() => selectPaymentOption(option)}
+                  className={`py-2.5 rounded-lg border text-sm font-medium ${selectedPaymentOption === option ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}
+                >
+                  {option}
+                </button>
+              ))}
             </div>
             {tipoVenta === "CREDITO" && (
               <label className="block text-gray-400">
@@ -388,16 +425,9 @@ export default function Ventas() {
                 <input type="date" value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} className="premium-input" />
               </label>
             )}
-            <div className="grid grid-cols-2 gap-3">
-              {(["EFECTIVO", "TRANSFERENCIA", "QR", "TARJETA"] as const).map((method) => (
-                <button key={method} onClick={() => setMetodoPago(method)} className={`py-2.5 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 ${metodoPago === method ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}>
-                  {method === "TARJETA" ? <CreditCard size={16} /> : null}{method}
-                </button>
-              ))}
-            </div>
             <div className="flex justify-between text-gray-400">
               <span>Productos</span>
-              <span>{cart.length} items / {totalQuantity} unidades</span>
+              <span>{cart.length} items / {totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
             </div>
             <div className="flex justify-between text-gray-400">
               <span>Subtotal</span>
@@ -482,7 +512,7 @@ function InvoiceModal({
         <div className="bg-grafito-900/80 p-5 border-b border-gray-700 flex items-center justify-between">
           <div>
             <h3 className="text-xl font-bold text-white">Factura de venta</h3>
-            <p className="text-sm text-gray-400">{cart.length} items / {totalQuantity} unidades</p>
+            <p className="text-sm text-gray-400">{cart.length} items / {totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</p>
           </div>
           <button type="button" onClick={onClose} disabled={saving} className="text-gray-400 hover:text-white disabled:opacity-50">
             <X size={22} />
@@ -511,7 +541,7 @@ function InvoiceModal({
                   <tr key={item.product.id}>
                     <td className="p-3 font-mono text-gray-400">{item.product.codigo}</td>
                     <td className="p-3 font-semibold text-white">{item.product.descripcion}</td>
-                    <td className="p-3 text-center text-gray-300">{item.cantidad}</td>
+                    <td className="p-3 text-center text-gray-300">{formatQuantity(item.cantidad, item.product)}</td>
                     <td className="p-3 text-right text-gray-300">{money(item.product.precioVenta)}</td>
                     <td className="p-3 text-right font-bold text-primary-light">{money(item.product.precioVenta * item.cantidad)}</td>
                   </tr>
@@ -524,7 +554,7 @@ function InvoiceModal({
             <div className="rounded-xl border border-gray-700 bg-grafito-900/40 p-4">
               <div className="grid grid-cols-2 gap-3">
                 <Stat label="Tipo" value={tipoVenta} />
-                <Stat label="Metodo" value={metodoPago} />
+                <Stat label="Metodo" value={salePaymentLabel(tipoVenta, metodoPago)} />
               </div>
             </div>
             <div className="rounded-xl border border-gray-700 bg-grafito-900/40 p-4 space-y-3">
@@ -572,7 +602,7 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat label="Tipo" value={sale.tipoVenta} />
-            <Stat label="Metodo" value={sale.metodoPago} />
+            <Stat label="Metodo" value={salePaymentLabel(sale.tipoVenta, sale.metodoPago)} />
             <Stat label="Subtotal" value={money(sale.subtotal)} />
             <Stat label="Total" value={money(sale.total)} />
           </div>
@@ -590,10 +620,10 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
                 {(sale.detalles || []).map((detail) => (
                   <tr key={detail.id}>
                     <td className="p-3">
-                      <p className="font-semibold text-white">{detail.producto?.descripcion || "Producto"}</p>
-                      <p className="text-xs text-gray-500">{detail.producto?.codigo}</p>
+                      <p className="font-semibold text-white">{detail.producto?.descripcion || detail.descripcion || "Detalle"}</p>
+                      <p className="text-xs text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</p>
                     </td>
-                    <td className="p-3 text-center text-gray-300">{detail.cantidad}</td>
+                    <td className="p-3 text-center text-gray-300">{detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
                     <td className="p-3 text-right text-gray-300">{money(detail.precioUnitario)}</td>
                     <td className="p-3 text-right font-bold text-primary-light">{money(detail.subtotal)}</td>
                   </tr>
@@ -604,7 +634,7 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
           <div className="flex justify-end gap-3">
             <button onClick={onClose} className="btn-secondary">Cerrar</button>
             <button onClick={onPrint} className="btn-primary flex items-center gap-2">
-              <Printer size={18} /> Imprimir detalle
+              <Printer size={18} /> Imprimir ticket 80mm
             </button>
           </div>
         </div>

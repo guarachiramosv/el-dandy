@@ -23,10 +23,20 @@ enum ProductCondition {
   USADO
 }
 
+enum ProductSaleUnit {
+  UNIDAD
+  METRO
+}
+
 enum ProductStatus {
   ACTIVO
   INACTIVO
   DESCONTINUADO
+}
+
+enum SaleLineType {
+  PRODUCTO
+  REMACHADO
 }
 
 enum PaymentMethod {
@@ -62,6 +72,17 @@ enum StockMovementType {
   TRANSFERENCIA_ENTRADA
 }
 
+enum RemachadoTrabajoTipo {
+  JUEGO
+  MEDIO_JUEGO
+}
+
+enum RemachadoMovimientoTipo {
+  INGRESO
+  AJUSTE
+  TRABAJO
+}
+
 // ========================
 // MODELOS
 // ========================
@@ -77,6 +98,8 @@ model Sucursal {
   ventas    Venta[]
   compras   Compra[]
   cierresCaja CierreCaja[]
+  gastosCaja GastoCaja[]
+  remachadoTrabajos RemachadoTrabajo[]
   createdAt DateTime   @default(now())
 }
 
@@ -100,6 +123,9 @@ model Usuario {
   movimientos MovimientoStock[]
   eliminacionesProducto ProductoEliminacionHistorial[]
   cierresCaja CierreCaja[]
+  gastosCaja GastoCaja[]
+  remachadoTrabajos RemachadoTrabajo[]
+  remachadoMovimientos RemachadoMovimiento[]
   createdAt  DateTime @default(now())
 }
 
@@ -139,11 +165,13 @@ model Cliente {
 model Producto {
   id           String           @id @default(uuid())
   codigo       String
+  codigoRepuesto String?
   descripcion  String
   marca        String
   condicion    ProductCondition @default(NUEVO)
-  stock        Int              @default(0)
-  stockMinimo  Int              @default(5)
+  unidadVenta  ProductSaleUnit  @default(UNIDAD)
+  stock        Float            @default(0)
+  stockMinimo  Float            @default(5)
   ubicacion    String?
   activo       Boolean          @default(true)
   estado       ProductStatus    @default(ACTIVO)
@@ -165,6 +193,9 @@ model Producto {
   alertas      AlertaStock[]
   transferenciasOrigen TransferenciaStock[] @relation("ProductoTransferenciaOrigen")
   transferenciasDestino TransferenciaStock[] @relation("ProductoTransferenciaDestino")
+  remachadoResorteTrabajos RemachadoTrabajo[] @relation("RemachadoResorteProducto")
+  remachadoGomaTrabajos    RemachadoTrabajo[] @relation("RemachadoGomaProducto")
+  remachadoSeguroTrabajos  RemachadoTrabajo[] @relation("RemachadoSeguroProducto")
   createdAt    DateTime         @default(now())
 
   @@unique([codigo, sucursalId])
@@ -179,7 +210,7 @@ model ProductoEliminacionHistorial {
   usuarioId      String?
   usuario        Usuario?      @relation(fields: [usuarioId], references: [id])
   motivo         String
-  stockAnterior  Int           @default(0)
+  stockAnterior  Float         @default(0)
   estadoAnterior ProductStatus @default(ACTIVO)
   createdAt      DateTime      @default(now())
 
@@ -194,7 +225,7 @@ model ProductoStockSucursal {
   producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
   sucursalId String
   sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
-  stock      Int      @default(0)
+  stock      Float    @default(0)
   activo     Boolean  @default(true)
   estado     ProductStatus @default(ACTIVO)
   createdAt  DateTime @default(now())
@@ -229,19 +260,25 @@ model Venta {
   clienteId  String?
   cliente    Cliente?       @relation(fields: [clienteId], references: [id])
   detalles   DetalleVenta[]
+  remachadoTrabajos RemachadoTrabajo[]
   cuenta     CuentaCobrar?
   createdAt  DateTime       @default(now())
 }
 
 model DetalleVenta {
   id             String   @id @default(uuid())
-  cantidad       Int
+  tipoLinea      SaleLineType @default(PRODUCTO)
+  descripcion    String?
+  unidadVenta    String?
+  cantidad       Float
   precioUnitario Float
   subtotal       Float
   ventaId        String
   venta          Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  productoId     String
-  producto       Producto @relation(fields: [productoId], references: [id])
+  productoId     String?
+  producto       Producto? @relation(fields: [productoId], references: [id])
+  remachadoTrabajoId String?
+  remachadoTrabajo   RemachadoTrabajo? @relation(fields: [remachadoTrabajoId], references: [id])
   createdAt      DateTime @default(now())
 }
 
@@ -266,7 +303,7 @@ model DetalleCompra {
   compra         Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
   productoId     String
   producto       Producto @relation(fields: [productoId], references: [id])
-  cantidad       Int
+  cantidad       Float
   precioUnitario Float
   subtotal       Float
   createdAt      DateTime @default(now())
@@ -278,9 +315,9 @@ model MovimientoStock {
   productoId     String
   producto       Producto          @relation(fields: [productoId], references: [id])
   sucursalId      String
-  stockAnterior   Int
-  stockNuevo      Int
-  cantidad        Int
+  stockAnterior   Float
+  stockNuevo      Float
+  cantidad        Float
   usuarioId       String?
   usuario         Usuario?         @relation(fields: [usuarioId], references: [id])
   referenciaId    String?
@@ -297,7 +334,7 @@ model TransferenciaStock {
   productoDestino   Producto @relation("ProductoTransferenciaDestino", fields: [productoDestinoId], references: [id])
   sucursalOrigenId  String
   sucursalDestinoId String
-  cantidad          Int
+  cantidad          Float
   usuarioId         String
   notas             String?
   createdAt         DateTime @default(now())
@@ -355,10 +392,126 @@ model CierreCaja {
   totalQr           Float
   totalTarjeta      Float
   totalCredito      Float
+  gastoEfectivo     Float    @default(0)
+  gastoQr           Float    @default(0)
+  totalGastos       Float    @default(0)
+  netoEfectivo      Float    @default(0)
+  netoQr            Float    @default(0)
   montoDeclarado    Float
   diferencia        Float
   notas             String?
   createdAt         DateTime @default(now())
 
   @@unique([fecha, usuarioId, sucursalId])
+}
+
+model GastoCaja {
+  id         String        @id @default(uuid())
+  motivo     String
+  monto      Float
+  metodoPago PaymentMethod
+  notas      String?
+  usuarioId  String
+  usuario    Usuario       @relation(fields: [usuarioId], references: [id])
+  sucursalId String
+  sucursal   Sucursal      @relation(fields: [sucursalId], references: [id])
+  createdAt  DateTime      @default(now())
+
+  @@index([usuarioId, sucursalId, createdAt])
+  @@index([sucursalId, createdAt])
+}
+
+model RemachadoMedida {
+  id                 String                @id @default(uuid())
+  medida             String                @unique
+  descripcion        String?
+  stockJuegos        Float                 @default(0)
+  stockMinimoJuegos  Float                 @default(1)
+  precioJuego        Float
+  precioMedioJuego   Float
+  remachesPorJuego   Int                   @default(8)
+  remachesPorMedioJuego Int                @default(4)
+  activo             Boolean               @default(true)
+  trabajos           RemachadoTrabajo[]
+  movimientos        RemachadoMovimiento[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+}
+
+model RemachadoRemache {
+  id          String                @id @default(uuid())
+  codigo      String                @unique
+  nombre      String
+  medida      String?
+  stock       Int                   @default(0)
+  stockMinimo Int                   @default(20)
+  activo      Boolean               @default(true)
+  trabajos    RemachadoTrabajo[]
+  movimientos RemachadoMovimiento[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}
+
+model RemachadoTrabajo {
+  id               String               @id @default(uuid())
+  medidaId         String
+  medida           RemachadoMedida      @relation(fields: [medidaId], references: [id])
+  remacheId        String?
+  remache          RemachadoRemache?    @relation(fields: [remacheId], references: [id])
+  usuarioId        String
+  usuario          Usuario              @relation(fields: [usuarioId], references: [id])
+  sucursalId       String
+  sucursal         Sucursal             @relation(fields: [sucursalId], references: [id])
+  ventaId          String?
+  venta            Venta?               @relation(fields: [ventaId], references: [id])
+  tipoTrabajo      RemachadoTrabajoTipo
+  cantidadJuegos   Float
+  cantidadBalatas  Int
+  cantidadRemaches Int
+  resorteProductoId String?
+  resorteProducto   Producto?            @relation("RemachadoResorteProducto", fields: [resorteProductoId], references: [id])
+  cantidadResortes  Int                  @default(0)
+  gomaProductoId    String?
+  gomaProducto      Producto?            @relation("RemachadoGomaProducto", fields: [gomaProductoId], references: [id])
+  cantidadGomas     Int                  @default(0)
+  seguroProductoId  String?
+  seguroProducto    Producto?            @relation("RemachadoSeguroProducto", fields: [seguroProductoId], references: [id])
+  cantidadSeguros   Int                  @default(0)
+  precioUnitario   Float
+  total            Float
+  notas            String?
+  detalleVenta     DetalleVenta[]
+  movimientos      RemachadoMovimiento[]
+  createdAt        DateTime             @default(now())
+
+  @@index([medidaId])
+  @@index([remacheId])
+  @@index([ventaId])
+  @@index([resorteProductoId])
+  @@index([gomaProductoId])
+  @@index([seguroProductoId])
+  @@index([createdAt])
+}
+
+model RemachadoMovimiento {
+  id              String                  @id @default(uuid())
+  tipo            RemachadoMovimientoTipo
+  medidaId        String?
+  medida          RemachadoMedida?        @relation(fields: [medidaId], references: [id])
+  remacheId       String?
+  remache         RemachadoRemache?       @relation(fields: [remacheId], references: [id])
+  trabajoId       String?
+  trabajo         RemachadoTrabajo?       @relation(fields: [trabajoId], references: [id])
+  usuarioId       String?
+  usuario         Usuario?                @relation(fields: [usuarioId], references: [id])
+  stockAnterior   Float
+  stockNuevo      Float
+  cantidad        Float
+  notas           String?
+  createdAt       DateTime                @default(now())
+
+  @@index([medidaId])
+  @@index([remacheId])
+  @@index([trabajoId])
+  @@index([createdAt])
 }

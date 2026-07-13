@@ -11,7 +11,7 @@ export const createSaleSchema = z.object({
   items: z.array(
     z.object({
       productoId: z.string().uuid('Producto invalido'),
-      cantidad: z.number().int().positive('Cantidad debe ser mayor a cero'),
+      cantidad: z.number().positive('Cantidad debe ser mayor a cero'),
       descuentoItem: z.number().min(0).default(0),
     })
   ).min(1, 'Agrega al menos un producto'),
@@ -21,4 +21,13 @@ export const closeCashRegisterSchema = z.object({
   fecha: z.string().optional().nullable(),
   montoDeclarado: z.number().min(0, 'Monto declarado invalido'),
   notas: z.string().optional().nullable(),
+});
+
+export const createCashExpenseSchema = z.object({
+  usuarioId: z.string().uuid('Usuario invalido').optional(),
+  sucursalId: z.string().uuid('Sucursal invalida').optional(),
+  motivo: z.string().trim().min(2, 'Motivo requerido').max(160, 'Motivo demasiado largo'),
+  monto: z.number().positive('Monto debe ser mayor a cero'),
+  metodoPago: z.enum(['EFECTIVO', 'QR']),
+  notas: z.string().trim().max(300, 'Notas demasiado largas').optional().nullable(),
 });

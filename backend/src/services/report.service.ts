@@ -71,6 +71,11 @@ function emptyClosingTotals() {
     totalQr: 0,
     totalTarjeta: 0,
     totalCredito: 0,
+    gastoEfectivo: 0,
+    gastoQr: 0,
+    totalGastos: 0,
+    netoEfectivo: 0,
+    netoQr: 0,
     montoDeclarado: 0,
     diferencia: 0,
   };
@@ -89,6 +94,12 @@ function emptySalesTotals() {
     totalQr: 0,
     totalTarjeta: 0,
     totalCredito: 0,
+    gastoEfectivo: 0,
+    gastoQr: 0,
+    totalGastos: 0,
+    netoEfectivo: 0,
+    netoQr: 0,
+    totalDisponible: 0,
   };
 }
 
@@ -102,22 +113,36 @@ export class ReportService {
     const where: Prisma.VentaWhereInput = {
       createdAt: { gte: range.start, lt: range.end },
     };
+    const gastosWhere: Prisma.GastoCajaWhereInput = {
+      createdAt: { gte: range.start, lt: range.end },
+    };
     if (params.sucursalId) where.sucursalId = params.sucursalId;
+    if (params.sucursalId) gastosWhere.sucursalId = params.sucursalId;
 
-    const ventas = await prisma.venta.findMany({
-      where,
-      include: {
-        usuario: { select: { id: true, nombre: true, email: true } },
-        sucursal: true,
-        cliente: true,
-        detalles: {
-          include: {
-            producto: { include: { categoria: true, sucursal: true } },
+    const [ventas, gastos] = await Promise.all([
+      prisma.venta.findMany({
+        where,
+        include: {
+          usuario: { select: { id: true, nombre: true, email: true } },
+          sucursal: true,
+          cliente: true,
+          detalles: {
+            include: {
+              producto: { include: { categoria: true, sucursal: true } },
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.gastoCaja.findMany({
+        where: gastosWhere,
+        include: {
+          usuario: { select: { id: true, nombre: true, email: true } },
+          sucursal: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
 
     const totals = ventas.reduce((acc, venta) => {
       acc.cantidadVentas += 1;
@@ -137,6 +162,19 @@ export class ReportService {
       return acc;
     }, emptySalesTotals());
 
+    gastos.forEach((gasto) => {
+      totals.totalGastos += gasto.monto;
+      if (gasto.metodoPago === 'EFECTIVO') totals.gastoEfectivo += gasto.monto;
+      else if (gasto.metodoPago === 'QR') totals.gastoQr += gasto.monto;
+    });
+    totals.netoEfectivo = Math.max(totals.totalEfectivo - totals.gastoEfectivo, 0);
+    totals.netoQr = Math.max(totals.totalQr - totals.gastoQr, 0);
+    totals.totalDisponible =
+      totals.netoEfectivo +
+      totals.totalTransferencia +
+      totals.netoQr +
+      totals.totalTarjeta;
+
     const productMap = new Map<string, {
       productoId: string;
       codigo: string;
@@ -151,10 +189,11 @@ export class ReportService {
     ventas.forEach((venta) => {
       venta.detalles.forEach((detalle) => {
         const product = detalle.producto;
-        const current = productMap.get(detalle.productoId) || {
-          productoId: detalle.productoId,
-          codigo: product?.codigo || '',
-          descripcion: product?.descripcion || 'Producto',
+        const productKey = detalle.productoId || detalle.descripcion || detalle.id;
+        const current = productMap.get(productKey) || {
+          productoId: productKey,
+          codigo: product?.codigo || detalle.tipoLinea || '',
+          descripcion: product?.descripcion || detalle.descripcion || 'Detalle',
           marca: product?.marca || '',
           categoria: product?.categoria?.nombre || 'Sin categoria',
           sucursal: product?.sucursal?.nombre || venta.sucursal?.nombre || 'Sucursal',
@@ -163,7 +202,7 @@ export class ReportService {
         };
         current.cantidad += detalle.cantidad;
         current.total += detalle.subtotal;
-        productMap.set(detalle.productoId, current);
+        productMap.set(productKey, current);
       });
     });
 
@@ -176,6 +215,7 @@ export class ReportService {
       hasta: range.end,
       totals,
       ventas,
+      gastos,
       productosVendidos,
     };
   }
@@ -211,6 +251,11 @@ export class ReportService {
       acc.totalQr += cierre.totalQr;
       acc.totalTarjeta += cierre.totalTarjeta;
       acc.totalCredito += cierre.totalCredito;
+      acc.gastoEfectivo += cierre.gastoEfectivo;
+      acc.gastoQr += cierre.gastoQr;
+      acc.totalGastos += cierre.totalGastos;
+      acc.netoEfectivo += cierre.netoEfectivo;
+      acc.netoQr += cierre.netoQr;
       acc.montoDeclarado += cierre.montoDeclarado;
       acc.diferencia += cierre.diferencia;
       return acc;

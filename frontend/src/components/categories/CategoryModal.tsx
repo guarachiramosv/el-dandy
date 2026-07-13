@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import api from '../../services/api';
+import { createCategory, updateCategory } from '../../services/catalog';
 import { Category } from '../../types';
 import { getErrorMessage } from '../../utils/errors';
 
@@ -26,15 +26,18 @@ export default function CategoryModal({ isOpen, onClose, onSuccess, initialData 
     return () => window.clearTimeout(timer);
   }, [isEdit, initialData, isOpen]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmedNombre = nombre.trim();
+    if (!trimmedNombre) return setError('El nombre es obligatorio.');
+
     setLoading(true);
     setError(null);
     try {
       if (isEdit && initialData) {
-        await api.put(`/categories/${initialData.id}`, { nombre });
+        await updateCategory(initialData.id, trimmedNombre);
       } else {
-        await api.post('/categories', { nombre });
+        await createCategory(trimmedNombre);
       }
       onSuccess();
       onClose();
@@ -49,62 +52,67 @@ export default function CategoryModal({ isOpen, onClose, onSuccess, initialData 
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
           <motion.div
-            className="bg-grafito-900 rounded-lg shadow-xl w-full max-w-md p-6 relative"
+            className="relative w-full max-w-md rounded-xl border border-gray-700 bg-grafito-900 p-6 shadow-xl"
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
           >
             <button
+              type="button"
               onClick={onClose}
-              className="absolute top-3 right-3 text-gray-400 hover:text-white"
+              disabled={loading}
+              className="absolute right-3 top-3 rounded-lg p-1 text-gray-400 hover:bg-grafito-800 hover:text-white disabled:opacity-60"
+              title="Cerrar"
             >
               <X size={20} />
             </button>
-            <h2 className="text-xl font-semibold text-white mb-4">
-              {isEdit ? 'Editar Categoría' : 'Crear Categoría'}
+
+            <h2 className="mb-4 text-xl font-semibold text-white">
+              {isEdit ? 'Editar Categoria' : 'Crear Categoria'}
             </h2>
+
             {error && (
-              <div className="bg-red-600/30 text-red-100 rounded p-2 mb-3">
+              <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 p-2 text-red-100">
                 {error}
               </div>
             )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre</label>
+              <label className="block">
+                <span className="mb-1 block text-gray-300">Nombre</span>
                 <input
                   type="text"
                   value={nombre}
-                  onChange={e => setNombre(e.target.value)}
+                  onChange={(event) => setNombre(event.target.value)}
                   required
-                  className="w-full px-3 py-2 bg-grafito-800 border border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                  minLength={3}
+                  maxLength={100}
+                  className="premium-input"
+                  autoFocus
                 />
-              </div>
-              <div className="flex justify-end space-x-3">
+              </label>
+
+              <div className="flex justify-end gap-3">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded"
+                  disabled={loading}
+                  className="btn-secondary py-2 disabled:opacity-60"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 bg-primary hover:bg-primary/80 text-white rounded flex items-center"
+                  className="btn-primary flex items-center px-5 py-2 disabled:opacity-60"
                 >
-                  {loading && (
-                    <svg className="animate-spin mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                    </svg>
-                  )}
-                  {isEdit ? 'Actualizar' : 'Crear'}
+                  {loading ? 'Guardando...' : isEdit ? 'Actualizar' : 'Crear'}
                 </button>
               </div>
             </form>

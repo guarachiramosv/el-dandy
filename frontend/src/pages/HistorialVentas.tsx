@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Banknote, CalendarDays, LockKeyhole, Printer, X } from "lucide-react";
+import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } from "lucide-react";
 import { CashClosing, DailySalesSummary, Sale } from "../types";
-import { closeCashRegister, fetchDailySalesSummary } from "../services/sales";
+import { closeCashRegister, createCashExpense, fetchDailySalesSummary } from "../services/sales";
 import { getErrorMessage } from "../utils/errors";
 
 const money = (value: number) =>
@@ -15,16 +15,21 @@ export default function HistorialVentas() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [declaredCash, setDeclaredCash] = useState(0);
   const [closeNotes, setCloseNotes] = useState("");
+  const [expenseReason, setExpenseReason] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState(0);
+  const [expenseMethod, setExpenseMethod] = useState<"EFECTIVO" | "QR">("EFECTIVO");
+  const [expenseNotes, setExpenseNotes] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [closingCash, setClosingCash] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
       const data = await fetchDailySalesSummary();
       setSummary(data);
-      setDeclaredCash(data.cierre?.montoDeclarado ?? data.totals.totalEfectivo);
+      setDeclaredCash(data.cierre?.montoDeclarado ?? data.netos?.totalEfectivo ?? data.totals.totalEfectivo);
       setCloseNotes(data.cierre?.notas || "");
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
@@ -51,6 +56,34 @@ export default function HistorialVentas() {
       setMessage(getErrorMessage(err));
     } finally {
       setClosingCash(false);
+    }
+  };
+
+  const handleAddExpense = async () => {
+    setMessage(null);
+    const motivo = expenseReason.trim();
+    if (!motivo) return setMessage("Indica para que se saco dinero.");
+    if (expenseAmount <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
+    if (summary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
+
+    setSavingExpense(true);
+    try {
+      await createCashExpense({
+        motivo,
+        monto: expenseAmount,
+        metodoPago: expenseMethod,
+        notas: expenseNotes.trim() || null,
+      });
+      setExpenseReason("");
+      setExpenseAmount(0);
+      setExpenseMethod("EFECTIVO");
+      setExpenseNotes("");
+      setMessage("Gasto registrado correctamente.");
+      await loadSummary();
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err));
+    } finally {
+      setSavingExpense(false);
     }
   };
 
@@ -82,8 +115,8 @@ export default function HistorialVentas() {
             <tbody>
               ${(sale.detalles || []).map(detail => `
                 <tr>
-                  <td>${detail.producto?.codigo || ""} - ${detail.producto?.descripcion || "Producto"}</td>
-                  <td>${detail.cantidad}</td>
+                  <td>${detail.producto?.codigo || detail.tipoLinea || ""} - ${detail.producto?.descripcion || detail.descripcion || "Detalle"}</td>
+                  <td>${detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
                   <td>${money(detail.precioUnitario)}</td>
                   <td>${money(detail.subtotal)}</td>
                 </tr>
@@ -99,7 +132,11 @@ export default function HistorialVentas() {
     printWindow.print();
   };
 
-  const expectedCash = summary?.totals.totalEfectivo || 0;
+  const grossCash = summary?.totals.totalEfectivo || 0;
+  const grossQr = summary?.totals.totalQr || 0;
+  const expenseTotals = summary?.gastos?.totals || { totalGastos: 0, totalEfectivo: 0, totalQr: 0 };
+  const expectedCash = summary?.netos?.totalEfectivo ?? Math.max(grossCash - expenseTotals.totalEfectivo, 0);
+  const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr - expenseTotals.totalQr, 0);
   const difference = declaredCash - expectedCash;
 
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
@@ -140,38 +177,124 @@ export default function HistorialVentas() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 p-4">
-          <div className="rounded-xl border border-gray-800 overflow-hidden">
-            <table className="w-full text-left">
-              <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="p-3">Hora</th>
-                  <th className="p-3">Cliente</th>
-                  <th className="p-3">Pago</th>
-                  <th className="p-3 text-right">Total</th>
-                  <th className="p-3 text-right">Accion</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800 text-sm">
-                {(summary?.ventas || []).map((sale) => (
-                  <tr key={sale.id} className="hover:bg-grafito-800/50">
-                    <td className="p-3 text-gray-400">{formatDateTime(sale.createdAt)}</td>
-                    <td className="p-3 text-white">{sale.cliente?.nombre || "Cliente ocasional"}</td>
-                    <td className="p-3 text-gray-300">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</td>
-                    <td className="p-3 text-right font-bold text-primary-light">{money(sale.total)}</td>
-                    <td className="p-3 text-right">
-                      <button onClick={() => setSelectedSale(sale)} className="text-gray-300 hover:text-white">
-                        Ver detalle
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {(summary?.ventas || []).length === 0 && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-gray-800 overflow-hidden">
+              <table className="w-full text-left">
+                <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
                   <tr>
-                    <td colSpan={5} className="p-6 text-center text-gray-500">Aun no hay ventas hoy.</td>
+                    <th className="p-3">Hora</th>
+                    <th className="p-3">Cliente</th>
+                    <th className="p-3">Pago</th>
+                    <th className="p-3 text-right">Total</th>
+                    <th className="p-3 text-right">Accion</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-800 text-sm">
+                  {(summary?.ventas || []).map((sale) => (
+                    <tr key={sale.id} className="hover:bg-grafito-800/50">
+                      <td className="p-3 text-gray-400">{formatDateTime(sale.createdAt)}</td>
+                      <td className="p-3 text-white">{sale.cliente?.nombre || "Cliente ocasional"}</td>
+                      <td className="p-3 text-gray-300">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</td>
+                      <td className="p-3 text-right font-bold text-primary-light">{money(sale.total)}</td>
+                      <td className="p-3 text-right">
+                        <button onClick={() => setSelectedSale(sale)} className="text-gray-300 hover:text-white">
+                          Ver detalle
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {(summary?.ventas || []).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-gray-500">Aun no hay ventas hoy.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h4 className="font-semibold text-white flex items-center gap-2">
+                  <ReceiptText size={18} className="text-amber-300" /> Gastos del dia
+                </h4>
+                <span className="text-sm font-semibold text-amber-200">{money(expenseTotals.totalGastos)}</span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[1fr_140px_140px]">
+                <input
+                  type="text"
+                  value={expenseReason}
+                  onChange={(event) => setExpenseReason(event.target.value)}
+                  disabled={summary?.cerrado}
+                  placeholder="Para que se saco dinero..."
+                  className="premium-input"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  value={expenseAmount}
+                  onChange={(event) => setExpenseAmount(Number(event.target.value))}
+                  disabled={summary?.cerrado}
+                  className="premium-input"
+                />
+                <select
+                  value={expenseMethod}
+                  onChange={(event) => setExpenseMethod(event.target.value as "EFECTIVO" | "QR")}
+                  disabled={summary?.cerrado}
+                  className="premium-input"
+                >
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="QR">QR</option>
+                </select>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_180px]">
+                <input
+                  type="text"
+                  value={expenseNotes}
+                  onChange={(event) => setExpenseNotes(event.target.value)}
+                  disabled={summary?.cerrado}
+                  placeholder="Nota opcional"
+                  className="premium-input"
+                />
+                <button
+                  onClick={handleAddExpense}
+                  disabled={savingExpense || summary?.cerrado}
+                  className="btn-secondary flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <Plus size={18} /> {savingExpense ? "Guardando..." : "Agregar gasto"}
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-lg border border-gray-800 overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="p-3">Hora</th>
+                      <th className="p-3">Motivo</th>
+                      <th className="p-3">Origen</th>
+                      <th className="p-3 text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {(summary?.gastos?.items || []).map((expense) => (
+                      <tr key={expense.id}>
+                        <td className="p-3 text-gray-400">{formatDateTime(expense.createdAt)}</td>
+                        <td className="p-3 text-white">
+                          <p className="font-semibold">{expense.motivo}</p>
+                          {expense.notas && <p className="text-xs text-gray-500">{expense.notas}</p>}
+                        </td>
+                        <td className="p-3 text-gray-300">{expense.metodoPago}</td>
+                        <td className="p-3 text-right font-bold text-amber-200">{money(expense.monto)}</td>
+                      </tr>
+                    ))}
+                    {(summary?.gastos?.items || []).length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-gray-500">Sin gastos registrados.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
           <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4 space-y-3">
@@ -179,8 +302,20 @@ export default function HistorialVentas() {
               <Banknote size={18} className="text-green-300" /> Cierre de caja
             </h4>
             <div className="flex justify-between text-sm text-gray-400">
+              <span>Ventas efectivo</span>
+              <span className="font-semibold text-white">{money(grossCash)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-gray-400">
+              <span>Gastos efectivo</span>
+              <span className="font-semibold text-amber-200">-{money(expenseTotals.totalEfectivo)}</span>
+            </div>
+            <div className="flex justify-between border-t border-gray-800 pt-3 text-sm text-gray-400">
               <span>Efectivo esperado</span>
-              <span className="font-semibold text-white">{money(expectedCash)}</span>
+              <span className="font-semibold text-green-200">{money(expectedCash)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-gray-400">
+              <span>QR neto</span>
+              <span className="font-semibold text-blue-200">{money(expectedQr)}</span>
             </div>
             <label className="block text-sm text-gray-300">
               <span className="mb-1 block">Dinero contado en caja</span>
@@ -233,9 +368,10 @@ export default function HistorialVentas() {
 
 function ClosedCashBox({ closing }: { closing?: CashClosing | null }) {
   return (
-    <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-200">
-      Cerrado con {money(closing?.montoDeclarado || 0)} en caja.
-      Diferencia {money(closing?.diferencia || 0)}.
+    <div className="space-y-1 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-200">
+      <p>Cerrado con {money(closing?.montoDeclarado || 0)} en caja.</p>
+      <p>Efectivo neto esperado {money(closing?.netoEfectivo ?? closing?.totalEfectivo ?? 0)}.</p>
+      <p>Gastos descontados {money(closing?.totalGastos || 0)}. Diferencia {money(closing?.diferencia || 0)}.</p>
     </div>
   );
 }
@@ -267,10 +403,10 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
                 {(sale.detalles || []).map((detail) => (
                   <tr key={detail.id}>
                     <td className="p-3">
-                      <p className="font-semibold text-white">{detail.producto?.descripcion || "Producto"}</p>
-                      <p className="text-xs text-gray-500">{detail.producto?.codigo}</p>
+                      <p className="font-semibold text-white">{detail.producto?.descripcion || detail.descripcion || "Detalle"}</p>
+                      <p className="text-xs text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</p>
                     </td>
-                    <td className="p-3 text-center text-gray-300">{detail.cantidad}</td>
+                    <td className="p-3 text-center text-gray-300">{detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
                     <td className="p-3 text-right text-gray-300">{money(detail.precioUnitario)}</td>
                     <td className="p-3 text-right font-bold text-primary-light">{money(detail.subtotal)}</td>
                   </tr>

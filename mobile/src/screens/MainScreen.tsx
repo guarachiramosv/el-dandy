@@ -2,30 +2,24 @@ import { useState } from 'react';
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import BrandLogo from '../components/BrandLogo';
 import { clearSession } from '../session';
 import { colors } from '../theme';
 import { Session } from '../types';
-import BrandLogo from '../components/BrandLogo';
 import AdminProductsScreen from './AdminProductsScreen';
 import AlertsScreen from './AlertsScreen';
 import CustomersScreen from './CustomersScreen';
 import InventoryScreen from './InventoryScreen';
+import RemachadoScreen from './RemachadoScreen';
 import SaleScreen from './SaleScreen';
 
-type Tab = 'stock' | 'sale' | 'customers' | 'alerts';
-
-const tabs: Array<{ id: Tab; icon: string; label: string }> = [
-  { id: 'stock', icon: '📦', label: 'Stock' },
-  { id: 'sale', icon: '🛒', label: 'Venta' },
-  { id: 'customers', icon: '👥', label: 'Clientes' },
-  { id: 'alerts', icon: '🔔', label: 'Alertas' },
-];
+type Tab = 'adminProducts' | 'stock' | 'sale' | 'remachado' | 'customers' | 'alerts';
 
 type Props = {
   session: Session;
@@ -33,11 +27,23 @@ type Props = {
 };
 
 export default function MainScreen({ session, onLogout }: Props) {
-  const [tab, setTab] = useState<Tab>('stock');
   const isAdmin = session.user.role === 'ADMIN';
+  const [tab, setTab] = useState<Tab>(isAdmin ? 'adminProducts' : 'stock');
+  const tabs: Array<{ id: Tab; icon: string; label: string }> = isAdmin
+    ? [
+        { id: 'adminProducts', icon: 'PR', label: 'Productos' },
+        { id: 'remachado', icon: 'BA', label: 'Balatas' },
+      ]
+    : [
+        { id: 'stock', icon: 'ST', label: 'Stock' },
+        { id: 'sale', icon: 'VE', label: 'Venta' },
+        { id: 'remachado', icon: 'BA', label: 'Balatas' },
+        { id: 'customers', icon: 'CL', label: 'Clientes' },
+        { id: 'alerts', icon: 'AL', label: 'Alertas' },
+      ];
 
   const logout = () => {
-    Alert.alert('Cerrar sesión', '¿Quieres salir de la aplicación?', [
+    Alert.alert('Cerrar sesion', 'Quieres salir de la aplicacion?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Salir',
@@ -59,7 +65,7 @@ export default function MainScreen({ session, onLogout }: Props) {
           <View>
             <Text style={styles.brand}>Diesel Dandy</Text>
             <Text style={styles.user} numberOfLines={1}>
-              {session.user.nombre} · {session.user.role === 'ADMIN' ? 'Administrador' : 'Vendedor'}
+              {session.user.nombre} - {isAdmin ? 'Administrador' : 'Vendedor'}
             </Text>
           </View>
         </View>
@@ -69,31 +75,25 @@ export default function MainScreen({ session, onLogout }: Props) {
       </View>
 
       <View style={styles.content}>
-        {isAdmin ? (
-          <AdminProductsScreen session={session} />
-        ) : (
-          <>
-            {tab === 'stock' && <InventoryScreen session={session} />}
-            {tab === 'sale' && <SaleScreen session={session} />}
-            {tab === 'customers' && <CustomersScreen session={session} />}
-            {tab === 'alerts' && <AlertsScreen session={session} />}
-          </>
-        )}
+        {tab === 'adminProducts' && <AdminProductsScreen session={session} />}
+        {tab === 'stock' && <InventoryScreen session={session} />}
+        {tab === 'sale' && <SaleScreen session={session} />}
+        {tab === 'remachado' && <RemachadoScreen session={session} />}
+        {tab === 'customers' && <CustomersScreen session={session} />}
+        {tab === 'alerts' && <AlertsScreen session={session} />}
       </View>
 
-      {!isAdmin && (
-        <View style={styles.tabs}>
-          {tabs.map((item) => (
-            <Pressable key={item.id} onPress={() => setTab(item.id)} style={styles.tab}>
-              <Text style={styles.tabIcon}>{item.icon}</Text>
-              <Text style={[styles.tabLabel, tab === item.id && styles.tabLabelActive]}>
-                {item.label}
-              </Text>
-              {tab === item.id && <View style={styles.activeLine} />}
-            </Pressable>
-          ))}
-        </View>
-      )}
+      <View style={styles.tabs}>
+        {tabs.map((item) => (
+          <Pressable key={item.id} onPress={() => setTab(item.id)} style={styles.tab}>
+            <Text style={[styles.tabIcon, tab === item.id && styles.tabIconActive]}>{item.icon}</Text>
+            <Text style={[styles.tabLabel, tab === item.id && styles.tabLabelActive]} numberOfLines={1}>
+              {item.label}
+            </Text>
+            {tab === item.id && <View style={styles.activeLine} />}
+          </Pressable>
+        ))}
+      </View>
     </SafeAreaView>
   );
 }
@@ -124,8 +124,9 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   tab: { alignItems: 'center', flex: 1, minHeight: 54, position: 'relative' },
-  tabIcon: { fontSize: 20 },
-  tabLabel: { color: colors.muted, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  tabIcon: { color: colors.muted, fontSize: 12, fontWeight: '900' },
+  tabIconActive: { color: colors.primaryLight },
+  tabLabel: { color: colors.muted, fontSize: 10, fontWeight: '700', marginTop: 4 },
   tabLabelActive: { color: colors.primaryLight },
   activeLine: { backgroundColor: colors.primary, borderRadius: 4, bottom: 0, height: 3, position: 'absolute', width: 34 },
 });

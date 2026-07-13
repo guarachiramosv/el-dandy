@@ -1,5 +1,5 @@
 import api from './api';
-import { CashClosing, DailySalesSummary, Sale, SaleInput } from '../types';
+import { CashClosing, CashExpense, DailySalesSummary, Sale, SaleInput } from '../types';
 
 export const createSale = async (sale: SaleInput): Promise<Sale> => {
   const response = await api.post<{ success: boolean; data: Sale }>('/sales', sale);
@@ -13,5 +13,15 @@ export const fetchDailySalesSummary = async (): Promise<DailySalesSummary> => {
 
 export const closeCashRegister = async (input: { montoDeclarado: number; notas?: string | null }): Promise<CashClosing> => {
   const response = await api.post<{ success: boolean; data: CashClosing }>('/sales/close-cash', input);
+  return response.data.data;
+};
+
+export const createCashExpense = async (input: {
+  motivo: string;
+  monto: number;
+  metodoPago: 'EFECTIVO' | 'QR';
+  notas?: string | null;
+}): Promise<CashExpense> => {
+  const response = await api.post<{ success: boolean; data: CashExpense }>('/sales/expenses', input);
   return response.data.data;
 };

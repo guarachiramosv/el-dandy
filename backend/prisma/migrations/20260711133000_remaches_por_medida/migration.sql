@@ -1,0 +1,3 @@
+ALTER TABLE "RemachadoMedida"
+ADD COLUMN "remachesPorJuego" INTEGER NOT NULL DEFAULT 8,
+ADD COLUMN "remachesPorMedioJuego" INTEGER NOT NULL DEFAULT 4;

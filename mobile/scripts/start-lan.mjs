@@ -15,20 +15,27 @@ const privateIpv4 = Object.values(networkInterfaces())
   });
 
 if (!privateIpv4) {
-  console.error('No se encontró una conexión de red local activa.');
+  console.error('No se encontro una conexion de red local activa.');
   process.exit(1);
 }
 
 const apiUrl = `http://${privateIpv4.address}:4000/api`;
 writeFileSync('.env', `EXPO_PUBLIC_API_URL=${apiUrl}\n`);
 
-console.log(`API móvil: ${apiUrl}`);
+console.log(`API movil: ${apiUrl}`);
 console.log('Iniciando Expo por red local...');
 
-const executable = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const expo = spawn(executable, ['expo', 'start', '--lan', '--clear'], {
+const expoCommand = process.platform === 'win32'
+  ? 'node_modules\\.bin\\expo.cmd start --lan --clear'
+  : 'npx expo start --lan --clear';
+const expo = spawn(
+  process.platform === 'win32' ? 'cmd.exe' : 'sh',
+  process.platform === 'win32'
+    ? ['/d', '/s', '/c', expoCommand]
+    : ['-c', expoCommand],
+  {
   stdio: 'inherit',
-  shell: process.platform === 'win32',
-});
+  },
+);
 
 expo.on('exit', (code) => process.exit(code ?? 0));

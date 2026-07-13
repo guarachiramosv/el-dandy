@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes } from "lucide-react";
+import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer } from "lucide-react";
 import { getCurrentUser } from "../services/auth";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
@@ -39,8 +39,14 @@ export default function AdminLayout() {
           <NavLink to="/admin/productos" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
             <Truck size={20} className="mr-3" /> Productos
           </NavLink>
+          <NavLink to="/admin/categorias" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
+            <Tags size={20} className="mr-3" /> Categorias
+          </NavLink>
           <NavLink to="/admin/inventario" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
             <Boxes size={20} className="mr-3" /> Inventario
+          </NavLink>
+          <NavLink to="/admin/remachado" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
+            <Hammer size={20} className="mr-3" /> Remachado
           </NavLink>
           <NavLink to="/admin/clientes" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
             <Users size={20} className="mr-3" /> Clientes

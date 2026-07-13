@@ -16,6 +16,11 @@ export type CashClosingReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    gastoEfectivo: number;
+    gastoQr: number;
+    totalGastos: number;
+    netoEfectivo: number;
+    netoQr: number;
     montoDeclarado: number;
     diferencia: number;
   };
@@ -29,6 +34,11 @@ export type CashClosingReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    gastoEfectivo: number;
+    gastoQr: number;
+    totalGastos: number;
+    netoEfectivo: number;
+    netoQr: number;
     montoDeclarado: number;
     diferencia: number;
     notas?: string | null;
@@ -84,6 +94,12 @@ export type SalesHistoryReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    gastoEfectivo: number;
+    gastoQr: number;
+    totalGastos: number;
+    netoEfectivo: number;
+    netoQr: number;
+    totalDisponible: number;
   };
   productosVendidos: Array<{
     productoId: string;
@@ -118,6 +134,16 @@ export type SalesHistoryReport = {
         categoria?: { nombre: string };
       };
     }>;
+  }>;
+  gastos: Array<{
+    id: string;
+    motivo: string;
+    monto: number;
+    metodoPago: 'EFECTIVO' | 'QR';
+    notas?: string | null;
+    createdAt: string;
+    usuario?: { id: string; nombre: string; email: string };
+    sucursal?: { id: string; nombre: string };
   }>;
 };
 
