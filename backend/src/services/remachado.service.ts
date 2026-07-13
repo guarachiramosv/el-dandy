@@ -206,22 +206,25 @@ export class RemachadoService {
   }
 
   async createTrabajo(data: {
-    medidaId: string;
-    remacheId?: string | null;
     usuarioId: string;
     sucursalId: string;
     clienteId?: string | null;
     metodoPago: PaymentMethod;
     tipoVenta: SaleType;
     fechaVencimiento?: string | null;
-    tipoTrabajo: RemachadoTrabajoTipo;
-    cantidadRemaches?: number;
-    resorteProductoId?: string | null;
-    cantidadResortes?: number;
-    gomaProductoId?: string | null;
-    cantidadGomas?: number;
-    seguroProductoId?: string | null;
-    cantidadSeguros?: number;
+    trabajos: Array<{
+      medidaId: string;
+      remacheId?: string | null;
+      tipoTrabajo: RemachadoTrabajoTipo;
+      cantidadRemaches?: number;
+      resorteProductoId?: string | null;
+      cantidadResortes?: number;
+      gomaProductoId?: string | null;
+      cantidadGomas?: number;
+      seguroProductoId?: string | null;
+      cantidadSeguros?: number;
+      notas?: string | null;
+    }>;
     accesorios?: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>;
     notas?: string | null;
   }) {
@@ -244,33 +247,98 @@ export class RemachadoService {
         throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar remachados.'), { status: 409 });
       }
 
-      const medida = await tx.remachadoMedida.findUnique({ where: { id: data.medidaId } });
-      if (!medida || !medida.activo) throw Object.assign(new Error('Medida de balata no disponible'), { status: 404 });
+      const medidaIds = [...new Set(data.trabajos.map(t => t.medidaId))];
+      const remacheIds = [...new Set(data.trabajos.map(t => t.remacheId).filter(Boolean) as string[])];
 
-      const config = trabajoConfig(data.tipoTrabajo);
-      if (medida.stockJuegos < config.cantidadJuegos) {
-        throw Object.assign(new Error(`Stock insuficiente de balata ${medida.medida}. Disponible: ${medida.stockJuegos} juegos`), { status: 400 });
+      const [medidasDb, remachesDb] = await Promise.all([
+        tx.remachadoMedida.findMany({ where: { id: { in: medidaIds } } }),
+        tx.remachadoRemache.findMany({ where: { id: { in: remacheIds } } })
+      ]);
+
+      const medidaMap = new Map(medidasDb.map(m => [m.id, m]));
+      const remacheMap = new Map(remachesDb.map(r => [r.id, r]));
+
+      for (const t of data.trabajos) {
+        const m = medidaMap.get(t.medidaId);
+        if (!m || !m.activo) {
+          throw Object.assign(new Error('Medida de balata no disponible'), { status: 404 });
+        }
       }
 
-      const remache = data.remacheId ? await tx.remachadoRemache.findUnique({ where: { id: data.remacheId } }) : null;
-      const cantidadRemaches = data.tipoTrabajo === 'MEDIO_JUEGO'
-        ? medida.remachesPorMedioJuego
-        : medida.remachesPorJuego;
-      if (remache && remache.stock < cantidadRemaches) {
-        throw Object.assign(new Error(`Stock insuficiente de remaches ${remache.codigo}. Disponible: ${remache.stock}`), { status: 400 });
+      let total = 0;
+      const accessoryInputs: Array<{ role: string; productoId: string; cantidad: number; precioUnitario: number }> = [];
+
+      if (data.accesorios) {
+        for (const acc of data.accesorios) {
+          if (acc.cantidad > 0) {
+            accessoryInputs.push({
+              role: 'producto',
+              productoId: acc.productoId,
+              cantidad: acc.cantidad,
+              precioUnitario: acc.precioUnitario ?? 0,
+            });
+            total += acc.cantidad * (acc.precioUnitario ?? 0);
+          }
+        }
       }
 
-      const accessoryInputs = [
-        { role: 'resorte', productoId: data.resorteProductoId || null, cantidad: data.cantidadResortes ?? config.resortes, precioUnitario: 0 },
-        { role: 'goma', productoId: data.gomaProductoId || null, cantidad: data.cantidadGomas ?? config.gomas, precioUnitario: 0 },
-        { role: 'seguro', productoId: data.seguroProductoId || null, cantidad: data.cantidadSeguros ?? config.seguros, precioUnitario: 0 },
-        ...(data.accesorios || []).map((item) => ({
-          role: 'producto',
-          productoId: item.productoId,
-          cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario ?? 0,
-        })),
-      ].filter((item) => item.productoId && item.cantidad > 0) as Array<{ role: string; productoId: string; cantidad: number; precioUnitario: number }>;
+      const processedTrabajos = data.trabajos.map((t) => {
+        const config = trabajoConfig(t.tipoTrabajo);
+        const medida = medidaMap.get(t.medidaId)!;
+        const remache = t.remacheId ? remacheMap.get(t.remacheId) : null;
+        const cantidadRemaches = t.tipoTrabajo === 'MEDIO_JUEGO'
+          ? medida.remachesPorMedioJuego
+          : medida.remachesPorJuego;
+
+        const pUnitario = t.tipoTrabajo === 'MEDIO_JUEGO' ? medida.precioMedioJuego : medida.precioJuego;
+        const descripcion = `Remachado ${medida.medida} - ${t.tipoTrabajo === 'MEDIO_JUEGO' ? '1/2 juego' : '1 juego'}`;
+        
+        const tAccessories = [
+          { role: 'resorte', productoId: t.resorteProductoId || null, cantidad: t.cantidadResortes ?? config.resortes, precioUnitario: 0 },
+          { role: 'goma', productoId: t.gomaProductoId || null, cantidad: t.cantidadGomas ?? config.gomas, precioUnitario: 0 },
+          { role: 'seguro', productoId: t.seguroProductoId || null, cantidad: t.cantidadSeguros ?? config.seguros, precioUnitario: 0 },
+        ].filter(item => item.productoId && item.cantidad > 0) as Array<{ role: string; productoId: string; cantidad: number; precioUnitario: number }>;
+        
+        tAccessories.forEach(a => accessoryInputs.push(a));
+        
+        total += pUnitario;
+
+        return {
+          original: t,
+          config,
+          medida,
+          remache,
+          cantidadRemaches,
+          precioUnitario: pUnitario,
+          descripcion,
+          totalTrabajo: pUnitario,
+        };
+      });
+
+      const medidaDeductions = new Map<string, number>();
+      for (const pt of processedTrabajos) {
+        medidaDeductions.set(pt.medida.id, (medidaDeductions.get(pt.medida.id) || 0) + pt.config.cantidadJuegos);
+      }
+      for (const [mId, deduction] of medidaDeductions.entries()) {
+        const m = medidaMap.get(mId)!;
+        if (m.stockJuegos < deduction) {
+          throw Object.assign(new Error(`Stock insuficiente de balata ${m.medida}. Disponible: ${m.stockJuegos}, requerido: ${deduction} juegos`), { status: 400 });
+        }
+      }
+
+      const remacheDeductions = new Map<string, number>();
+      for (const pt of processedTrabajos) {
+        if (pt.remache) {
+          remacheDeductions.set(pt.remache.id, (remacheDeductions.get(pt.remache.id) || 0) + pt.cantidadRemaches);
+        }
+      }
+      for (const [rId, deduction] of remacheDeductions.entries()) {
+        const r = remacheMap.get(rId)!;
+        if (r.stock < deduction) {
+          throw Object.assign(new Error(`Stock insuficiente de remaches ${r.codigo}. Disponible: ${r.stock}, requerido: ${deduction}`), { status: 400 });
+        }
+      }
+
       const accessoryTotals = Array.from(accessoryInputs.reduce((map, item) => {
         const current = map.get(item.productoId) || { productoId: item.productoId, cantidad: 0, roles: [] as string[] };
         current.cantidad += item.cantidad;
@@ -306,33 +374,47 @@ export class RemachadoService {
         }
       }
 
-      const precioUnitario = data.tipoTrabajo === 'MEDIO_JUEGO' ? medida.precioMedioJuego : medida.precioJuego;
-      const accesoriosTotal = accessoryInputs.reduce((sum, item) => sum + item.cantidad * item.precioUnitario, 0);
-      const total = precioUnitario + accesoriosTotal;
-      const descripcion = `Remachado ${medida.medida} - ${data.tipoTrabajo === 'MEDIO_JUEGO' ? '1/2 juego' : '1 juego'}`;
+      const trabajosCreated = [];
+      for (const pt of processedTrabajos) {
+        const trabajo = await tx.remachadoTrabajo.create({
+          data: {
+            medidaId: pt.medida.id,
+            remacheId: pt.remache?.id || null,
+            usuarioId: data.usuarioId,
+            sucursalId: data.sucursalId,
+            tipoTrabajo: pt.original.tipoTrabajo,
+            cantidadJuegos: pt.config.cantidadJuegos,
+            cantidadBalatas: pt.config.cantidadBalatas,
+            cantidadRemaches: pt.cantidadRemaches,
+            resorteProductoId: pt.original.resorteProductoId || null,
+            cantidadResortes: pt.original.resorteProductoId ? (pt.original.cantidadResortes ?? pt.config.resortes) : 0,
+            gomaProductoId: pt.original.gomaProductoId || null,
+            cantidadGomas: pt.original.gomaProductoId ? (pt.original.cantidadGomas ?? pt.config.gomas) : 0,
+            seguroProductoId: pt.original.seguroProductoId || null,
+            cantidadSeguros: pt.original.seguroProductoId ? (pt.original.cantidadSeguros ?? pt.config.seguros) : 0,
+            precioUnitario: pt.precioUnitario,
+            total: pt.totalTrabajo,
+            notas: pt.original.notas || null,
+          }
+        });
+        trabajosCreated.push(trabajo);
+      }
 
-      const trabajo = await tx.remachadoTrabajo.create({
-        data: {
-          medidaId: data.medidaId,
-          remacheId: data.remacheId || null,
-          usuarioId: data.usuarioId,
-          sucursalId: data.sucursalId,
-          tipoTrabajo: data.tipoTrabajo,
-          cantidadJuegos: config.cantidadJuegos,
-          cantidadBalatas: config.cantidadBalatas,
-          cantidadRemaches,
-          resorteProductoId: data.resorteProductoId || null,
-          cantidadResortes: data.resorteProductoId ? (data.cantidadResortes ?? config.resortes) : 0,
-          gomaProductoId: data.gomaProductoId || null,
-          cantidadGomas: data.gomaProductoId ? (data.cantidadGomas ?? config.gomas) : 0,
-          seguroProductoId: data.seguroProductoId || null,
-          cantidadSeguros: data.seguroProductoId ? (data.cantidadSeguros ?? config.seguros) : 0,
-          precioUnitario,
-          total,
-          notas: data.notas || null,
-        },
-      });
-
+      const ventaDetalles = [];
+      for (let i = 0; i < processedTrabajos.length; i++) {
+        const pt = processedTrabajos[i];
+        const tb = trabajosCreated[i];
+        ventaDetalles.push({
+          tipoLinea: 'REMACHADO' as const,
+          descripcion: pt.descripcion,
+          unidadVenta: pt.original.tipoTrabajo,
+          cantidad: pt.config.cantidadJuegos,
+          precioUnitario: pt.precioUnitario,
+          subtotal: pt.precioUnitario,
+          remachadoTrabajoId: tb.id,
+        });
+      }
+      
       const accessoryDetailLines = accessoryInputs.map((accessory) => {
         const producto = accessoryProductMap.get(accessory.productoId)!;
         return {
@@ -357,52 +439,53 @@ export class RemachadoService {
           descuento: 0,
           total,
           detalles: {
-            create: [
-              {
-                tipoLinea: 'REMACHADO',
-                descripcion,
-                unidadVenta: data.tipoTrabajo,
-                cantidad: config.cantidadJuegos,
-                precioUnitario,
-                subtotal: precioUnitario,
-                remachadoTrabajoId: trabajo.id,
-              },
-              ...accessoryDetailLines,
-            ],
+            create: [...ventaDetalles, ...accessoryDetailLines]
           },
         },
       });
 
-      await tx.remachadoTrabajo.update({ where: { id: trabajo.id }, data: { ventaId: venta.id } });
-
-      const stockBalataNuevo = medida.stockJuegos - config.cantidadJuegos;
-      await tx.remachadoMedida.update({ where: { id: medida.id }, data: { stockJuegos: stockBalataNuevo } });
-      await tx.remachadoMovimiento.create({
-        data: {
-          tipo: 'TRABAJO',
-          medidaId: medida.id,
-          trabajoId: trabajo.id,
-          usuarioId: data.usuarioId,
-          stockAnterior: medida.stockJuegos,
-          stockNuevo: stockBalataNuevo,
-          cantidad: -config.cantidadJuegos,
-          notas: descripcion,
-        },
+      await tx.remachadoTrabajo.updateMany({
+        where: { id: { in: trabajosCreated.map(t => t.id) } },
+        data: { ventaId: venta.id }
       });
 
-      if (remache) {
-        const stockRemacheNuevo = remache.stock - cantidadRemaches;
-        await tx.remachadoRemache.update({ where: { id: remache.id }, data: { stock: stockRemacheNuevo } });
+      for (const [mId, deduction] of medidaDeductions.entries()) {
+        const m = medidaMap.get(mId)!;
+        const stockBalataNuevo = m.stockJuegos - deduction;
+        await tx.remachadoMedida.update({ where: { id: mId }, data: { stockJuegos: stockBalataNuevo } });
+        
+        // Registrar el movimiento de stock (apuntando al primer trabajo para referencia)
+        const matchedTrabajo = trabajosCreated.find(t => t.medidaId === mId);
         await tx.remachadoMovimiento.create({
           data: {
             tipo: 'TRABAJO',
-            remacheId: remache.id,
-            trabajoId: trabajo.id,
+            medidaId: mId,
+            trabajoId: matchedTrabajo?.id,
             usuarioId: data.usuarioId,
-            stockAnterior: remache.stock,
+            stockAnterior: m.stockJuegos,
+            stockNuevo: stockBalataNuevo,
+            cantidad: -deduction,
+            notas: `Venta de remachado (${deduction} juegos)`,
+          },
+        });
+      }
+
+      for (const [rId, deduction] of remacheDeductions.entries()) {
+        const r = remacheMap.get(rId)!;
+        const stockRemacheNuevo = r.stock - deduction;
+        await tx.remachadoRemache.update({ where: { id: rId }, data: { stock: stockRemacheNuevo } });
+        
+        const matchedTrabajo = trabajosCreated.find(t => t.remacheId === rId);
+        await tx.remachadoMovimiento.create({
+          data: {
+            tipo: 'TRABAJO',
+            remacheId: rId,
+            trabajoId: matchedTrabajo?.id,
+            usuarioId: data.usuarioId,
+            stockAnterior: r.stock,
             stockNuevo: stockRemacheNuevo,
-            cantidad: -cantidadRemaches,
-            notas: descripcion,
+            cantidad: -deduction,
+            notas: `Venta de remachado (${deduction} remaches)`,
           },
         });
       }
@@ -436,7 +519,7 @@ export class RemachadoService {
             usuarioId: data.usuarioId,
             referenciaId: venta.id,
             referenciaTipo: 'REMACHADO',
-            notas: `${descripcion} - ${accessory.roles.join(', ')}`,
+            notas: `Remachado - ${accessory.roles.join(', ')}`,
           },
         });
       }
@@ -456,7 +539,7 @@ export class RemachadoService {
       }
 
       return tx.remachadoTrabajo.findUnique({
-        where: { id: trabajo.id },
+        where: { id: trabajosCreated[0].id },
         include: trabajoInclude,
       });
     }, {

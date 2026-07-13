@@ -54,20 +54,23 @@ export const adjustRemachadoRemacheStock = async (id: string, data: {
 };
 
 export const createRemachadoTrabajo = async (data: {
-  medidaId: string;
-  remacheId?: string | null;
   usuarioId: string;
   sucursalId: string;
   clienteId?: string | null;
   metodoPago: PaymentMethod;
   tipoVenta: 'CONTADO' | 'CREDITO';
-  tipoTrabajo: 'JUEGO' | 'MEDIO_JUEGO';
-  resorteProductoId?: string | null;
-  cantidadResortes?: number;
-  gomaProductoId?: string | null;
-  cantidadGomas?: number;
-  seguroProductoId?: string | null;
-  cantidadSeguros?: number;
+  trabajos: Array<{
+    medidaId: string;
+    remacheId?: string | null;
+    tipoTrabajo: 'JUEGO' | 'MEDIO_JUEGO';
+    resorteProductoId?: string | null;
+    cantidadResortes?: number;
+    gomaProductoId?: string | null;
+    cantidadGomas?: number;
+    seguroProductoId?: string | null;
+    cantidadSeguros?: number;
+    notas?: string | null;
+  }>;
   accesorios?: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>;
   notas?: string | null;
 }): Promise<RemachadoTrabajo> => {
