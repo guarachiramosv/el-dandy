@@ -46,6 +46,12 @@ export default function Productos() {
   } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [pendingSaveProduct, setPendingSaveProduct] = useState<ProductFormData | null>(null);
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<{
+    product: Product;
+    sucursalId: string;
+    motivo: string;
+  } | null>(null);
   const [statusFilter, setStatusFilter] = useState<ProductStatusFilter | "deleted">('active');
   const productStatusFilter: ProductStatusFilter = statusFilter === "deleted" ? "active" : statusFilter;
   const { data: filteredFetchedProducts, loading: filteredLoading, error: filteredError } = useProducts(productStatusFilter);
@@ -155,9 +161,16 @@ export default function Productos() {
       return;
     }
 
+    setPendingDeleteAction({ product, sucursalId, motivo: deletionReason.trim() });
+  };
+
+  const confirmDeleteProduct = async () => {
+    if (!pendingDeleteAction) return;
+    const { product, sucursalId, motivo } = pendingDeleteAction;
+    const branch = getActionBranches(product).find((item) => item.sucursalId === sucursalId);
     setSavingProduct(true);
     try {
-      const updated = await deleteProduct(product.id, { sucursalId, motivo: deletionReason.trim() });
+      const updated = await deleteProduct(product.id, { sucursalId, motivo });
       if (statusFilter === "active" && updated.estado !== "ACTIVO") {
         setProducts(prev => prev.filter(p => p.id !== updated.id));
       } else {
@@ -166,6 +179,7 @@ export default function Productos() {
       const branchName = branch?.sucursal?.nombre || "la sucursal";
       setSaveError(`Producto enviado al historial de eliminacion en ${branchName}. Las otras sucursales se mantienen.`);
       setBranchAction(null);
+      setPendingDeleteAction(null);
       setDeletionReason("");
       if (statusFilter === "deleted") void loadDeletionHistory();
     } catch (err: unknown) {
@@ -205,24 +219,30 @@ export default function Productos() {
     }
   };
 
-  const handleSaveProduct = async (savedProduct: ProductFormData) => {
+  const handleSaveProduct = (savedProduct: ProductFormData) => {
+    setSaveError(null);
+    setPendingSaveProduct(savedProduct);
+  };
+
+  const confirmSaveProduct = async () => {
+    if (!pendingSaveProduct) return;
     setSaveError(null);
     setSavingProduct(true);
     try {
-      const imageFiles = savedProduct.imageFiles;
-      const productPayload: Partial<ProductFormData> = { ...savedProduct };
+      const imageFiles = pendingSaveProduct.imageFiles;
+      const productPayload: Partial<ProductFormData> = { ...pendingSaveProduct };
       delete productPayload.imageFiles;
       if (modalMode !== "CREATE") {
         delete productPayload.stock;
         delete productPayload.sucursalId;
       }
-      const normalizedCode = savedProduct.codigo.trim().toLowerCase();
+      const normalizedCode = pendingSaveProduct.codigo.trim().toLowerCase();
       const duplicatedProduct = products.find((product) =>
         product.codigo.trim().toLowerCase() === normalizedCode &&
         product.id !== selectedProduct?.id
       );
       if (duplicatedProduct) {
-        throw new Error(`Ya existe el codigo ${savedProduct.codigo} como ${duplicatedProduct.descripcion}. Usa el boton + para agregar stock en otra sucursal.`);
+        throw new Error(`Ya existe el codigo ${pendingSaveProduct.codigo} como ${duplicatedProduct.descripcion}. Usa el boton + para agregar stock en otra sucursal.`);
       }
       if (modalMode === "CREATE") {
         const created = await createProduct(productPayload as Omit<Product, "id" | "createdAt" | "updatedAt">);
@@ -233,9 +253,11 @@ export default function Productos() {
         const withImage = imageFiles?.length ? (await uploadProductImages(updated.id, imageFiles)).product : updated;
         setProducts(prev => prev.map(p => (p.id === withImage.id ? withImage : p)));
       }
+      setPendingSaveProduct(null);
       setModalOpen(false);
     } catch (err: unknown) {
       setSaveError(getErrorMessage(err));
+      setPendingSaveProduct(null);
     } finally {
       setSavingProduct(false);
     }
@@ -362,6 +384,78 @@ export default function Productos() {
           onConfirm={runBranchAction}
         />
       )}
+
+      {pendingSaveProduct && (
+        <ConfirmProductActionModal
+          title={modalMode === "CREATE" ? "Crear producto" : "Guardar cambios"}
+          message={
+            modalMode === "CREATE"
+              ? `Deseas crear el producto "${pendingSaveProduct.descripcion}"?`
+              : `Deseas guardar los cambios de "${pendingSaveProduct.descripcion}"?`
+          }
+          confirmLabel={modalMode === "CREATE" ? "Si, crear" : "Si, guardar"}
+          saving={savingProduct}
+          onCancel={() => setPendingSaveProduct(null)}
+          onConfirm={confirmSaveProduct}
+        />
+      )}
+
+      {pendingDeleteAction && (
+        <ConfirmProductActionModal
+          title="Eliminar producto"
+          message={`Deseas enviar "${pendingDeleteAction.product.descripcion}" al historial de eliminacion? Esta accion no registrara venta y conservara el motivo indicado.`}
+          confirmLabel="Si, eliminar"
+          danger
+          saving={savingProduct}
+          onCancel={() => setPendingDeleteAction(null)}
+          onConfirm={confirmDeleteProduct}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmProductActionModal({
+  title,
+  message,
+  confirmLabel,
+  danger = false,
+  saving,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  saving: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={saving ? undefined : onCancel} />
+      <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+        <div className="border-b border-gray-700 bg-grafito-900/70 p-5">
+          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <p className="mt-1 text-sm text-gray-400">Confirma la accion antes de continuar.</p>
+        </div>
+        <div className="space-y-5 p-5">
+          <p className="text-gray-200">{message}</p>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button onClick={onCancel} disabled={saving} className="btn-secondary disabled:opacity-60">
+              Cancelar
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={saving}
+              className={`${danger ? "btn-danger" : "btn-primary"} disabled:opacity-60`}
+            >
+              {saving ? "Procesando..." : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

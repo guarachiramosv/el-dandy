@@ -1,10 +1,11 @@
 import api from './api';
-import { PaymentMethod, RemachadoMedida, RemachadoRemache, RemachadoTrabajo } from '../types';
+import { PaymentMethod, RemachadoMedida, RemachadoMovimiento, RemachadoRemache, RemachadoTrabajo } from '../types';
 
 export type RemachadoSummary = {
   medidas: RemachadoMedida[];
   remaches: RemachadoRemache[];
   trabajos: RemachadoTrabajo[];
+  movimientos: RemachadoMovimiento[];
 };
 
 export const fetchRemachadoSummary = async (): Promise<RemachadoSummary> => {
@@ -26,6 +27,20 @@ export const createRemachadoMedida = async (data: {
   return response.data.data;
 };
 
+export const updateRemachadoMedida = async (id: string, data: Partial<{
+  medida: string;
+  descripcion?: string | null;
+  stockJuegos?: number;
+  stockMinimoJuegos?: number;
+  precioJuego: number;
+  precioMedioJuego: number;
+  remachesPorJuego?: number;
+  remachesPorMedioJuego?: number;
+}>): Promise<RemachadoMedida> => {
+  const response = await api.patch<{ success: boolean; data: RemachadoMedida }>(`/remachado/medidas/${id}`, data);
+  return response.data.data;
+};
+
 export const adjustRemachadoMedidaStock = async (id: string, data: {
   cantidadJuegos: number;
   notas?: string | null;
@@ -42,6 +57,17 @@ export const createRemachadoRemache = async (data: {
   stockMinimo?: number;
 }): Promise<RemachadoRemache> => {
   const response = await api.post<{ success: boolean; data: RemachadoRemache }>('/remachado/remaches', data);
+  return response.data.data;
+};
+
+export const updateRemachadoRemache = async (id: string, data: Partial<{
+  codigo: string;
+  nombre: string;
+  medida?: string | null;
+  stock?: number;
+  stockMinimo?: number;
+}>): Promise<RemachadoRemache> => {
+  const response = await api.patch<{ success: boolean; data: RemachadoRemache }>(`/remachado/remaches/${id}`, data);
   return response.data.data;
 };
 
@@ -73,6 +99,7 @@ export const createRemachadoTrabajo = async (data: {
   }>;
   accesorios?: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>;
   notas?: string | null;
+  descuento?: number;
 }): Promise<RemachadoTrabajo> => {
   const response = await api.post<{ success: boolean; data: RemachadoTrabajo }>('/remachado/trabajos', data);
   return response.data.data;

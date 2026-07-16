@@ -36,8 +36,8 @@ export const adjustRemachadoRemacheStockSchema = z.object({
 });
 
 export const createRemachadoTrabajoSchema = z.object({
-  usuarioId: uuidSchema,
-  sucursalId: uuidSchema,
+  usuarioId: uuidSchema.optional(),
+  sucursalId: uuidSchema.optional(),
   clienteId: uuidSchema.optional().nullable(),
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA']).default('EFECTIVO'),
   tipoVenta: z.enum(['CONTADO', 'CREDITO']).default('CONTADO'),
@@ -61,4 +61,5 @@ export const createRemachadoTrabajoSchema = z.object({
     precioUnitario: z.number().min(0).default(0),
   })).optional(),
   notas: z.string().trim().max(300).optional().nullable(),
+  descuento: z.number().min(0).optional().default(0),
 });

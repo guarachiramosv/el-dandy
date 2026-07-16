@@ -61,7 +61,7 @@ const trabajoInclude = {
 
 export class RemachadoService {
   async summary() {
-    const [medidas, remaches, trabajos] = await Promise.all([
+    const [medidas, remaches, trabajos, movimientos] = await Promise.all([
       prisma.remachadoMedida.findMany({ orderBy: { medida: 'asc' } }),
       prisma.remachadoRemache.findMany({ orderBy: { codigo: 'asc' } }),
       prisma.remachadoTrabajo.findMany({
@@ -69,8 +69,13 @@ export class RemachadoService {
         orderBy: { createdAt: 'desc' },
         take: 100,
       }),
+      prisma.remachadoMovimiento.findMany({
+        include: { medida: true, remache: true, usuario: { select: { nombre: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
     ]);
-    return { medidas, remaches, trabajos };
+    return { medidas, remaches, trabajos, movimientos };
   }
 
   async createMedida(data: {
@@ -227,6 +232,7 @@ export class RemachadoService {
     }>;
     accesorios?: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>;
     notas?: string | null;
+    descuento?: number;
   }) {
     return prisma.$transaction(async (tx) => {
       if (data.tipoVenta === 'CREDITO' && !data.clienteId) {
@@ -436,8 +442,8 @@ export class RemachadoService {
           metodoPago: data.metodoPago,
           tipoVenta: data.tipoVenta,
           subtotal: total,
-          descuento: 0,
-          total,
+          descuento: data.descuento || 0,
+          total: total - (data.descuento || 0),
           detalles: {
             create: [...ventaDetalles, ...accessoryDetailLines]
           },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, Box, Download, History, Printer, Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ArrowRightLeft, Box, Download, Eye, History, ImageIcon, Printer, Search, ShoppingCart, X } from "lucide-react";
 import { Product, StockMovement } from "../types";
 import { useProducts } from "../hooks/useProducts";
 import { fetchStockMovements, transferStock } from "../services/inventory";
@@ -20,9 +21,16 @@ const valueForPeriod = (period: ReportPeriod, day: string, month: string, year: 
   return day;
 };
 
+const sanitizePdfText = (value: string) =>
+  Array.from(value)
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return (code >= 32 && code <= 126) || (code >= 160 && code <= 255) ? char : " ";
+    })
+    .join("");
+
 const cleanPdfText = (value: string | number | null | undefined) =>
-  String(value ?? "")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, " ")
+  sanitizePdfText(String(value ?? ""))
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
@@ -165,6 +173,7 @@ const downloadInventoryPdf = (report: ProductInventoryReport) => {
 };
 
 export default function Inventario() {
+  const navigate = useNavigate();
   const user = getCurrentUser();
   const isSeller = user?.role === "SELLER";
   const { data: products, loading, error } = useProducts("active", {
@@ -179,6 +188,7 @@ export default function Inventario() {
   const [cantidad, setCantidad] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; alt: string } | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [printPeriod, setPrintPeriod] = useState<ReportPeriod>("day");
   const [printDay, setPrintDay] = useState(defaultDay);
   const [printMonth, setPrintMonth] = useState(defaultMonth);
@@ -211,7 +221,23 @@ export default function Inventario() {
   }, [products, searchTerm]);
 
   const getCoverImage = (product: Product) => product.imagenes?.[0]?.url || product.imagen;
+  const getProductImages = (product: Product) => {
+    const urls = [
+      ...(product.imagenes?.map((image) => image.url) || []),
+      product.imagen,
+    ].filter((url): url is string => Boolean(url));
+    return Array.from(new Set(urls)).map((url) => productImageUrl(url)).filter((url): url is string => Boolean(url));
+  };
   const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
+
+  const sendToPointOfSale = (product: Product) => {
+    if (!isSeller) return;
+    if (product.stock <= 0) {
+      setMessage("Este producto no tiene stock disponible para vender.");
+      return;
+    }
+    navigate("/seller/ventas", { state: { addProductId: product.id } });
+  };
 
   const submitTransfer = async () => {
     if (!user) return setMessage("Sesion requerida");
@@ -348,9 +374,11 @@ export default function Inventario() {
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Producto</th>
                   <th className="p-3">Sucursal</th>
+                  <th className="p-3">Estante</th>
                   <th className="p-3">Stock</th>
                   <th className="p-3">Minimo</th>
                   <th className="p-3 text-right">Precio</th>
+                  <th className="p-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -381,13 +409,40 @@ export default function Inventario() {
                       </td>
                       <td className="p-3 text-gray-300">
                         <span className="block">{product.sucursal?.nombre}</span>
-                        <span className="text-xs text-gray-500">{product.ubicacion || "Sin ubicacion"}</span>
+                      </td>
+                      <td className="p-3">
+                        <span className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-3 py-1 text-sm font-bold text-primary-light">
+                          {product.ubicacion || "Sin ubicacion"}
+                        </span>
                       </td>
                       <td className={`p-3 font-bold ${product.stock <= (product.stockMinimo || 5) ? "text-red-300" : "text-green-300"}`}>
                         {product.stock} {getUnitLabel(product)}
                       </td>
                       <td className="p-3 text-gray-300">{product.stockMinimo || 5} {getUnitLabel(product)}</td>
                       <td className="p-3 text-right text-primary-light">Bs {product.precioVenta.toLocaleString()}</td>
+                      <td className="p-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProduct(product)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-grafito-900/80 text-gray-300 transition-colors hover:border-primary/40 hover:text-white"
+                            title="Ver detalle del producto"
+                          >
+                            <Eye size={17} />
+                          </button>
+                          {isSeller && (
+                            <button
+                              type="button"
+                              onClick={() => sendToPointOfSale(product)}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary-gradient px-3 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-opacity hover:opacity-90 disabled:opacity-50"
+                              disabled={product.stock <= 0}
+                              title="Llevar al carrito"
+                            >
+                              <ShoppingCart size={17} /> Vender
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -462,7 +517,141 @@ export default function Inventario() {
       </div>
 
       {!isSeller && <InventoryPrintArea report={inventoryReport} />}
+      {selectedProduct && (
+        <ProductDetailModal
+          product={selectedProduct}
+          images={getProductImages(selectedProduct)}
+          isSeller={isSeller}
+          unitLabel={getUnitLabel(selectedProduct)}
+          onClose={() => setSelectedProduct(null)}
+          onSendToSale={() => sendToPointOfSale(selectedProduct)}
+          onOpenImage={(url) => setLightboxImage({ url, alt: selectedProduct.descripcion })}
+        />
+      )}
       <ImageLightbox imageUrl={lightboxImage?.url || null} alt={lightboxImage?.alt} onClose={() => setLightboxImage(null)} />
+    </div>
+  );
+}
+
+function ProductDetailModal({
+  product,
+  images,
+  isSeller,
+  unitLabel,
+  onClose,
+  onSendToSale,
+  onOpenImage,
+}: {
+  product: Product;
+  images: string[];
+  isSeller: boolean;
+  unitLabel: string;
+  onClose: () => void;
+  onSendToSale: () => void;
+  onOpenImage: (url: string) => void;
+}) {
+  const stockMinimo = product.stockMinimo || 5;
+  const lowStock = product.stock <= stockMinimo;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={onClose} aria-label="Cerrar detalle" />
+      <div className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+        <div className="flex items-center justify-between border-b border-gray-700 bg-grafito-900/80 p-5">
+          <div>
+            <p className="text-sm font-semibold uppercase text-primary-light">Detalle de producto</p>
+            <h3 className="mt-1 text-xl font-black text-white">{product.descripcion}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-grafito-700 hover:text-white">
+            <X size={22} />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 gap-5 overflow-y-auto p-5 lg:grid-cols-[360px_1fr]">
+          <div className="space-y-3">
+            {images.length > 0 ? (
+              <>
+                <button type="button" onClick={() => onOpenImage(images[0])} className="block w-full overflow-hidden rounded-xl border border-gray-700 bg-grafito-900">
+                  <img src={images[0]} alt={product.descripcion} className="h-72 w-full object-cover" />
+                </button>
+                {images.length > 1 && (
+                  <div className="grid grid-cols-4 gap-2">
+                    {images.map((image) => (
+                      <button key={image} type="button" onClick={() => onOpenImage(image)} className="overflow-hidden rounded-lg border border-gray-700 bg-grafito-900">
+                        <img src={image} alt={product.descripcion} className="h-20 w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex h-72 flex-col items-center justify-center rounded-xl border border-gray-700 bg-grafito-900 text-gray-500">
+                <ImageIcon size={38} />
+                <span className="mt-2 text-sm">Sin imagen registrada</span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <DetailCard label="Codigo" value={product.codigo} />
+              <DetailCard label="Codigo repuesto" value={product.codigoRepuesto || "Sin codigo"} />
+              <DetailCard label="Marca" value={product.marca || "Sin marca"} />
+              <DetailCard label="Categoria" value={product.categoria?.nombre || "Sin categoria"} />
+              <DetailCard label="Sucursal" value={product.sucursal?.nombre || "Sin sucursal"} />
+              <DetailCard label="Estante" value={product.ubicacion || "Sin ubicacion"} highlight />
+              <DetailCard label="Condicion" value={product.condicion} />
+              <DetailCard label="Precio venta" value={`Bs ${product.precioVenta.toLocaleString("es-BO")}`} highlight />
+              <DetailCard label="Precio compra" value={`Bs ${product.precioCompra.toLocaleString("es-BO")}`} />
+            </div>
+
+            <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm uppercase text-gray-500">Stock disponible</p>
+                  <p className={`mt-1 text-3xl font-black ${lowStock ? "text-red-300" : "text-green-300"}`}>
+                    {product.stock} {unitLabel}
+                  </p>
+                </div>
+                <div className="text-sm text-gray-400">
+                  Minimo: <span className="font-bold text-gray-200">{stockMinimo} {unitLabel}</span>
+                </div>
+              </div>
+            </div>
+
+            {product.stockSucursales && product.stockSucursales.length > 0 && (
+              <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+                <p className="mb-3 text-sm font-bold uppercase text-gray-400">Stock por sucursal</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {product.stockSucursales.map((item) => (
+                    <div key={item.id} className="rounded-lg border border-gray-800 bg-black/20 p-3">
+                      <p className="font-semibold text-white">{item.sucursal?.nombre || "Sucursal"}</p>
+                      <p className="text-sm text-gray-400">{item.stock} {unitLabel} disponibles</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isSeller && (
+              <div className="flex justify-end">
+                <button type="button" onClick={onSendToSale} disabled={product.stock <= 0} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  <ShoppingCart size={18} /> Llevar al carrito
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailCard({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className={`rounded-xl border p-3 ${highlight ? "border-primary/30 bg-primary/10" : "border-gray-700 bg-grafito-900/50"}`}>
+      <p className="text-xs uppercase text-gray-500">{label}</p>
+      <p className={`mt-1 font-bold ${highlight ? "text-primary-light" : "text-white"}`}>{value}</p>
     </div>
   );
 }

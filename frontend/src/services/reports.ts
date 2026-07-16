@@ -2,6 +2,13 @@ import api from './api';
 
 export type ReportPeriod = 'day' | 'month' | 'year';
 
+type ReportUser = {
+  id: string;
+  nombre: string;
+  email: string;
+  sucursal?: { id: string; nombre: string };
+};
+
 export type CashClosingReport = {
   period: ReportPeriod;
   label: string;
@@ -42,7 +49,7 @@ export type CashClosingReport = {
     montoDeclarado: number;
     diferencia: number;
     notas?: string | null;
-    usuario?: { id: string; nombre: string; email: string };
+    usuario?: ReportUser;
     sucursal?: { id: string; nombre: string };
     createdAt: string;
   }>;
@@ -100,6 +107,12 @@ export type SalesHistoryReport = {
     netoEfectivo: number;
     netoQr: number;
     totalDisponible: number;
+    cantidadCierres?: number;
+    montoDeclarado?: number;
+    diferencia?: number;
+    totalCierreVentas?: number;
+    cierreEfectivo?: number;
+    cierreQr?: number;
   };
   productosVendidos: Array<{
     productoId: string;
@@ -119,7 +132,7 @@ export type SalesHistoryReport = {
     metodoPago: string;
     tipoVenta: string;
     createdAt: string;
-    usuario?: { id: string; nombre: string; email: string };
+    usuario?: ReportUser;
     sucursal?: { id: string; nombre: string };
     cliente?: { id: string; nombre: string } | null;
     detalles?: Array<{
@@ -142,9 +155,10 @@ export type SalesHistoryReport = {
     metodoPago: 'EFECTIVO' | 'QR';
     notas?: string | null;
     createdAt: string;
-    usuario?: { id: string; nombre: string; email: string };
+    usuario?: ReportUser;
     sucursal?: { id: string; nombre: string };
   }>;
+  cierres: CashClosingReport['cierres'];
 };
 
 export const fetchCashClosingReport = async (params: {

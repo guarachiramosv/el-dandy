@@ -107,6 +107,9 @@ export class ProductService {
         { codigo: { contains: search, mode: 'insensitive' } },
         { codigoRepuesto: { contains: search, mode: 'insensitive' } },
         { marca: { contains: search, mode: 'insensitive' } },
+        { ubicacion: { contains: search, mode: 'insensitive' } },
+        { categoria: { nombre: { contains: search, mode: 'insensitive' } } },
+        { sucursal: { nombre: { contains: search, mode: 'insensitive' } } },
       ] });
     }
     if (and.length > 0) where.AND = and;
@@ -172,7 +175,7 @@ export class ProductService {
     });
   }
 
-  async create(data: Prisma.ProductoUncheckedCreateInput) {
+  async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }) {
     if (typeof data.codigoRepuesto === 'string') {
       data.codigoRepuesto = data.codigoRepuesto.trim() || null;
     }
@@ -180,10 +183,14 @@ export class ProductService {
       ? data.marca.trim()
       : DEFAULT_PRODUCT_BRAND;
     const initialStock = typeof data.stock === 'number' ? data.stock : 0;
+    
+    // Remove deletedImageUrls so it's not passed to Prisma during creation
+    const { deletedImageUrls, ...createData } = data as any;
+
     return prisma.$transaction(async (tx) => {
-      data.codigo = await this.nextSequentialCode(tx);
+      createData.codigo = await this.nextSequentialCode(tx);
       const product = await tx.producto.create({
-        data: { ...data, stock: initialStock },
+        data: { ...createData, stock: initialStock },
         include: productInclude,
       });
       await tx.productoStockSucursal.create({
@@ -224,7 +231,10 @@ export class ProductService {
         await tx.productoImagen.deleteMany({
           where: { productoId: id, url: { in: data.deletedImageUrls } },
         });
-        if (current.imagen && data.deletedImageUrls.includes(current.imagen)) {
+        if (
+          (current.imagen && data.deletedImageUrls.includes(current.imagen)) ||
+          (updateData.imagen && data.deletedImageUrls.includes(updateData.imagen))
+        ) {
           const remainingImages = await tx.productoImagen.findMany({
             where: { productoId: id },
             orderBy: { orden: 'asc' },

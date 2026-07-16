@@ -58,11 +58,20 @@ export const adjustRemacheStock = asyncHandler(async (req: Request, res: Respons
 });
 
 export const createTrabajo = asyncHandler(async (req: Request, res: Response) => {
-  const parsed = createRemachadoTrabajoSchema.parse(req.body);
-  const data = await service.createTrabajo({
-    ...parsed,
-    usuarioId: req.user?.id ?? parsed.usuarioId,
-    sucursalId: req.user?.role === 'SELLER' && req.user.sucursalId ? req.user.sucursalId : parsed.sucursalId,
-  });
-  res.status(201).json({ success: true, data });
+  try {
+    const parsed = createRemachadoTrabajoSchema.parse(req.body);
+    const data = await service.createTrabajo({
+      ...parsed,
+      usuarioId: (req.user?.id ?? parsed.usuarioId) as string,
+      sucursalId: (req.user?.role === 'SELLER' && req.user.sucursalId ? req.user.sucursalId : parsed.sucursalId) as string,
+    });
+    res.status(201).json({ success: true, data });
+  } catch (error: any) {
+    console.log("PAYLOAD RECEIVED:", JSON.stringify(req.body, null, 2));
+    if (error.issues) {
+      console.log("ZOD ERRORS:", JSON.stringify(error.issues, null, 2));
+      throw new Error("Validation Error: " + error.issues.map((i: any) => `${i.path.join('.')}: ${i.message}`).join(', '));
+    }
+    throw error;
+  }
 });

@@ -392,3 +392,21 @@ export interface RemachadoTrabajo {
   notas?: string | null;
   createdAt: string;
 }
+
+export interface RemachadoMovimiento {
+  id: string;
+  tipo: 'INGRESO' | 'AJUSTE' | 'TRABAJO' | 'VENTA';
+  medidaId?: string | null;
+  medida?: RemachadoMedida | null;
+  remacheId?: string | null;
+  remache?: RemachadoRemache | null;
+  trabajoId?: string | null;
+  trabajo?: RemachadoTrabajo | null;
+  usuarioId?: string | null;
+  usuario?: Pick<User, 'id' | 'nombre'> | null;
+  stockAnterior: number;
+  stockNuevo: number;
+  cantidad: number;
+  notas?: string | null;
+  createdAt: string;
+}

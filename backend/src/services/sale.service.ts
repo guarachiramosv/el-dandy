@@ -45,6 +45,13 @@ type ProductWithBranchStock = Prisma.ProductoGetPayload<{
 }>;
 
 function getBusinessDay(dateValue?: string | null) {
+  if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    const start = new Date(Date.UTC(year, month - 1, day, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0));
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end, label: dateValue };
+  }
+
   const base = dateValue ? new Date(dateValue) : new Date();
   if (Number.isNaN(base.getTime())) {
     throw Object.assign(new Error('Fecha invalida'), { status: 400 });
@@ -58,6 +65,16 @@ function getBusinessDay(dateValue?: string | null) {
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   const label = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return { start, end, label };
+}
+
+function sellerBusinessDayScope(usuarioId: string, sucursalId: string) {
+  return {
+    usuarioId,
+    OR: [
+      { sucursalId },
+      { usuario: { sucursalId } },
+    ],
+  };
 }
 
 function emptyTotals() {
@@ -118,6 +135,17 @@ function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId:
 }
 
 export class SaleService {
+  async updatePaymentMethod(id: string, metodoPago: PaymentMethod) {
+    if (metodoPago !== 'EFECTIVO' && metodoPago !== 'QR') {
+      throw Object.assign(new Error('Solo se permite cambiar a EFECTIVO o QR'), { status: 400 });
+    }
+    
+    return prisma.venta.update({
+      where: { id },
+      data: { metodoPago }
+    });
+  }
+
   async getAll() {
     return prisma.venta.findMany({
       include: {
@@ -141,13 +169,10 @@ export class SaleService {
       }
 
       const businessDay = getBusinessDay();
-      const cierre = await tx.cierreCaja.findUnique({
+      const cierre = await tx.cierreCaja.findFirst({
         where: {
-          fecha_usuarioId_sucursalId: {
-            fecha: businessDay.start,
-            usuarioId: data.usuarioId,
-            sucursalId: data.sucursalId,
-          },
+          fecha: businessDay.start,
+          ...sellerBusinessDayScope(data.usuarioId, data.sucursalId),
         },
       });
       if (cierre) {
@@ -278,10 +303,17 @@ export class SaleService {
 
   async getDailySummary(params: { usuarioId: string; sucursalId: string; fecha?: string | null }) {
     const businessDay = getBusinessDay(params.fecha);
-    const where = {
-      usuarioId: params.usuarioId,
-      sucursalId: params.sucursalId,
+    const where: Prisma.VentaWhereInput = {
+      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
       createdAt: { gte: businessDay.start, lt: businessDay.end },
+    };
+    const expenseWhere: Prisma.GastoCajaWhereInput = {
+      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
+      createdAt: { gte: businessDay.start, lt: businessDay.end },
+    };
+    const closingWhere: Prisma.CierreCajaWhereInput = {
+      fecha: businessDay.start,
+      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
     };
 
     const [ventas, cierre, gastos] = await Promise.all([
@@ -296,17 +328,9 @@ export class SaleService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.cierreCaja.findUnique({
-        where: {
-          fecha_usuarioId_sucursalId: {
-            fecha: businessDay.start,
-            usuarioId: params.usuarioId,
-            sucursalId: params.sucursalId,
-          },
-        },
-      }),
+      prisma.cierreCaja.findFirst({ where: closingWhere }),
       prisma.gastoCaja.findMany({
-        where,
+        where: expenseWhere,
         include: {
           usuario: { select: { id: true, nombre: true, email: true } },
           sucursal: true,
@@ -351,13 +375,10 @@ export class SaleService {
 
   async createCashExpense(data: CreateCashExpenseInput) {
     const businessDay = getBusinessDay();
-    const cierre = await prisma.cierreCaja.findUnique({
+    const cierre = await prisma.cierreCaja.findFirst({
       where: {
-        fecha_usuarioId_sucursalId: {
-          fecha: businessDay.start,
-          usuarioId: data.usuarioId,
-          sucursalId: data.sucursalId,
-        },
+        fecha: businessDay.start,
+        ...sellerBusinessDayScope(data.usuarioId, data.sucursalId),
       },
     });
 

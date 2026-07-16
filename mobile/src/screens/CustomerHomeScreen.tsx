@@ -126,6 +126,8 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
   const renderProduct = ({ item }: { item: Product }) => {
     const imageUrl = productImageUrl(productImageUrls(item)[0]);
     const lowStock = item.stock <= (item.stockMinimo || 5);
+    const productBrand = item.marca?.trim() || 'Sin marca';
+    const fallbackLabel = (item.marca || item.descripcion || item.codigo || 'DD').slice(0, 2).toUpperCase();
 
     return (
       <Pressable onPress={() => setSelectedProduct(item)} style={styles.productCard}>
@@ -138,7 +140,7 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
           </Pressable>
         ) : (
           <View style={styles.productImageFallback}>
-            <Text style={styles.productImageFallbackText}>{item.marca.slice(0, 2).toUpperCase()}</Text>
+            <Text style={styles.productImageFallbackText}>{fallbackLabel}</Text>
           </View>
         )}
         <View style={styles.productInfo}>
@@ -152,7 +154,7 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
           </View>
           <Text style={styles.productName} numberOfLines={2}>{item.descripcion}</Text>
           <Text style={styles.productMeta} numberOfLines={1}>
-            {item.marca} · {item.categoria?.nombre || 'General'}
+            {productBrand} · {item.categoria?.nombre || 'General'}
           </Text>
           <View style={styles.productBottom}>
             <Text style={styles.storeName}>{item.sucursal?.nombre || 'Sucursal'}</Text>
@@ -263,7 +265,7 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
                     <Text style={styles.modalPrice}>{money(selectedProduct.precioVenta)}</Text>
                     
                     <View style={styles.detailGrid}>
-                      <Detail label="Marca" value={selectedProduct.marca} />
+                      <Detail label="Marca" value={selectedProduct.marca?.trim() || 'Sin marca'} />
                       <Detail label="Condición" value={selectedProduct.condicion} />
                       <Detail label="Categoría" value={selectedProduct.categoria?.nombre || 'General'} />
                       <Detail label="Sucursal" value={selectedProduct.sucursal?.nombre || 'Sucursal'} />

@@ -6,12 +6,14 @@ export const createSale = async (sale: SaleInput): Promise<Sale> => {
   return response.data.data;
 };
 
-export const fetchDailySalesSummary = async (): Promise<DailySalesSummary> => {
-  const response = await api.get<{ success: boolean; data: DailySalesSummary }>('/sales/daily-summary');
+export const fetchDailySalesSummary = async (fecha?: string): Promise<DailySalesSummary> => {
+  const response = await api.get<{ success: boolean; data: DailySalesSummary }>('/sales/daily-summary', {
+    params: fecha ? { fecha } : undefined,
+  });
   return response.data.data;
 };
 
-export const closeCashRegister = async (input: { montoDeclarado: number; notas?: string | null }): Promise<CashClosing> => {
+export const closeCashRegister = async (input: { fecha?: string; montoDeclarado: number; notas?: string | null }): Promise<CashClosing> => {
   const response = await api.post<{ success: boolean; data: CashClosing }>('/sales/close-cash', input);
   return response.data.data;
 };
@@ -23,5 +25,10 @@ export const createCashExpense = async (input: {
   notas?: string | null;
 }): Promise<CashExpense> => {
   const response = await api.post<{ success: boolean; data: CashExpense }>('/sales/expenses', input);
+  return response.data.data;
+};
+
+export const updateSalePaymentMethod = async (id: string, metodoPago: 'EFECTIVO' | 'QR'): Promise<Sale> => {
+  const response = await api.patch<{ success: boolean; data: Sale }>(`/sales/${id}/payment-method`, { metodoPago });
   return response.data.data;
 };

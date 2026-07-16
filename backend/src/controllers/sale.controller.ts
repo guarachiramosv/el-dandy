@@ -1,9 +1,22 @@
+import { PaymentMethod } from '@prisma/client';
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
 import { SaleService } from '../services/sale.service';
 import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema } from '../validators/saleValidator';
 
 const service = new SaleService();
+
+export const updatePaymentMethod = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { metodoPago } = req.body;
+  
+  if (!id || !metodoPago) {
+    return res.status(400).json({ success: false, error: 'ID y metodo de pago requeridos' });
+  }
+
+  const data = await service.updatePaymentMethod(String(id), metodoPago as PaymentMethod);
+  res.json({ success: true, data });
+});
 
 export const getAllSales = asyncHandler(async (_req: Request, res: Response) => {
   const data = await service.getAll();

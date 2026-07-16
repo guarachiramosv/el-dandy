@@ -2,17 +2,25 @@ import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer } from "lucide-react";
-import { getCurrentUser } from "../services/auth";
+import { clearSession, getCurrentUser } from "../services/auth";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
+import ConfirmLogoutModal from "../components/ConfirmLogoutModal";
 
 export default function AdminLayout() {
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const user = getCurrentUser();
 
   const handleLogout = () => {
+    setShowDropdown(false);
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
+    clearSession();
     navigate("/login");
   };
 
@@ -136,6 +144,9 @@ export default function AdminLayout() {
         
         {showPasswordModal && (
           <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
+        )}
+        {showLogoutConfirm && (
+          <ConfirmLogoutModal onCancel={() => setShowLogoutConfirm(false)} onConfirm={confirmLogout} />
         )}
       </div>
     </div>

@@ -116,14 +116,20 @@ export class ReportService {
     const gastosWhere: Prisma.GastoCajaWhereInput = {
       createdAt: { gte: range.start, lt: range.end },
     };
-    if (params.sucursalId) where.sucursalId = params.sucursalId;
-    if (params.sucursalId) gastosWhere.sucursalId = params.sucursalId;
+    const cierresWhere: Prisma.CierreCajaWhereInput = {
+      fecha: { gte: range.start, lt: range.end },
+    };
+    if (params.sucursalId) {
+      where.usuario = { sucursalId: params.sucursalId };
+      gastosWhere.usuario = { sucursalId: params.sucursalId };
+      cierresWhere.usuario = { sucursalId: params.sucursalId };
+    }
 
-    const [ventas, gastos] = await Promise.all([
+    const [ventas, gastos, cierres] = await Promise.all([
       prisma.venta.findMany({
         where,
         include: {
-          usuario: { select: { id: true, nombre: true, email: true } },
+          usuario: { select: { id: true, nombre: true, email: true, sucursal: true } },
           sucursal: true,
           cliente: true,
           detalles: {
@@ -137,10 +143,18 @@ export class ReportService {
       prisma.gastoCaja.findMany({
         where: gastosWhere,
         include: {
-          usuario: { select: { id: true, nombre: true, email: true } },
+          usuario: { select: { id: true, nombre: true, email: true, sucursal: true } },
           sucursal: true,
         },
         orderBy: { createdAt: 'asc' },
+      }),
+      prisma.cierreCaja.findMany({
+        where: cierresWhere,
+        include: {
+          usuario: { select: { id: true, nombre: true, email: true, sucursal: true } },
+          sucursal: true,
+        },
+        orderBy: [{ fecha: 'asc' }, { createdAt: 'asc' }],
       }),
     ]);
 
@@ -167,6 +181,16 @@ export class ReportService {
       if (gasto.metodoPago === 'EFECTIVO') totals.gastoEfectivo += gasto.monto;
       else if (gasto.metodoPago === 'QR') totals.gastoQr += gasto.monto;
     });
+    const cierreTotals = cierres.reduce((acc, cierre) => {
+      acc.cantidadCierres += 1;
+      acc.montoDeclarado += cierre.montoDeclarado;
+      acc.diferencia += cierre.diferencia;
+      acc.totalCierreVentas += cierre.totalVentas;
+      acc.cierreEfectivo += cierre.netoEfectivo;
+      acc.cierreQr += cierre.netoQr;
+      return acc;
+    }, { cantidadCierres: 0, montoDeclarado: 0, diferencia: 0, totalCierreVentas: 0, cierreEfectivo: 0, cierreQr: 0 });
+    Object.assign(totals, cierreTotals);
     totals.netoEfectivo = Math.max(totals.totalEfectivo - totals.gastoEfectivo, 0);
     totals.netoQr = Math.max(totals.totalQr - totals.gastoQr, 0);
     totals.totalDisponible =
@@ -187,6 +211,7 @@ export class ReportService {
     }>();
 
     ventas.forEach((venta) => {
+      const reportSucursalName = venta.usuario?.sucursal?.nombre || venta.sucursal?.nombre || 'Sucursal';
       venta.detalles.forEach((detalle) => {
         const product = detalle.producto;
         const productKey = detalle.productoId || detalle.descripcion || detalle.id;
@@ -196,7 +221,7 @@ export class ReportService {
           descripcion: product?.descripcion || detalle.descripcion || 'Detalle',
           marca: product?.marca || '',
           categoria: product?.categoria?.nombre || 'Sin categoria',
-          sucursal: product?.sucursal?.nombre || venta.sucursal?.nombre || 'Sucursal',
+          sucursal: reportSucursalName,
           cantidad: 0,
           total: 0,
         };
@@ -207,6 +232,18 @@ export class ReportService {
     });
 
     const productosVendidos = Array.from(productMap.values()).sort((a, b) => b.cantidad - a.cantidad);
+    const ventasReporte = ventas.map((venta) => ({
+      ...venta,
+      sucursal: venta.usuario?.sucursal || venta.sucursal,
+    }));
+    const gastosReporte = gastos.map((gasto) => ({
+      ...gasto,
+      sucursal: gasto.usuario?.sucursal || gasto.sucursal,
+    }));
+    const cierresReporte = cierres.map((cierre) => ({
+      ...cierre,
+      sucursal: cierre.usuario?.sucursal || cierre.sucursal,
+    }));
 
     return {
       period: params.period,
@@ -214,8 +251,9 @@ export class ReportService {
       desde: range.start,
       hasta: range.end,
       totals,
-      ventas,
-      gastos,
+      ventas: ventasReporte,
+      gastos: gastosReporte,
+      cierres: cierresReporte,
       productosVendidos,
     };
   }

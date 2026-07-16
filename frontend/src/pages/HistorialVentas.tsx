@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } from "lucide-react";
 import { CashClosing, DailySalesSummary, Sale } from "../types";
-import { closeCashRegister, createCashExpense, fetchDailySalesSummary } from "../services/sales";
+import { getCurrentUser } from "../services/auth";
+import { closeCashRegister, createCashExpense, fetchDailySalesSummary, updateSalePaymentMethod } from "../services/sales";
 import { getErrorMessage } from "../utils/errors";
+import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
 
 const money = (value: number) =>
   `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -10,7 +12,22 @@ const money = (value: number) =>
 const formatDateTime = (value: string) =>
   new Date(value).toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" });
 
+const defaultDay = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/La_Paz",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
+
+const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
+const productConditionClass = (condition?: string | null) =>
+  condition === "USADO"
+    ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+    : "border-green-500/40 bg-green-500/10 text-green-200";
+
 export default function HistorialVentas() {
+  const user = getCurrentUser();
+  const [reportDate, setReportDate] = useState(defaultDay);
   const [summary, setSummary] = useState<DailySalesSummary | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [declaredCash, setDeclaredCash] = useState(0);
@@ -27,7 +44,7 @@ export default function HistorialVentas() {
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchDailySalesSummary();
+      const data = await fetchDailySalesSummary(reportDate);
       setSummary(data);
       setDeclaredCash(data.cierre?.montoDeclarado ?? data.netos?.totalEfectivo ?? data.totals.totalEfectivo);
       setCloseNotes(data.cierre?.notas || "");
@@ -36,7 +53,7 @@ export default function HistorialVentas() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reportDate]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -49,7 +66,7 @@ export default function HistorialVentas() {
     setMessage(null);
     setClosingCash(true);
     try {
-      const closing = await closeCashRegister({ montoDeclarado: declaredCash, notas: closeNotes || null });
+      const closing = await closeCashRegister({ fecha: reportDate, montoDeclarado: declaredCash, notas: closeNotes || null });
       setMessage(`Caja cerrada correctamente. Diferencia: ${money(closing.diferencia)}.`);
       await loadSummary();
     } catch (err: unknown) {
@@ -87,49 +104,31 @@ export default function HistorialVentas() {
     }
   };
 
-  const printSale = (sale: Sale) => {
-    const printWindow = window.open("", "_blank", "width=420,height=720");
+  const fillBankDepositNote = () => {
+    const amount = money(expectedCash);
+    setDeclaredCash(expectedCash);
+    setCloseNotes(`Efectivo neto del dia (${amount}) entregado para deposito al banco. Ya no queda efectivo de ventas en caja.`);
+  };
+
+  const printCashClosing = () => {
+    if (!summary) return;
+    if (!summary.cerrado || !summary.cierre) {
+      return setMessage("Primero cierra caja para imprimir el reporte con el monto real cerrado.");
+    }
+    const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Detalle de venta ${sale.id}</title>
-          <style>
-            body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
-            h1 { font-size: 20px; margin: 0 0 4px; }
-            .muted { color: #555; font-size: 12px; }
-            .row { display: flex; justify-content: space-between; gap: 12px; }
-            table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 12px; }
-            th, td { border-bottom: 1px solid #ddd; padding: 8px 0; text-align: left; }
-            th:last-child, td:last-child { text-align: right; }
-            .total { margin-top: 16px; border-top: 2px solid #111; padding-top: 10px; font-size: 18px; font-weight: 700; }
-          </style>
-        </head>
-        <body>
-          <h1>El Dandy - Detalle de venta</h1>
-          <div class="muted">Venta: ${sale.id}</div>
-          <div class="muted">Fecha: ${formatDateTime(sale.createdAt)}</div>
-          <div class="muted">Cliente: ${sale.cliente?.nombre || "Cliente ocasional"}</div>
-          <table>
-            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
-            <tbody>
-              ${(sale.detalles || []).map(detail => `
-                <tr>
-                  <td>${detail.producto?.codigo || detail.tipoLinea || ""} - ${detail.producto?.descripcion || detail.descripcion || "Detalle"}</td>
-                  <td>${detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
-                  <td>${money(detail.precioUnitario)}</td>
-                  <td>${money(detail.subtotal)}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-          <div class="row total"><span>Total</span><span>${money(sale.total)}</span></div>
-        </body>
-      </html>
-    `);
+    printWindow.document.write(buildThermalCashClosingHtml(summary, user?.nombre || "", {
+      declaredCash,
+      notes: closeNotes || null,
+    }));
     printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+  };
+
+  const printSale = (sale: Sale) => {
+    const printWindow = window.open("", "_blank", "width=360,height=720");
+    if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
+    printWindow.document.write(buildThermalReceiptHtml(sale, user?.nombre || ""));
+    printWindow.document.close();
   };
 
   const grossCash = summary?.totals.totalEfectivo || 0;
@@ -144,10 +143,25 @@ export default function HistorialVentas() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <CalendarDays className="text-primary" /> Historial de ventas
-        </h2>
-        <p className="text-gray-400 text-sm mt-1">Ventas del dia, control de efectivo y cierre de caja.</p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+              <CalendarDays className="text-primary" /> Historial de ventas
+            </h2>
+            <p className="text-gray-400 text-sm mt-1">Ventas del dia, control de efectivo y cierre de caja.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              type="date"
+              value={reportDate}
+              onChange={(event) => setReportDate(event.target.value)}
+              className="premium-input h-11"
+            />
+            <button onClick={loadSummary} disabled={loading} className="btn-secondary h-11 disabled:opacity-60">
+              {loading ? "Cargando..." : "Actualizar dia"}
+            </button>
+          </div>
+        </div>
       </div>
 
       {message && <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-primary-light">{message}</div>}
@@ -317,6 +331,9 @@ export default function HistorialVentas() {
               <span>QR neto</span>
               <span className="font-semibold text-blue-200">{money(expectedQr)}</span>
             </div>
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
+              Si el efectivo se deposita al banco al cerrar, cuenta el dinero en caja, deja ese monto en el cierre y registra la nota de deposito.
+            </div>
             <label className="block text-sm text-gray-300">
               <span className="mb-1 block">Dinero contado en caja</span>
               <input
@@ -344,23 +361,54 @@ export default function HistorialVentas() {
                 className="premium-input min-h-20"
               />
             </label>
-            {summary?.cerrado ? (
-              <ClosedCashBox closing={summary.cierre} />
-            ) : (
+            {!summary?.cerrado && (
               <button
-                onClick={handleCloseCash}
-                disabled={closingCash}
-                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
+                type="button"
+                onClick={fillBankDepositNote}
+                className="btn-secondary w-full"
               >
-                <LockKeyhole size={18} /> {closingCash ? "Cerrando..." : "Cerrar caja por hoy"}
+                Marcar efectivo para deposito al banco
               </button>
+            )}
+            {summary?.cerrado ? (
+              <>
+                <ClosedCashBox closing={summary.cierre} />
+                <button
+                  type="button"
+                  onClick={printCashClosing}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  <Printer size={18} /> Imprimir cierre 80mm
+                </button>
+              </>
+            ) : (
+              <div className="grid gap-2">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  Cierra caja para habilitar la impresion del reporte real de ese dia.
+                </div>
+                <button
+                  onClick={handleCloseCash}
+                  disabled={closingCash}
+                  className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <LockKeyhole size={18} /> {closingCash ? "Cerrando..." : "Cerrar caja por hoy"}
+                </button>
+              </div>
             )}
           </div>
         </div>
       </div>
 
       {selectedSale && (
-        <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onPrint={() => printSale(selectedSale)} />
+        <SaleDetailModal 
+          sale={selectedSale} 
+          onClose={() => setSelectedSale(null)} 
+          onPrint={() => printSale(selectedSale)} 
+          onPaymentUpdated={(newMethod) => {
+            setSelectedSale({ ...selectedSale, metodoPago: newMethod });
+            loadSummary();
+          }} 
+        />
       )}
     </div>
   );
@@ -376,7 +424,24 @@ function ClosedCashBox({ closing }: { closing?: CashClosing | null }) {
   );
 }
 
-function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () => void; onPrint: () => void }) {
+function SaleDetailModal({ sale, onClose, onPrint, onPaymentUpdated }: { sale: Sale; onClose: () => void; onPrint: () => void; onPaymentUpdated: (method: "EFECTIVO" | "QR") => void }) {
+  const [updating, setUpdating] = useState(false);
+  const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
+
+  const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
+    setUpdating(true);
+    try {
+      await updateSalePaymentMethod(sale.id, newMethod);
+      onPaymentUpdated(newMethod);
+      setConfirmMethod(null);
+    } catch (error) {
+      alert(getErrorMessage(error));
+      setConfirmMethod(null);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -404,7 +469,14 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
                   <tr key={detail.id}>
                     <td className="p-3">
                       <p className="font-semibold text-white">{detail.producto?.descripcion || detail.descripcion || "Detalle"}</p>
-                      <p className="text-xs text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</span>
+                        {detail.producto && (
+                          <span className={`rounded border px-2 py-0.5 font-bold ${productConditionClass(detail.producto.condicion)}`}>
+                            {productConditionLabel(detail.producto.condicion)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 text-center text-gray-300">{detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
                     <td className="p-3 text-right text-gray-300">{money(detail.precioUnitario)}</td>
@@ -414,18 +486,56 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
               </tbody>
             </table>
           </div>
-          <div className="flex justify-between border-t border-gray-700 pt-4 text-xl font-bold text-white">
-            <span>Total</span>
-            <span className="text-primary-light">{money(sale.total)}</span>
+          <div className="space-y-2 border-t border-gray-700 pt-4">
+            <div className="flex justify-between text-gray-400">
+              <span>Subtotal</span>
+              <span>{money(sale.subtotal || 0)}</span>
+            </div>
+            <div className="flex justify-between text-gray-400">
+              <span>Descuento</span>
+              <span>{money(sale.descuento || 0)}</span>
+            </div>
+            <div className="flex justify-between pt-2 text-xl font-bold text-white">
+              <span>Total</span>
+              <span className="text-primary-light">{money(sale.total)}</span>
+            </div>
           </div>
-          <div className="flex justify-end gap-3">
-            <button onClick={onClose} className="btn-secondary">Cerrar</button>
-            <button onClick={onPrint} className="btn-primary flex items-center gap-2">
-              <Printer size={18} /> Imprimir detalle
-            </button>
+          <div className="flex items-center justify-between border-t border-gray-700 pt-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400">Pago actual: <strong className="text-white">{sale.metodoPago}</strong></span>
+              {sale.metodoPago === "EFECTIVO" ? (
+                <button onClick={() => setConfirmMethod("QR")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a QR</button>
+              ) : sale.metodoPago === "QR" ? (
+                <button onClick={() => setConfirmMethod("EFECTIVO")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a Efectivo</button>
+              ) : null}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="btn-secondary">Cerrar</button>
+              <button onClick={onPrint} className="btn-primary flex items-center gap-2">
+                <Printer size={18} /> Imprimir detalle
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {confirmMethod && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmMethod(null)} />
+          <div className="relative w-full max-w-sm rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium p-6 text-center">
+            <h3 className="text-xl font-bold text-white mb-2">Confirmar cambio</h3>
+            <p className="text-gray-300 mb-6">
+              ¿Seguro que deseas cambiar el método de pago a <strong className="text-white">{confirmMethod}</strong>?
+            </p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setConfirmMethod(null)} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
+              <button onClick={() => handleUpdatePayment(confirmMethod)} className="btn-primary w-full" disabled={updating}>
+                {updating ? "Guardando..." : "Sí, cambiar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

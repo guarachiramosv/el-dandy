@@ -9,9 +9,11 @@ import {
   createRemachadoRemache,
   createRemachadoTrabajo,
   fetchRemachadoSummary,
+  updateRemachadoMedida,
+  updateRemachadoRemache,
 } from "../services/remachado";
 import { useProducts } from "../hooks/useProducts";
-import { PaymentMethod, RemachadoMedida, RemachadoRemache, RemachadoTrabajo } from "../types";
+import { PaymentMethod, RemachadoMedida, RemachadoMovimiento, RemachadoRemache, RemachadoTrabajo } from "../types";
 
 type Tab = "TRABAJO" | "BALATAS" | "REMACHES" | "HISTORIAL";
 type CartTrabajo = {
@@ -32,6 +34,12 @@ const money = (value: number) => `Bs ${value.toLocaleString("es-BO", { minimumFr
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 
+const getStockTextClass = (stock: number, stockMinimo: number) => {
+  if (stock <= 0) return "p-4 font-bold text-red-300";
+  if (stock <= stockMinimo) return "p-4 font-bold text-amber-300";
+  return "p-4 font-bold text-green-300";
+};
+
 export default function Remachado() {
   const user = getCurrentUser();
   const isAdmin = user?.role === "ADMIN";
@@ -43,6 +51,7 @@ export default function Remachado() {
   const [medidas, setMedidas] = useState<RemachadoMedida[]>([]);
   const [remaches, setRemaches] = useState<RemachadoRemache[]>([]);
   const [trabajos, setTrabajos] = useState<RemachadoTrabajo[]>([]);
+  const [movimientos, setMovimientos] = useState<RemachadoMovimiento[]>([]);
   const [cartTrabajos, setCartTrabajos] = useState<CartTrabajo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,6 +62,7 @@ export default function Remachado() {
   const [detailProductId, setDetailProductId] = useState("");
   const [detailQuantity, setDetailQuantity] = useState(1);
   const [detailPrice, setDetailPrice] = useState(0);
+  const [descuento, setDescuento] = useState(0);
 
   const [trabajoForm, setTrabajoForm] = useState({
     medidaId: "",
@@ -61,6 +71,7 @@ export default function Remachado() {
     metodoPago: "EFECTIVO" as PaymentMethod,
     notas: "",
   });
+  const [editingMedidaId, setEditingMedidaId] = useState<string | null>(null);
   const [medidaForm, setMedidaForm] = useState({
     medida: "",
     descripcion: "",
@@ -71,6 +82,7 @@ export default function Remachado() {
     remachesPorJuego: 8,
     remachesPorMedioJuego: 4,
   });
+  const [editingRemacheId, setEditingRemacheId] = useState<string | null>(null);
   const [remacheForm, setRemacheForm] = useState({
     codigo: "",
     nombre: "",
@@ -88,6 +100,7 @@ export default function Remachado() {
       setMedidas(data.medidas);
       setRemaches(data.remaches);
       setTrabajos(data.trabajos);
+      setMovimientos(data.movimientos);
       setTrabajoForm((prev) => ({
         ...prev,
         medidaId: prev.medidaId || data.medidas[0]?.id || "",
@@ -103,6 +116,7 @@ export default function Remachado() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, []);
 
@@ -110,11 +124,7 @@ export default function Remachado() {
   const selectedPrice = selectedMedida
     ? trabajoForm.tipoTrabajo === "MEDIO_JUEGO" ? selectedMedida.precioMedioJuego : selectedMedida.precioJuego
     : 0;
-  const selectedJuegos = trabajoForm.tipoTrabajo === "MEDIO_JUEGO" ? 0.5 : 1;
   const selectedBalatas = trabajoForm.tipoTrabajo === "MEDIO_JUEGO" ? 2 : 4;
-  const selectedRemaches = selectedMedida
-    ? trabajoForm.tipoTrabajo === "MEDIO_JUEGO" ? selectedMedida.remachesPorMedioJuego : selectedMedida.remachesPorJuego
-    : 0;
   const unitProducts = products.filter((product) => product.unidadVenta !== "METRO");
   const cartTotal = cartTrabajos.reduce((sum, ct) => {
     const med = medidas.find(m => m.id === ct.medidaId);
@@ -122,7 +132,7 @@ export default function Remachado() {
     return sum + (ct.tipoTrabajo === "MEDIO_JUEGO" ? med.precioMedioJuego : med.precioJuego);
   }, 0);
   const detailSubtotal = detailItems.reduce((sum, item) => sum + item.cantidad * item.precioUnitario, 0);
-  const detailTotal = cartTotal + detailSubtotal;
+  const detailTotal = Math.max(cartTotal + detailSubtotal - descuento, 0);
 
   const filteredMedidas = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -153,6 +163,7 @@ export default function Remachado() {
   const openDetail = () => {
     if (cartTrabajos.length === 0) return setMessage("Agrega al menos un trabajo a la lista.");
     setMessage(null);
+    setDescuento(0);
     setDetailOpen(true);
   };
 
@@ -191,6 +202,8 @@ export default function Remachado() {
         <td class="right">${money(detail.subtotal)}</td>
       </tr>
     `).join("");
+    const printDescuento = trabajo.venta?.descuento ? `<div class="right" style="margin-top: 5px;">SUBTOTAL: ${money(trabajo.venta.subtotal)}</div>
+    <div class="right">DESCUENTO: -${money(trabajo.venta.descuento)}</div>` : "";
     printWindow.document.write(`<!doctype html>
       <html>
         <head>
@@ -215,6 +228,7 @@ export default function Remachado() {
             <thead><tr><th class="center">Cant.</th><th>Detalle</th><th class="right">Total</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
+          ${printDescuento}
           <div class="total">TOTAL: ${money(trabajo.venta?.total || trabajo.total)}</div>
           <p class="center" style="margin-top: 10px;">¡Gracias por su preferencia!</p>
           <script>window.addEventListener("load", () => { window.print(); });</script>
@@ -246,6 +260,7 @@ export default function Remachado() {
           precioUnitario: item.precioUnitario,
         })),
         notas: trabajoForm.notas || null,
+        descuento: descuento > 0 ? descuento : undefined,
       });
       setMessage("Remachado registrado, venta creada y stock descontado.");
       setDetailOpen(false);
@@ -255,7 +270,10 @@ export default function Remachado() {
       await Promise.all([load(), refetchProducts({ silent: true })]);
       printTrabajo(trabajo);
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      console.error(error);
+      const msg = getErrorMessage(error);
+      setMessage(msg);
+      alert("Error al guardar: " + msg + "\nDatos: " + JSON.stringify(cartTrabajos));
     } finally {
       setSaving(false);
     }
@@ -266,12 +284,21 @@ export default function Remachado() {
     setSaving(true);
     setMessage(null);
     try {
-      await createRemachadoMedida({
-        ...medidaForm,
-        descripcion: medidaForm.descripcion || null,
-      });
+      if (editingMedidaId) {
+        await updateRemachadoMedida(editingMedidaId, {
+          ...medidaForm,
+          descripcion: medidaForm.descripcion || null,
+        });
+        setMessage("Medida de balata actualizada.");
+      } else {
+        await createRemachadoMedida({
+          ...medidaForm,
+          descripcion: medidaForm.descripcion || null,
+        });
+        setMessage("Medida de balata creada.");
+      }
       setMedidaForm({ medida: "", descripcion: "", stockJuegos: 0, stockMinimoJuegos: 1, precioJuego: 0, precioMedioJuego: 0, remachesPorJuego: 8, remachesPorMedioJuego: 4 });
-      setMessage("Medida de balata creada.");
+      setEditingMedidaId(null);
       await load();
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -280,23 +307,67 @@ export default function Remachado() {
     }
   };
 
+  const handleEditMedida = (item: RemachadoMedida) => {
+    setMedidaForm({
+      medida: item.medida,
+      descripcion: item.descripcion || "",
+      stockJuegos: item.stockJuegos,
+      stockMinimoJuegos: item.stockMinimoJuegos,
+      precioJuego: item.precioJuego,
+      precioMedioJuego: item.precioMedioJuego,
+      remachesPorJuego: item.remachesPorJuego || 0,
+      remachesPorMedioJuego: item.remachesPorMedioJuego || 0,
+    });
+    setEditingMedidaId(item.id);
+  };
+
+  const cancelEditMedida = () => {
+    setMedidaForm({ medida: "", descripcion: "", stockJuegos: 0, stockMinimoJuegos: 1, precioJuego: 0, precioMedioJuego: 0, remachesPorJuego: 8, remachesPorMedioJuego: 4 });
+    setEditingMedidaId(null);
+  };
+
   const submitRemache = async () => {
     if (!remacheForm.codigo.trim() || !remacheForm.nombre.trim()) return setMessage("Codigo y nombre de remache son requeridos.");
     setSaving(true);
     setMessage(null);
     try {
-      await createRemachadoRemache({
-        ...remacheForm,
-        medida: remacheForm.medida || null,
-      });
+      if (editingRemacheId) {
+        await updateRemachadoRemache(editingRemacheId, {
+          ...remacheForm,
+          medida: remacheForm.medida || null,
+        });
+        setMessage("Remache actualizado.");
+      } else {
+        await createRemachadoRemache({
+          ...remacheForm,
+          medida: remacheForm.medida || null,
+        });
+        setMessage("Remache creado.");
+      }
       setRemacheForm({ codigo: "", nombre: "", medida: "", stock: 0, stockMinimo: 20 });
-      setMessage("Remache creado.");
+      setEditingRemacheId(null);
       await load();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleEditRemache = (item: RemachadoRemache) => {
+    setRemacheForm({
+      codigo: item.codigo,
+      nombre: item.nombre,
+      medida: item.medida || "",
+      stock: item.stock,
+      stockMinimo: item.stockMinimo,
+    });
+    setEditingRemacheId(item.id);
+  };
+
+  const cancelEditRemache = () => {
+    setRemacheForm({ codigo: "", nombre: "", medida: "", stock: 0, stockMinimo: 20 });
+    setEditingRemacheId(null);
   };
 
   const submitStockMedida = async () => {
@@ -451,13 +522,22 @@ export default function Remachado() {
               <div className="space-y-3">
                 <Input label="Medida" value={medidaForm.medida} onChange={(value) => setMedidaForm((prev) => ({ ...prev, medida: value }))} />
                 <Input label="Descripcion" value={medidaForm.descripcion} onChange={(value) => setMedidaForm((prev) => ({ ...prev, descripcion: value }))} />
-                <Input label="Stock en juegos" type="number" value={medidaForm.stockJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockJuegos: Number(value) }))} />
-                <Input label="Stock minimo" type="number" value={medidaForm.stockMinimoJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockMinimoJuegos: Number(value) }))} />
+                <Input label="Stock en juegos" type="number" step="0.5" value={medidaForm.stockJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockJuegos: Number(value) }))} />
+                <Input label="Stock minimo" type="number" step="0.5" value={medidaForm.stockMinimoJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockMinimoJuegos: Number(value) }))} />
                 <Input label="Precio juego" type="number" value={medidaForm.precioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioJuego: Number(value) }))} />
                 <Input label="Precio medio juego" type="number" value={medidaForm.precioMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioMedioJuego: Number(value) }))} />
                 <Input label="Remaches por juego" type="number" value={medidaForm.remachesPorJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorJuego: Number(value) }))} />
                 <Input label="Remaches por medio juego" type="number" value={medidaForm.remachesPorMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorMedioJuego: Number(value) }))} />
-                <button onClick={submitMedida} disabled={saving} className="btn-primary flex items-center gap-2 disabled:opacity-60"><Plus size={18} /> Crear medida</button>
+                <div className="flex gap-2">
+                  <button onClick={submitMedida} disabled={saving} className="btn-primary flex flex-1 items-center justify-center gap-2 disabled:opacity-60">
+                    <Save size={18} /> {editingMedidaId ? "Guardar cambios" : "Crear medida"}
+                  </button>
+                  {editingMedidaId && (
+                    <button onClick={cancelEditMedida} disabled={saving} className="btn-secondary px-3 disabled:opacity-60">
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-6 border-t border-gray-700 pt-4">
@@ -465,7 +545,7 @@ export default function Remachado() {
                 <Select label="Medida" value={stockMedida.medidaId} onChange={(value) => setStockMedida((prev) => ({ ...prev, medidaId: value }))}>
                   {medidas.map((item) => <option key={item.id} value={item.id}>{item.medida}</option>)}
                 </Select>
-                <Input label="Cantidad juegos (+ ingreso / - ajuste)" type="number" value={stockMedida.cantidadJuegos} onChange={(value) => setStockMedida((prev) => ({ ...prev, cantidadJuegos: Number(value) }))} />
+                <Input label="Cantidad juegos (+ ingreso / - ajuste)" type="number" step="0.5" value={stockMedida.cantidadJuegos} onChange={(value) => setStockMedida((prev) => ({ ...prev, cantidadJuegos: Number(value) }))} />
                 <Input label="Notas" value={stockMedida.notas} onChange={(value) => setStockMedida((prev) => ({ ...prev, notas: value }))} />
                 <button onClick={submitStockMedida} disabled={saving} className="btn-secondary mt-3 disabled:opacity-60">Actualizar stock</button>
               </div>
@@ -488,17 +568,25 @@ export default function Remachado() {
                   <th className="p-4">Remaches</th>
                   <th className="p-4 text-right">Juego</th>
                   <th className="p-4 text-right">1/2 juego</th>
+                  {isAdmin && <th className="p-4"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filteredMedidas.map((item) => (
                   <tr key={item.id}>
                     <td className="p-4"><p className="font-bold text-white">{item.medida}</p><p className="text-xs text-gray-500">{item.descripcion}</p></td>
-                    <td className={item.stockJuegos <= item.stockMinimoJuegos ? "p-4 font-bold text-red-300" : "p-4 font-bold text-green-300"}>{item.stockJuegos} juegos</td>
+                    <td className={getStockTextClass(item.stockJuegos, item.stockMinimoJuegos)}>{item.stockJuegos} juegos</td>
                     <td className="p-4 text-gray-300">{item.stockMinimoJuegos}</td>
                     <td className="p-4 text-gray-300">{item.remachesPorJuego} / {item.remachesPorMedioJuego}</td>
                     <td className="p-4 text-right text-primary-light">{money(item.precioJuego)}</td>
                     <td className="p-4 text-right text-primary-light">{money(item.precioMedioJuego)}</td>
+                    {isAdmin && (
+                      <td className="p-4 text-right">
+                        <button onClick={() => handleEditMedida(item)} className="text-gray-400 hover:text-primary transition-colors text-sm underline">
+                          Editar
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -518,7 +606,16 @@ export default function Remachado() {
                 <Input label="Medida" value={remacheForm.medida} onChange={(value) => setRemacheForm((prev) => ({ ...prev, medida: value }))} />
                 <Input label="Stock" type="number" value={remacheForm.stock} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stock: Number(value) }))} />
                 <Input label="Stock minimo" type="number" value={remacheForm.stockMinimo} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stockMinimo: Number(value) }))} />
-                <button onClick={submitRemache} disabled={saving} className="btn-primary flex items-center gap-2 disabled:opacity-60"><Plus size={18} /> Crear remache</button>
+                <div className="flex gap-2">
+                  <button onClick={submitRemache} disabled={saving} className="btn-primary flex flex-1 items-center justify-center gap-2 disabled:opacity-60">
+                    <Save size={18} /> {editingRemacheId ? "Guardar cambios" : "Crear remache"}
+                  </button>
+                  {editingRemacheId && (
+                    <button onClick={cancelEditRemache} disabled={saving} className="btn-secondary px-3 disabled:opacity-60">
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-6 border-t border-gray-700 pt-4">
@@ -533,14 +630,21 @@ export default function Remachado() {
             </div>
           )}
 
-          <TablePanel headers={["Codigo", "Nombre", "Medida", "Stock", "Minimo"]}>
+          <TablePanel headers={isAdmin ? ["Codigo", "Nombre", "Medida", "Stock", "Minimo", ""] : ["Codigo", "Nombre", "Medida", "Stock", "Minimo"]}>
             {remaches.map((item) => (
               <tr key={item.id}>
                 <td className="p-4 font-mono text-gray-300">{item.codigo}</td>
                 <td className="p-4 font-bold text-white">{item.nombre}</td>
                 <td className="p-4 text-gray-300">{item.medida || "-"}</td>
-                <td className={item.stock <= item.stockMinimo ? "p-4 font-bold text-red-300" : "p-4 font-bold text-green-300"}>{item.stock}</td>
+                <td className={getStockTextClass(item.stock, item.stockMinimo)}>{item.stock}</td>
                 <td className="p-4 text-gray-300">{item.stockMinimo}</td>
+                {isAdmin && (
+                  <td className="p-4 text-right">
+                    <button onClick={() => handleEditRemache(item)} className="text-gray-400 hover:text-primary transition-colors text-sm underline">
+                      Editar
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </TablePanel>
@@ -548,22 +652,60 @@ export default function Remachado() {
       )}
 
       {tab === "HISTORIAL" && (
-        <TablePanel headers={["Fecha", "Medida", "Trabajo", "Balatas", "Accesorios", "Total"]}>
-          {trabajos.map((item) => (
-            <tr key={item.id}>
-              <td className="p-4 text-gray-300">{new Date(item.createdAt).toLocaleString("es-BO")}</td>
-              <td className="p-4 font-bold text-white">{item.medida?.medida || "-"}</td>
-              <td className="p-4 text-gray-300">{item.tipoTrabajo === "MEDIO_JUEGO" ? "1/2 juego" : "1 juego"}</td>
-              <td className="p-4 text-gray-300">{item.cantidadBalatas} balatas / {item.cantidadRemaches} remaches</td>
-              <td className="p-4 text-gray-300">
-                <span className="block">Resortes: {item.cantidadResortes}</span>
-                <span className="block">Gomas: {item.cantidadGomas}</span>
-                <span className="block">Seguros: {item.cantidadSeguros}</span>
-              </td>
-              <td className="p-4 text-right text-primary-light">{money(item.total)}</td>
-            </tr>
-          ))}
-        </TablePanel>
+        <div className="space-y-6">
+          <div>
+            <h3 className="mb-4 text-xl font-bold text-white">Historial de Trabajos</h3>
+            <TablePanel headers={["Fecha", "Medida", "Trabajo", "Balatas", "Accesorios", "Total"]}>
+              {trabajos.map((item) => (
+                <tr key={item.id}>
+                  <td className="p-4 text-gray-300">{new Date(item.createdAt).toLocaleString("es-BO")}</td>
+                  <td className="p-4 font-bold text-white">{item.medida?.medida || "-"}</td>
+                  <td className="p-4 text-gray-300">{item.tipoTrabajo === "MEDIO_JUEGO" ? "1/2 juego" : "1 juego"}</td>
+                  <td className="p-4 text-gray-300">{item.cantidadBalatas} balatas / {item.cantidadRemaches} remaches</td>
+                  <td className="p-4 text-gray-300">
+                    <span className="block">Resortes: {item.cantidadResortes}</span>
+                    <span className="block">Gomas: {item.cantidadGomas}</span>
+                    <span className="block">Seguros: {item.cantidadSeguros}</span>
+                  </td>
+                  <td className="p-4 text-right text-primary-light">{money(item.total)}</td>
+                </tr>
+              ))}
+            </TablePanel>
+          </div>
+
+          <div>
+            <h3 className="mb-4 text-xl font-bold text-white">Historial de Movimientos de Stock</h3>
+            <TablePanel headers={["Fecha", "Tipo", "Medida / Remache", "Stock Ant.", "Cant.", "Stock Nvo.", "Usuario", "Notas"]}>
+              {movimientos.map((item) => (
+                <tr key={item.id}>
+                  <td className="p-4 text-gray-300">{new Date(item.createdAt).toLocaleString("es-BO")}</td>
+                  <td className="p-4">
+                    <span className={`inline-block rounded px-2 py-1 text-xs font-bold ${
+                      item.tipo === 'INGRESO' ? 'bg-green-500/20 text-green-300' :
+                      item.tipo === 'AJUSTE' ? 'bg-orange-500/20 text-orange-300' :
+                      item.tipo === 'TRABAJO' ? 'bg-blue-500/20 text-blue-300' :
+                      'bg-gray-500/20 text-gray-300'
+                    }`}>
+                      {item.tipo}
+                    </span>
+                  </td>
+                  <td className="p-4 font-bold text-white">
+                    {item.medida?.medida || item.remache?.codigo || "-"}
+                  </td>
+                  <td className="p-4 text-gray-400">{item.stockAnterior}</td>
+                  <td className={`p-4 font-bold ${item.cantidad > 0 ? "text-green-400" : "text-red-400"}`}>
+                    {item.cantidad > 0 ? "+" : ""}{item.cantidad}
+                  </td>
+                  <td className="p-4 text-white font-bold">{item.stockNuevo}</td>
+                  <td className="p-4 text-gray-300">{item.usuario?.nombre || "-"}</td>
+                  <td className="p-4 text-gray-400 text-sm max-w-[200px] truncate" title={item.notas || ""}>
+                    {item.notas || "-"}
+                  </td>
+                </tr>
+              ))}
+            </TablePanel>
+          </div>
+        </div>
       )}
 
       {detailOpen && (
@@ -581,6 +723,8 @@ export default function Remachado() {
             </div>
 
             <div className="overflow-y-auto p-5">
+              {message && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-500">{message}</div>}
+
               <div className="rounded-xl border border-primary/30 bg-primary/10 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -657,6 +801,19 @@ export default function Remachado() {
                     <span>Productos</span>
                     <span>{money(detailSubtotal)}</span>
                   </div>
+                  <div className="mt-4 flex items-center justify-between border-t border-gray-700 pt-3 text-white">
+                    <span className="font-medium text-red-300">Descuento</span>
+                    <div className="w-32">
+                      <input 
+                        type="number" 
+                        min="0" 
+                        value={descuento || ""} 
+                        onChange={(e) => setDescuento(Number(e.target.value))} 
+                        placeholder="0.00"
+                        className="premium-input px-2 py-1 text-right text-red-300 placeholder-red-900/50 focus:border-red-500 focus:ring-red-500" 
+                      />
+                    </div>
+                  </div>
                   <div className="mt-3 flex justify-between border-t border-gray-700 pt-3 text-xl font-black text-white">
                     <span>Total</span>
                     <span className="text-primary-light">{money(detailTotal)}</span>
@@ -683,16 +840,18 @@ function Input({
   value,
   onChange,
   type = "text",
+  step,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
+  step?: string | number;
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm text-gray-300">{label}</span>
-      <input className="premium-input" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input className="premium-input" type={type} step={step} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

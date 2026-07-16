@@ -1,12 +1,12 @@
-import type { PaymentMethod, Sale } from "../types";
+import type { DailySalesSummary, PaymentMethod, Sale } from "../types";
 
 const TICKET_WIDTH = 40;
-const DESCRIPTION_WIDTH = 20;
-const QTY_WIDTH = 5;
-const SUBTOTAL_WIDTH = 13;
 
 const money = (value: number) =>
   `${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} BOB`;
+
+const moneyShort = (value: number) =>
+  `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const repeat = (char: string) => char.repeat(TICKET_WIDTH);
 
@@ -86,53 +86,80 @@ const escapeHtml = (value: string | number | null | undefined) =>
 const salePaymentLabel = (tipoVenta: "CONTADO" | "CREDITO", metodoPago: PaymentMethod) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
 
-function buildTicketText(sale: Sale, fallbackSellerName = "") {
-  const details = sale.detalles || [];
-  const { date, time } = formatDateParts(sale.createdAt);
+const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
+
+const quantityLabel = (value: number, unit?: string | null) => {
+  const quantity = value.toLocaleString("es-BO", { maximumFractionDigits: 2 });
+  if (unit === "METRO") return `${quantity} m`;
+  return quantity;
+};
+
+function buildCashClosingText(
+  summary: DailySalesSummary,
+  fallbackSellerName = "",
+  options: { declaredCash?: number; notes?: string | null } = {},
+) {
+  const closing = summary.cierre;
+  const { time } = formatDateParts(closing?.createdAt);
+  const grossCash = summary.totals.totalEfectivo || 0;
+  const grossQr = summary.totals.totalQr || 0;
+  const expenses = summary.gastos?.totals || { totalGastos: 0, totalEfectivo: 0, totalQr: 0 };
+  const netCash = closing?.netoEfectivo ?? summary.netos?.totalEfectivo ?? Math.max(grossCash - expenses.totalEfectivo, 0);
+  const netQr = closing?.netoQr ?? summary.netos?.totalQr ?? Math.max(grossQr - expenses.totalQr, 0);
+  const declaredCash = closing?.montoDeclarado ?? options.declaredCash ?? netCash;
+  const difference = closing?.diferencia ?? declaredCash - netCash;
+  const notes = normalizeText(closing?.notas || options.notes || "");
+
   const lines = [
     repeat("="),
     center("EL DANDY"),
+    center("CIERRE DE CAJA"),
     repeat("="),
-    lineBetween(`Fecha: ${date}`, `Hora: ${time}`),
-    `Nro. Nota: ${formatSaleNumber(sale.id)}`,
-    `Atendido por: ${normalizeText(sale.usuario?.nombre || fallbackSellerName || "Vendedor")}`,
-    `Metodo: ${salePaymentLabel(sale.tipoVenta, sale.metodoPago)}`,
+    lineBetween(`Fecha: ${summary.fecha}`, `Hora: ${time}`),
+    `Vendedor: ${normalizeText(fallbackSellerName || "Vendedor")}`,
+    `Estado: ${summary.cerrado ? "CERRADO" : "PRECIERRE"}`,
     repeat("-"),
-    `${"DESCRIPCION".padEnd(DESCRIPTION_WIDTH)} ${"CANT.".padStart(QTY_WIDTH)} ${"SUBTOTAL".padStart(SUBTOTAL_WIDTH)}`,
+    lineBetween("Ventas:", String(summary.totals.cantidadVentas || 0)),
+    lineBetween("Total ventas:", money(summary.totals.totalVentas || 0)),
+    lineBetween("Efectivo venta:", money(grossCash)),
+    lineBetween("Gastos efectivo:", `-${money(expenses.totalEfectivo || 0)}`),
+    lineBetween("EFECTIVO CIERRE:", money(netCash)),
+    lineBetween("QR venta:", money(grossQr)),
+    lineBetween("Gastos QR:", `-${money(expenses.totalQr || 0)}`),
+    lineBetween("QR CIERRE:", money(netQr)),
+    lineBetween("Transferencia:", money(summary.totals.totalTransferencia || 0)),
+    lineBetween("Tarjeta:", money(summary.totals.totalTarjeta || 0)),
+    lineBetween("Credito:", money(summary.totals.totalCredito || 0)),
     repeat("-"),
+    lineBetween("Contado caja:", money(declaredCash)),
+    lineBetween("Diferencia:", money(difference)),
+    repeat("-"),
+    center("EFECTIVO PARA DEPOSITO"),
+    center(money(declaredCash)),
   ];
 
-  details.forEach((detail) => {
-    const description = detail.producto?.descripcion || detail.descripcion || detail.producto?.codigo || "Detalle de venta";
-    const descriptionLines = wrapText(description, DESCRIPTION_WIDTH);
-    descriptionLines.forEach((descriptionLine, index) => {
-      const quantity = index === 0 ? detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 }).padStart(QTY_WIDTH) : " ".repeat(QTY_WIDTH);
-      const subtotal = index === 0 ? money(detail.subtotal).padStart(SUBTOTAL_WIDTH) : " ".repeat(SUBTOTAL_WIDTH);
-      lines.push(`${truncate(descriptionLine, DESCRIPTION_WIDTH).padEnd(DESCRIPTION_WIDTH)} ${quantity} ${subtotal}`);
-    });
-  });
+  if (notes) {
+    lines.push(repeat("-"), "Nota:");
+    wrapText(notes, TICKET_WIDTH).forEach((line) => lines.push(line));
+  }
 
   lines.push(
-    "",
-    repeat("-"),
-    lineBetween("TOTAL A PAGAR:", money(sale.total)),
     repeat("="),
-    center("* NOTA DE VENTA - SIN VALOR FISCAL *"),
-    center("Gracias por su preferencia!"),
+    center("Firma vendedor"),
+    "",
+    "____________________________",
     repeat("="),
   );
 
   return lines.join("\n");
 }
 
-export function buildThermalReceiptHtml(sale: Sale, fallbackSellerName = "") {
-  const ticketText = buildTicketText(sale, fallbackSellerName);
-
+function thermalHtml(title: string, text: string) {
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Ticket ${escapeHtml(sale.id)}</title>
+    <title>${escapeHtml(title)}</title>
     <style>
       @page {
         size: 80mm auto;
@@ -170,7 +197,7 @@ export function buildThermalReceiptHtml(sale: Sale, fallbackSellerName = "") {
     </style>
   </head>
   <body>
-    <pre class="ticket">${escapeHtml(ticketText)}</pre>
+    <pre class="ticket">${escapeHtml(text)}</pre>
     <script>
       window.addEventListener("load", () => {
         window.focus();
@@ -179,4 +206,331 @@ export function buildThermalReceiptHtml(sale: Sale, fallbackSellerName = "") {
     </script>
   </body>
 </html>`;
+}
+
+function saleReceiptCopyHtml(sale: Sale, fallbackSellerName: string, copyLabel: "COPIA CLIENTE" | "COPIA VENDEDOR") {
+  const details = sale.detalles || [];
+  const { date, time } = formatDateParts(sale.createdAt);
+  const sellerName = sale.usuario?.nombre || fallbackSellerName || "Vendedor";
+  const customerName = sale.cliente?.nombre || "Cliente ocasional";
+  const customerNit = sale.cliente?.nit;
+  const branchName = sale.sucursal?.nombre || "Sucursal";
+  const paymentLabel = salePaymentLabel(sale.tipoVenta, sale.metodoPago);
+
+  const rows = details.map((detail) => {
+    const product = detail.producto;
+    const code = product?.codigo || detail.tipoLinea || "";
+    const description = product?.descripcion || detail.descripcion || "Detalle de venta";
+    const condition = product ? productConditionLabel(product.condicion) : detail.tipoLinea === "REMACHADO" ? "Remachado" : "";
+    const unit = detail.unidadVenta || product?.unidadVenta;
+
+    return `
+      <tr>
+        <td class="item-description">
+          <strong>${escapeHtml(description)}</strong>
+          <span>${escapeHtml([code, condition].filter(Boolean).join(" - "))}</span>
+        </td>
+        <td class="numeric">${escapeHtml(quantityLabel(detail.cantidad, unit))}</td>
+        <td class="numeric">${escapeHtml(moneyShort(detail.precioUnitario))}</td>
+        <td class="numeric strong">${escapeHtml(moneyShort(detail.subtotal))}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <section class="receipt-copy">
+      <header class="brand-header">
+        <div class="brand-mark">DD</div>
+        <div>
+          <p class="eyebrow">Repuestos Diesel</p>
+          <h1>DANDY</h1>
+          <p class="tagline">Calidad y confianza</p>
+        </div>
+      </header>
+
+      <div class="copy-badge">${copyLabel}</div>
+
+      <div class="meta-grid">
+        <div>
+          <span>Nota</span>
+          <strong>${escapeHtml(formatSaleNumber(sale.id))}</strong>
+        </div>
+        <div>
+          <span>Fecha</span>
+          <strong>${escapeHtml(date)} ${escapeHtml(time)}</strong>
+        </div>
+        <div>
+          <span>Cliente</span>
+          <strong>${escapeHtml(customerName)}</strong>
+        </div>
+        <div>
+          <span>NIT/CI</span>
+          <strong>${escapeHtml(customerNit || "-")}</strong>
+        </div>
+        <div>
+          <span>Vendedor</span>
+          <strong>${escapeHtml(sellerName)}</strong>
+        </div>
+        <div>
+          <span>Pago</span>
+          <strong>${escapeHtml(paymentLabel)}</strong>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Detalle</th>
+            <th class="numeric">Cant.</th>
+            <th class="numeric">P. Unit.</th>
+            <th class="numeric">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="4" class="empty">Sin productos.</td></tr>`}
+        </tbody>
+      </table>
+
+      <div class="summary">
+        <div><span>Subtotal</span><strong>${escapeHtml(moneyShort(sale.subtotal || 0))}</strong></div>
+        <div><span>Descuento</span><strong>${escapeHtml(moneyShort(sale.descuento || 0))}</strong></div>
+        <div class="grand-total"><span>Total</span><strong>${escapeHtml(moneyShort(sale.total))}</strong></div>
+      </div>
+
+      <footer>
+        <p>${escapeHtml(branchName)} - WhatsApp 76982111</p>
+        <p>Nota de venta sin valor fiscal</p>
+        ${copyLabel === "COPIA VENDEDOR" ? `<div class="signature">Firma / conformidad</div>` : `<p class="thanks">Gracias por su preferencia.</p>`}
+      </footer>
+    </section>
+  `;
+}
+
+function saleReceiptHtml(title: string, copies: string) {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      @page {
+        size: 80mm auto;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        color: #111;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 10px;
+        line-height: 1.25;
+      }
+      body {
+        width: 80mm;
+      }
+      .receipt-copy {
+        width: 80mm;
+        padding: 4mm 3mm 6mm;
+        break-after: page;
+        page-break-after: always;
+      }
+      .receipt-copy:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+      .brand-header {
+        display: grid;
+        grid-template-columns: 13mm 1fr;
+        gap: 2.5mm;
+        align-items: center;
+        border: 1px solid #111;
+        border-bottom: 4px solid #f97316;
+        padding: 2.5mm;
+        background: #111;
+        color: #fff;
+      }
+      .brand-mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 11mm;
+        height: 11mm;
+        border: 2px solid #f97316;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 900;
+      }
+      h1,
+      p {
+        margin: 0;
+      }
+      h1 {
+        color: #f97316;
+        font-size: 19px;
+        line-height: 1;
+        letter-spacing: 0;
+      }
+      .eyebrow {
+        font-size: 9px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .tagline {
+        margin-top: 1mm;
+        font-size: 8px;
+        text-transform: uppercase;
+      }
+      .copy-badge {
+        margin: 2.5mm 0;
+        border: 1px dashed #111;
+        padding: 1.5mm;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5mm;
+      }
+      .meta-grid div {
+        border: 1px solid #ddd;
+        padding: 1.5mm;
+      }
+      .meta-grid span,
+      .item-description span,
+      footer {
+        display: block;
+        color: #555;
+        font-size: 8px;
+      }
+      .meta-grid strong {
+        display: block;
+        margin-top: 0.5mm;
+        font-size: 9px;
+      }
+      table {
+        width: 100%;
+        margin-top: 3mm;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      th {
+        border-top: 2px solid #111;
+        border-bottom: 1px solid #111;
+        padding: 1.5mm 0.8mm;
+        font-size: 8px;
+        text-align: left;
+        text-transform: uppercase;
+      }
+      th:first-child {
+        width: 41%;
+      }
+      th:nth-child(2) {
+        width: 16%;
+      }
+      th:nth-child(3),
+      th:nth-child(4) {
+        width: 21.5%;
+      }
+      td {
+        border-bottom: 1px solid #e5e5e5;
+        padding: 1.8mm 0.8mm;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+      }
+      .item-description strong {
+        display: block;
+        font-size: 9px;
+      }
+      .numeric {
+        text-align: right;
+      }
+      .strong {
+        font-weight: 800;
+      }
+      .empty {
+        padding: 4mm 0;
+        text-align: center;
+        color: #777;
+      }
+      .summary {
+        margin-top: 3mm;
+        border: 1px solid #111;
+      }
+      .summary div {
+        display: flex;
+        justify-content: space-between;
+        gap: 2mm;
+        padding: 1.5mm 2mm;
+        border-bottom: 1px solid #ddd;
+      }
+      .summary div:last-child {
+        border-bottom: 0;
+      }
+      .grand-total {
+        background: #111;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 900;
+      }
+      footer {
+        margin-top: 3mm;
+        text-align: center;
+      }
+      .thanks {
+        margin-top: 1mm;
+        color: #111;
+        font-weight: 800;
+      }
+      .signature {
+        margin-top: 8mm;
+        border-top: 1px solid #111;
+        padding-top: 1mm;
+        color: #111;
+        font-size: 9px;
+      }
+      @media print {
+        html,
+        body,
+        .receipt-copy {
+          width: 80mm;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    ${copies}
+    <script>
+      window.addEventListener("load", () => {
+        window.focus();
+        window.print();
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+export function buildThermalReceiptHtml(sale: Sale, fallbackSellerName = "") {
+  return saleReceiptHtml(
+    `Detalle de venta ${sale.id}`,
+    [
+      saleReceiptCopyHtml(sale, fallbackSellerName, "COPIA CLIENTE"),
+      saleReceiptCopyHtml(sale, fallbackSellerName, "COPIA VENDEDOR"),
+    ].join(""),
+  );
+}
+
+export function buildThermalCashClosingHtml(
+  summary: DailySalesSummary,
+  fallbackSellerName = "",
+  options: { declaredCash?: number; notes?: string | null } = {},
+) {
+  return thermalHtml("Cierre de caja", buildCashClosingText(summary, fallbackSellerName, options));
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   LockKeyhole,
@@ -15,6 +16,7 @@ import { useProducts } from "../hooks/useProducts";
 import { createSale, fetchDailySalesSummary } from "../services/sales";
 import { getCurrentUser } from "../services/auth";
 import { createCustomer, fetchCustomers } from "../services/customers";
+import { searchProductsForSale } from "../services/products";
 import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
 
 interface CartItem {
@@ -43,8 +45,16 @@ const normalizeSearchText = (value?: string | null) =>
 const productUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "unidades";
 const productStep = (product: Product) => product.unidadVenta === "METRO" ? 0.5 : 1;
 const formatQuantity = (value: number, product?: Product) => `${value.toLocaleString("es-BO", { maximumFractionDigits: 2 })} ${product ? productUnitLabel(product) : "unidades"}`;
+const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
+const productConditionClass = (condition?: string | null) =>
+  condition === "USADO"
+    ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+    : "border-green-500/40 bg-green-500/10 text-green-200";
 
 export default function Ventas() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const productToAddFromInventory = (location.state as { addProductId?: string } | null)?.addProductId;
   const { data: products, loading, error, refetch: refetchProducts } = useProducts("active", {
     scope: "all",
     refreshIntervalMs: 10000,
@@ -60,6 +70,9 @@ export default function Ventas() {
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [searchingProducts, setSearchingProducts] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
   const [invoiceCustomerNit, setInvoiceCustomerNit] = useState("");
@@ -83,9 +96,46 @@ export default function Ventas() {
 
   useEffect(() => {
     if (tipoVenta === "CONTADO" && metodoPago !== "EFECTIVO" && metodoPago !== "QR") {
-      setMetodoPago("EFECTIVO");
+      const timer = window.setTimeout(() => setMetodoPago("EFECTIVO"), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [metodoPago, tipoVenta]);
+
+  useEffect(() => {
+    const query = searchTerm.trim();
+    if (!query) {
+      const timer = window.setTimeout(() => {
+        setSearchResults([]);
+        setSearchError(null);
+        setSearchingProducts(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setSearchingProducts(true);
+      searchProductsForSale(query)
+        .then((items) => {
+          if (cancelled) return;
+          setSearchResults(items);
+          setSearchError(null);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setSearchResults([]);
+          setSearchError(getErrorMessage(err));
+        })
+        .finally(() => {
+          if (!cancelled) setSearchingProducts(false);
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm]);
 
   const getAvailableStock = useCallback((product: Product) => {
     if (!user?.sucursalId) return product.stock;
@@ -100,18 +150,22 @@ export default function Ventas() {
   }, [user?.sucursalId]);
 
   const hasProductSearch = normalizeSearchText(searchTerm).length > 0;
+  const clearProductSearch = () => setSearchTerm("");
 
   const filteredProducts = useMemo(() => {
     const terms = normalizeSearchText(searchTerm).split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
-    return products
+    const sourceProducts = searchResults.length > 0 ? searchResults : products;
+    return sourceProducts
       .map((product) => {
         const codigo = normalizeSearchText(product.codigo);
         const codigoRepuesto = normalizeSearchText(product.codigoRepuesto);
         const descripcion = normalizeSearchText(product.descripcion);
         const marca = normalizeSearchText(product.marca);
         const categoria = normalizeSearchText(product.categoria?.nombre);
-        const haystack = [codigo, codigoRepuesto, descripcion, marca, categoria].join(" ");
+        const sucursal = normalizeSearchText(product.sucursal?.nombre);
+        const ubicacion = normalizeSearchText(product.ubicacion);
+        const haystack = [codigo, codigoRepuesto, descripcion, marca, categoria, sucursal, ubicacion].join(" ");
         const matches = terms.every((term) => haystack.includes(term));
         if (!matches) return null;
 
@@ -121,7 +175,10 @@ export default function Ventas() {
           if (codigo.includes(term) || codigoRepuesto.includes(term)) return acc + 65;
           if (descripcion.startsWith(term)) return acc + 50;
           if (descripcion.includes(term)) return acc + 35;
+          if (ubicacion.startsWith(term)) return acc + 30;
+          if (ubicacion.includes(term)) return acc + 25;
           if (marca.includes(term) || categoria.includes(term)) return acc + 15;
+          if (sucursal.includes(term)) return acc + 10;
           return acc + 5;
         }, 0);
 
@@ -130,7 +187,7 @@ export default function Ventas() {
       .filter((item): item is { product: Product; score: number } => Boolean(item))
       .sort((a, b) => b.score - a.score || a.product.descripcion.localeCompare(b.product.descripcion))
       .map((item) => item.product);
-  }, [products, searchTerm]);
+  }, [products, searchResults, searchTerm]);
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
   const totalQuantity = cart.reduce((acc, item) => acc + item.cantidad, 0);
@@ -149,34 +206,47 @@ export default function Ventas() {
     setFechaVencimiento("");
   };
 
-  const addToCart = (product: Product) => {
+  const addToCart = useCallback((product: Product) => {
     setMessage(null);
-    if (dailySummary?.cerrado) {
-      setMessage("La caja de hoy ya fue cerrada. No se pueden registrar mas ventas.");
-      return;
-    }
     const availableStock = getAvailableStock(product);
     const step = productStep(product);
     if (availableStock < step) {
       setMessage("Producto sin stock disponible en tu sucursal.");
-      return;
+      return false;
+    }
+    const existing = cart.find((item) => item.product.id === product.id);
+    if (existing && existing.cantidad + step > availableStock) {
+      setMessage(`Stock insuficiente. Disponible: ${availableStock}`);
+      return false;
     }
     const productForCart = { ...product, stock: availableStock };
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      if (existing) {
-        const next = existing.cantidad + step;
-        if (next > availableStock) {
-          setMessage(`Stock insuficiente. Disponible: ${availableStock}`);
-          return prev;
-        }
+      const current = prev.find((item) => item.product.id === product.id);
+      if (current) {
+        const next = current.cantidad + step;
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, cantidad: next } : item,
         );
       }
       return [...prev, { product: productForCart, cantidad: step }];
     });
-  };
+    return true;
+  }, [cart, getAvailableStock]);
+
+  useEffect(() => {
+    if (!productToAddFromInventory || products.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const product = products.find((item) => item.id === productToAddFromInventory);
+      if (product) {
+        const added = addToCart(product);
+        if (added) setMessage("Producto agregado al carrito desde Inventario.");
+      } else {
+        setMessage("No se encontro el producto seleccionado desde Inventario.");
+      }
+      navigate(".", { replace: true, state: null });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [addToCart, navigate, productToAddFromInventory, products]);
 
   const changeQuantity = (productId: string, delta: number) => {
     setCart((prev) =>
@@ -297,37 +367,132 @@ export default function Ventas() {
           </div>
         )}
 
-        <div className="glass-panel p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
+        <div className="pos-search-card">
+          <div className="pos-search-shell">
+            <Search className="pos-search-icon" />
             <input
               type="text"
+              aria-label="Buscar producto"
+              autoComplete="off"
               placeholder="Buscar por nombre o codigo..."
-              className="premium-input pl-10"
+              className="pos-search-input"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") clearProductSearch();
+              }}
             />
+            {hasProductSearch && (
+              <button
+                type="button"
+                onClick={clearProductSearch}
+                className="pos-search-clear"
+                aria-label="Borrar busqueda"
+                title="Borrar busqueda"
+              >
+                <X size={24} />
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="grid max-h-80 grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
+        {hasProductSearch && (
+          <div className="flex items-center justify-between rounded-lg border border-gray-700 bg-grafito-900/70 px-4 py-3 text-sm text-gray-300">
+            <span>
+              {searchingProducts
+                ? "Buscando en inventario..."
+                : `${filteredProducts.length} producto(s) encontrados para "${searchTerm.trim()}"`}
+            </span>
+            {searchError && <span className="text-red-300">Error: {searchError}</span>}
+          </div>
+        )}
+
+        {filteredProducts.length > 0 && (
+          <div className="rounded-2xl border border-primary/25 bg-grafito-900/80 p-4 shadow-lg shadow-black/25">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-bold text-white">Selecciona un producto</h3>
+              <span className="text-sm text-gray-400">{filteredProducts.length} resultado(s)</span>
+            </div>
+            <div className="grid max-h-96 grid-cols-1 gap-3 overflow-y-auto pr-1">
+              {filteredProducts.map((product) => {
+                const selected = cart.find((item) => item.product.id === product.id);
+                const availableStock = getAvailableStock(product);
+                const shelf = product.ubicacion?.trim() || "Sin ubicacion";
+                const isBlocked = availableStock <= 0;
+                return (
+                  <button
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    disabled={isBlocked}
+                    className="group text-left rounded-xl border border-gray-700 bg-grafito-800/90 p-4 transition-colors hover:border-primary/70 hover:bg-grafito-800 disabled:cursor-not-allowed disabled:opacity-75"
+                  >
+                    <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <p className="truncate text-lg font-black text-white">{product.descripcion}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 font-mono text-xs text-gray-300">{product.codigo}</span>
+                          <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-sm font-bold text-primary-light">
+                            Estante: {shelf}
+                          </span>
+                          <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 text-xs text-gray-300">
+                            {product.sucursal?.nombre || "Sucursal"}
+                          </span>
+                          <span className={`rounded-md border px-2 py-1 text-xs font-bold ${productConditionClass(product.condicion)}`}>
+                            {productConditionLabel(product.condicion)}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-gray-400">
+                          {product.marca || "Sin marca"} - Stock disponible {formatQuantity(availableStock, product)}
+                        </p>
+                        {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {formatQuantity(selected.cantidad, product)}</p>}
+                      </div>
+                      <div className="text-left lg:text-right">
+                        <span className="block text-2xl font-black text-primary-light">{money(product.precioVenta)}</span>
+                        <span className="text-xs text-gray-500">Precio venta</span>
+                      </div>
+                      <span className={`inline-flex h-11 items-center justify-center rounded-lg px-4 text-sm font-bold ${
+                        isBlocked ? "border border-amber-500/30 bg-amber-500/10 text-amber-200" : "bg-primary-gradient text-white"
+                      }`}>
+                        {availableStock <= 0 ? "Sin stock" : "Agregar"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="hidden">
           {filteredProducts.map((product) => {
             const selected = cart.find((item) => item.product.id === product.id);
             const availableStock = getAvailableStock(product);
+            const shelf = product.ubicacion?.trim() || "Sin ubicacion";
             return (
               <button
                 key={product.id}
                 onClick={() => addToCart(product)}
                 disabled={availableStock <= 0 || dailySummary?.cerrado}
-                className="text-left rounded-lg border border-gray-700 bg-grafito-800/70 p-3 hover:border-primary/60 disabled:opacity-50"
+                className="text-left rounded-xl border border-gray-700 bg-grafito-800/75 p-4 transition-colors hover:border-primary/70 hover:bg-grafito-800 disabled:opacity-50"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-white">{product.codigo} - {product.descripcion}</p>
-                    <p className="text-sm text-gray-400">{product.marca} - Stock disponible {formatQuantity(availableStock, product)}</p>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-lg font-black text-white">{product.descripcion}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 font-mono text-xs text-gray-300">{product.codigo}</span>
+                      <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-sm font-bold text-primary-light">
+                        Estante: {shelf}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-400">
+                      {product.marca || "Sin marca"} · Stock disponible {formatQuantity(availableStock, product)}
+                    </p>
                     {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {formatQuantity(selected.cantidad, product)}</p>}
                   </div>
-                  <span className="text-primary-light font-bold">{money(product.precioVenta)}</span>
+                  <div className="shrink-0 text-right">
+                    <span className="block text-xl font-black text-primary-light">{money(product.precioVenta)}</span>
+                    <span className="mt-1 block text-xs text-gray-500">{product.sucursal?.nombre || "Sucursal"}</span>
+                  </div>
                 </div>
               </button>
             );
@@ -335,7 +500,13 @@ export default function Ventas() {
         </div>
         {filteredProducts.length === 0 && (
           <div className="rounded-lg border border-gray-700 bg-grafito-800/60 p-6 text-center text-gray-400">
-            {hasProductSearch ? "No hay productos que coincidan con esa busqueda." : "Busca un producto por nombre o codigo para agregarlo a la venta."}
+            {searchingProducts
+              ? "Buscando productos..."
+              : searchError
+                ? `No se pudo buscar en el servidor: ${searchError}`
+                : hasProductSearch
+                  ? "No hay productos que coincidan con esa busqueda."
+                  : "Busca un producto por nombre, codigo o estante para agregarlo a la venta."}
           </div>
         )}
 
@@ -363,7 +534,12 @@ export default function Ventas() {
                     <td className="py-4 font-mono text-sm text-gray-400">{item.product.codigo}</td>
                     <td className="py-4">
                       <p className="font-medium text-gray-200">{item.product.descripcion}</p>
-                      <p className="mt-1 text-xs text-gray-500">Disponible: {formatQuantity(item.product.stock, item.product)}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="text-gray-500">Disponible: {formatQuantity(item.product.stock, item.product)}</span>
+                        <span className={`rounded border px-2 py-0.5 font-bold ${productConditionClass(item.product.condicion)}`}>
+                          {productConditionLabel(item.product.condicion)}
+                        </span>
+                      </div>
                     </td>
                     <td className="py-4">
                       <div className="flex items-center justify-center gap-2">
@@ -540,7 +716,12 @@ function InvoiceModal({
                 {cart.map((item) => (
                   <tr key={item.product.id}>
                     <td className="p-3 font-mono text-gray-400">{item.product.codigo}</td>
-                    <td className="p-3 font-semibold text-white">{item.product.descripcion}</td>
+                    <td className="p-3">
+                      <p className="font-semibold text-white">{item.product.descripcion}</p>
+                      <span className={`mt-1 inline-flex rounded border px-2 py-0.5 text-xs font-bold ${productConditionClass(item.product.condicion)}`}>
+                        {productConditionLabel(item.product.condicion)}
+                      </span>
+                    </td>
                     <td className="p-3 text-center text-gray-300">{formatQuantity(item.cantidad, item.product)}</td>
                     <td className="p-3 text-right text-gray-300">{money(item.product.precioVenta)}</td>
                     <td className="p-3 text-right font-bold text-primary-light">{money(item.product.precioVenta * item.cantidad)}</td>
@@ -600,10 +781,11 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white"><X size={22} /></button>
         </div>
         <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Stat label="Tipo" value={sale.tipoVenta} />
             <Stat label="Metodo" value={salePaymentLabel(sale.tipoVenta, sale.metodoPago)} />
             <Stat label="Subtotal" value={money(sale.subtotal)} />
+            <Stat label="Descuento" value={money(sale.descuento || 0)} />
             <Stat label="Total" value={money(sale.total)} />
           </div>
           <div className="rounded-xl border border-gray-700 overflow-hidden">
@@ -621,7 +803,14 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
                   <tr key={detail.id}>
                     <td className="p-3">
                       <p className="font-semibold text-white">{detail.producto?.descripcion || detail.descripcion || "Detalle"}</p>
-                      <p className="text-xs text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="text-gray-500">{detail.producto?.codigo || detail.tipoLinea || ""}</span>
+                        {detail.producto && (
+                          <span className={`rounded border px-2 py-0.5 font-bold ${productConditionClass(detail.producto.condicion)}`}>
+                            {productConditionLabel(detail.producto.condicion)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 text-center text-gray-300">{detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
                     <td className="p-3 text-right text-gray-300">{money(detail.precioUnitario)}</td>

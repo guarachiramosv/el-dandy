@@ -1,21 +1,285 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Printer } from "lucide-react";
+import { CalendarDays, Download, Printer } from "lucide-react";
 import { fetchSucursales } from "../services/catalog";
 import { fetchSalesHistoryReport, ReportPeriod, SalesHistoryReport } from "../services/reports";
 import type { Sucursal } from "../types";
 
 const today = new Date();
-const defaultDay = today.toISOString().slice(0, 10);
-const defaultMonth = today.toISOString().slice(0, 7);
+const localDateParts = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/La_Paz",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(today);
+const defaultDay = localDateParts;
+const defaultMonth = localDateParts.slice(0, 7);
 const defaultYear = String(today.getFullYear());
 
 const money = (value: number) => `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const branchNameFrom = (item: { usuario?: { sucursal?: { nombre: string } }; sucursal?: { nombre: string } }) =>
+  item.usuario?.sucursal?.nombre || item.sucursal?.nombre || "Sucursal";
+
+const sanitizePdfText = (value: string) =>
+  Array.from(value)
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && code <= 126 ? char : " ";
+    })
+    .join("");
 
 function valueForPeriod(period: ReportPeriod, day: string, month: string, year: string) {
   if (period === "year") return year;
   if (period === "month") return month;
   return day;
 }
+
+const cleanPdfText = (value: unknown) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split("")
+    .map((char) => sanitizePdfText(char))
+    .join("")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+
+const fitPdfText = (value: unknown, maxChars: number) => {
+  const text = cleanPdfText(value);
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+};
+
+const wrapPdfText = (value: unknown, maxChars: number) => {
+  const words = cleanPdfText(value).split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > maxChars) {
+      if (current) lines.push(current);
+      current = word.length > maxChars ? word.slice(0, maxChars) : word;
+    } else {
+      current = next;
+    }
+  });
+
+  if (current) lines.push(current);
+  return lines;
+};
+
+const pdfText = (value: unknown, x: number, y: number, size = 9, bold = false) =>
+  `BT /F${bold ? 2 : 1} ${size} Tf ${x.toFixed(2)} ${y.toFixed(2)} Td (${cleanPdfText(value)}) Tj ET\n`;
+
+const pdfLine = (x1: number, y1: number, x2: number, y2: number) =>
+  `q 0.55 0.58 0.64 RG 0.5 w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q\n`;
+
+const pdfFillRect = (x: number, y: number, width: number, height: number, color: string) =>
+  `q ${color} rg ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re f Q\n`;
+
+const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const margin = 30;
+  const bottom = 34;
+  const rowHeight = 18;
+  const pages: string[] = [];
+  const closingNotes = (report.cierres || [])
+    .filter((cierre) => cierre.notas?.trim())
+    .map((cierre) => ({
+      seller: cierre.usuario?.nombre || "Vendedor",
+      branch: branchNameFrom(cierre),
+      note: cierre.notas || "",
+    }));
+  const rows: Array<{ kind: "section" | "closing" | "sale" | "note"; cells: string[] }> = [
+    { kind: "section", cells: ["Cierres enviados por vendedores"] },
+    ...(report.cierres || []).map((cierre) => ({
+      kind: "closing" as const,
+      cells: [
+        new Date(cierre.fecha).toLocaleDateString("es-BO"),
+        cierre.usuario?.nombre || "Vendedor",
+        branchNameFrom(cierre),
+        String(cierre.cantidadVentas),
+        money(cierre.totalVentas),
+        money(cierre.netoEfectivo),
+        money(cierre.netoQr),
+        money(cierre.montoDeclarado),
+        money(cierre.diferencia),
+      ],
+    })),
+    { kind: "section", cells: ["Ventas registradas"] },
+    ...report.ventas.map((sale) => ({
+      kind: "sale" as const,
+      cells: [
+        new Date(sale.createdAt).toLocaleString("es-BO"),
+        sale.usuario?.nombre || "Usuario",
+        branchNameFrom(sale),
+        sale.cliente?.nombre || "Sin cliente",
+        `${sale.tipoVenta} / ${sale.metodoPago}`,
+        String(sale.detalles?.length || 0),
+        money(sale.total),
+      ],
+    })),
+    ...(closingNotes.length
+      ? [
+          { kind: "section" as const, cells: ["Notas de cierre"] },
+          ...closingNotes.map((item) => ({
+            kind: "note" as const,
+            cells: [item.seller, item.branch, item.note],
+          })),
+        ]
+      : []),
+  ];
+
+  const drawHeader = (pageNumber: number) => {
+    let content = "";
+    content += pdfText("Reporte diario de ventas", margin, 560, 16, true);
+    content += pdfText(`Periodo: ${report.label}`, margin, 542, 9);
+    content += pdfText(`Sucursal: ${sucursal}`, margin, 528, 9);
+    content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 514, 9);
+    content += pdfText(`Pagina ${pageNumber}`, 770, 560, 9, true);
+
+    const stats = [
+      ["Ventas", report.totals.cantidadVentas],
+      ["Total", money(report.totals.totalVentas)],
+      ["Cierres", report.totals.cantidadCierres || 0],
+      ["Efectivo cierre", money(report.totals.cierreEfectivo || 0)],
+      ["QR cierre", money(report.totals.cierreQr || 0)],
+      ["Declarado", money(report.totals.montoDeclarado || 0)],
+      ["Diferencia", money(report.totals.diferencia || 0)],
+    ];
+    stats.forEach(([label, value], index) => {
+      const x = margin + index * 111;
+      content += pdfFillRect(x, 470, 103, 34, "0.96 0.97 0.98");
+      content += pdfText(label, x + 7, 489, 7, true);
+      content += pdfText(value, x + 7, 476, 9, true);
+    });
+    content += pdfLine(margin, 458, pageWidth - margin, 458);
+    return content;
+  };
+
+  let page = drawHeader(1);
+  let y = 438;
+  let pageNumber = 1;
+
+  const newPage = () => {
+    pages.push(page);
+    pageNumber += 1;
+    page = drawHeader(pageNumber);
+    y = 438;
+  };
+
+  rows.forEach((row) => {
+    const noteLines = row.kind === "note" ? wrapPdfText(row.cells[2], 118) : [];
+    const neededHeight = row.kind === "section" ? rowHeight : rowHeight + noteLines.length * 10;
+    if (y < bottom + neededHeight) newPage();
+
+    if (row.kind === "section") {
+      page += pdfFillRect(margin, y - 4, pageWidth - margin * 2, 18, "0.92 0.93 0.95");
+      page += pdfText(row.cells[0], margin + 6, y + 2, 9, true);
+      if (row.cells[0].startsWith("Notas")) {
+        y -= 26;
+        return;
+      }
+      y -= 24;
+      if (row.cells[0].startsWith("Cierres")) {
+        page += pdfText("Fecha", 36, y + 4, 7, true);
+        page += pdfText("Vendedor", 100, y + 4, 7, true);
+        page += pdfText("Sucursal", 230, y + 4, 7, true);
+        page += pdfText("Ventas", 315, y + 4, 7, true);
+        page += pdfText("Total", 360, y + 4, 7, true);
+        page += pdfText("Efectivo", 435, y + 4, 7, true);
+        page += pdfText("QR", 520, y + 4, 7, true);
+        page += pdfText("Declarado", 590, y + 4, 7, true);
+        page += pdfText("Dif.", 700, y + 4, 7, true);
+      } else {
+        page += pdfText("Fecha", 36, y + 4, 7, true);
+        page += pdfText("Vendedor", 156, y + 4, 7, true);
+        page += pdfText("Sucursal", 270, y + 4, 7, true);
+        page += pdfText("Cliente", 380, y + 4, 7, true);
+        page += pdfText("Pago", 510, y + 4, 7, true);
+        page += pdfText("Items", 630, y + 4, 7, true);
+        page += pdfText("Total", 700, y + 4, 7, true);
+      }
+      y -= rowHeight;
+      return;
+    }
+
+    page += pdfLine(margin, y - 3, pageWidth - margin, y - 3);
+    if (row.kind === "closing") {
+      page += pdfText(fitPdfText(row.cells[0], 12), 36, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 24), 100, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 14), 230, y + 3, 7);
+      page += pdfText(row.cells[3], 315, y + 3, 7);
+      page += pdfText(row.cells[4], 360, y + 3, 7);
+      page += pdfText(row.cells[5], 435, y + 3, 7);
+      page += pdfText(row.cells[6], 520, y + 3, 7);
+      page += pdfText(row.cells[7], 590, y + 3, 7);
+      page += pdfText(row.cells[8], 700, y + 3, 7);
+    } else if (row.kind === "note") {
+      const boxHeight = Math.max(22, 14 + noteLines.length * 10);
+      page += pdfFillRect(margin, y - boxHeight + 6, pageWidth - margin * 2, boxHeight, "0.98 0.98 0.98");
+      page += pdfText(`Nota del vendedor - ${row.cells[0]} / ${row.cells[1]}`, margin + 8, y + 1, 8, true);
+      noteLines.forEach((line, index) => {
+        page += pdfText(line, margin + 8, y - 10 - index * 10, 8);
+      });
+    } else {
+      page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 20), 156, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 18), 270, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[3], 20), 380, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[4], 18), 510, y + 3, 7);
+      page += pdfText(row.cells[5], 630, y + 3, 7);
+      page += pdfText(row.cells[6], 700, y + 3, 7);
+    }
+    y -= row.kind === "note" ? Math.max(28, 20 + noteLines.length * 10) : rowHeight;
+  });
+
+  pages.push(page);
+
+  const objects: string[] = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+  ];
+  const pageObjectNumbers: number[] = [];
+  pages.forEach((content) => {
+    const streamNumber = objects.length + 2;
+    pageObjectNumbers.push(objects.length + 1);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamNumber} 0 R >>`);
+    objects.push(`<< /Length ${content.length} >>\nstream\n${content}endstream`);
+  });
+  objects[1] = `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${pageObjectNumbers.length} >>`;
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new Uint8Array(Array.from(pdf, (char) => char.charCodeAt(0) & 0xff));
+};
+
+const downloadSalesReportPdf = (report: SalesHistoryReport, sucursal: string) => {
+  const blob = new Blob([salesReportPdfBytes(report, sucursal)], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `reporte-ventas-${report.label}-${sucursal.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
 
 export default function Reportes() {
   const [period, setPeriod] = useState<ReportPeriod>("day");
@@ -190,9 +454,14 @@ export default function Reportes() {
           <h1 className="text-2xl font-bold text-white">Historial de ventas</h1>
           <p className="text-sm text-gray-400">Consulta e imprime lo vendido por dia, mes o anio.</p>
         </div>
-        <button onClick={() => window.print()} className="btn-primary flex items-center justify-center gap-2">
-          <Printer size={18} /> Imprimir
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button onClick={() => report && downloadSalesReportPdf(report, selectedSucursal)} disabled={!report} className="btn-secondary flex items-center justify-center gap-2 disabled:opacity-60">
+            <Download size={18} /> Descargar PDF
+          </button>
+          <button onClick={() => window.print()} className="btn-primary flex items-center justify-center gap-2">
+            <Printer size={18} /> Imprimir
+          </button>
+        </div>
       </div>
 
       <div className="no-print glass-panel grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-[180px_220px_1fr_180px]">
@@ -247,6 +516,54 @@ export default function Reportes() {
               <Stat label="Unidades" value={String(report.totals.unidadesVendidas)} />
               <Stat label="Descuento" value={money(report.totals.descuento)} />
               <Stat label="Items" value={String(report.totals.cantidadItems)} />
+              <Stat label="Cierres recibidos" value={String(report.totals.cantidadCierres || 0)} />
+              <Stat label="Efectivo cierre" value={money(report.totals.cierreEfectivo || 0)} />
+              <Stat label="QR cierre" value={money(report.totals.cierreQr || 0)} />
+              <Stat label="Declarado" value={money(report.totals.montoDeclarado || 0)} />
+              <Stat label="Diferencia" value={money(report.totals.diferencia || 0)} />
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Cierres enviados por vendedores</h3>
+              <table className="w-full text-left text-sm">
+                <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
+                  <tr>
+                    <th className="p-3">Fecha</th>
+                    <th className="p-3">Vendedor</th>
+                    <th className="p-3">Sucursal</th>
+                    <th className="p-3 text-right">Ventas</th>
+                    <th className="p-3 text-right">Total ventas</th>
+                    <th className="p-3 text-right">Efectivo cierre</th>
+                    <th className="p-3 text-right">QR cierre</th>
+                    <th className="p-3 text-right">Declarado</th>
+                    <th className="p-3 text-right">Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800 print:divide-gray-200">
+                  {(report.cierres || []).map((cierre) => (
+                    <tr key={cierre.id}>
+                      <td className="p-3">{new Date(cierre.fecha).toLocaleDateString("es-BO")}</td>
+                      <td className="p-3">{cierre.usuario?.nombre || "Vendedor"}</td>
+                      <td className="p-3">{branchNameFrom(cierre)}</td>
+                      <td className="p-3 text-right">{cierre.cantidadVentas}</td>
+                      <td className="p-3 text-right font-bold">{money(cierre.totalVentas)}</td>
+                      <td className="p-3 text-right font-bold text-green-300 print:text-gray-950">{money(cierre.netoEfectivo)}</td>
+                      <td className="p-3 text-right font-bold text-sky-300 print:text-gray-950">{money(cierre.netoQr)}</td>
+                      <td className="p-3 text-right">{money(cierre.montoDeclarado)}</td>
+                      <td className={`p-3 text-right font-bold ${cierre.diferencia === 0 ? "text-green-300 print:text-gray-950" : "text-red-300 print:text-gray-950"}`}>
+                        {money(cierre.diferencia)}
+                      </td>
+                    </tr>
+                  ))}
+                  {(report.cierres || []).length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="p-4 text-center text-gray-500">
+                        No hay cierre de caja para este periodo o sucursal.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             <div>
@@ -296,7 +613,7 @@ export default function Reportes() {
                     <tr key={expense.id}>
                       <td className="p-3">{new Date(expense.createdAt).toLocaleString("es-BO")}</td>
                       <td className="p-3">{expense.usuario?.nombre || "Usuario"}</td>
-                      <td className="p-3">{expense.sucursal?.nombre || "Sucursal"}</td>
+                      <td className="p-3">{branchNameFrom(expense)}</td>
                       <td className="p-3">
                         <p className="font-semibold">{expense.motivo}</p>
                         {expense.notas && <p className="print-muted text-xs text-gray-500 print:text-gray-600">{expense.notas}</p>}
@@ -321,6 +638,7 @@ export default function Reportes() {
                   <tr>
                     <th className="col-date p-3">Fecha</th>
                     <th className="col-seller p-3">Vendedor</th>
+                    <th className="p-3">Sucursal</th>
                     <th className="col-client p-3">Cliente</th>
                     <th className="col-payment p-3">Pago</th>
                     <th className="col-items p-3 text-right">Items</th>
@@ -332,6 +650,7 @@ export default function Reportes() {
                     <tr key={sale.id}>
                       <td className="p-3">{new Date(sale.createdAt).toLocaleString("es-BO")}</td>
                       <td className="p-3">{sale.usuario?.nombre || "Usuario"}</td>
+                      <td className="p-3">{branchNameFrom(sale)}</td>
                       <td className="p-3">{sale.cliente?.nombre || "Sin cliente"}</td>
                       <td className="p-3">{sale.tipoVenta} / {sale.metodoPago}</td>
                       <td className="p-3 text-right">{sale.detalles?.length || 0}</td>
@@ -341,6 +660,24 @@ export default function Reportes() {
                 </tbody>
               </table>
             </div>
+
+            {(report.cierres || []).some((cierre) => cierre.notas?.trim()) && (
+              <div>
+                <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Notas de cierre</h3>
+                <div className="space-y-2">
+                  {(report.cierres || [])
+                    .filter((cierre) => cierre.notas?.trim())
+                    .map((cierre) => (
+                      <div key={`nota-${cierre.id}`} className="rounded border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100 print:border-gray-300 print:bg-gray-50 print:text-gray-800">
+                        <p className="font-bold print:text-gray-950">
+                          Nota del vendedor - {cierre.usuario?.nombre || "Vendedor"} / {branchNameFrom(cierre)}
+                        </p>
+                        <p className="mt-1">{cierre.notas}</p>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
