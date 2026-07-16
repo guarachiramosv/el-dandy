@@ -34,10 +34,12 @@ mobile/.expo/
 mobile/ios/
 mobile/android/
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+**/keystore.properties
 
 # OS and editor files
 .DS_Store
