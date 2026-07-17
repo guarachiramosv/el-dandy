@@ -2,6 +2,7 @@
 import { prisma } from '../lib/prisma';
 import { Prisma, ProductStatus } from '@prisma/client';
 import { StockService } from './stock.service';
+import { filterAndSortBySearch } from '../utils/fuzzySearch';
 
 const stockService = new StockService();
 const DEFAULT_PRODUCT_BRAND = 'Sin marca';
@@ -16,6 +17,16 @@ const productInclude = {
   },
   imagenes: { orderBy: { orden: 'asc' as const } },
 };
+
+const productSearchFields = (product: any) => [
+  { value: product.codigo, weight: 2 },
+  { value: product.codigoRepuesto, weight: 1.9 },
+  { value: product.descripcion, weight: 1.5 },
+  { value: product.ubicacion, weight: 1.25 },
+  { value: product.marca, weight: 1 },
+  { value: product.categoria?.nombre, weight: 0.9 },
+  { value: product.sucursal?.nombre, weight: 0.7 },
+];
 
 export class ProductService {
   private formatSequentialCode(value: number) {
@@ -87,7 +98,7 @@ export class ProductService {
   }) {
     const page = Number.isFinite(params.page) && params.page! > 0 ? params.page! : 1;
     const limit = Number.isFinite(params.limit) && params.limit! > 0 ? params.limit! : 10;
-    const { search } = params;
+    const search = typeof params.search === 'string' ? params.search.trim() : '';
     const where: Prisma.ProductoWhereInput = {};
     const and: Prisma.ProductoWhereInput[] = [];
     if (params.sucursalId) {
@@ -101,18 +112,26 @@ export class ProductService {
     if (params.status === 'inactive') where.estado = 'INACTIVO';
     else if (params.status === 'discontinued') where.estado = 'DESCONTINUADO';
     else if (params.status !== 'all') where.estado = 'ACTIVO';
-    if (search) {
-      and.push({ OR: [
-        { descripcion: { contains: search, mode: 'insensitive' } },
-        { codigo: { contains: search, mode: 'insensitive' } },
-        { codigoRepuesto: { contains: search, mode: 'insensitive' } },
-        { marca: { contains: search, mode: 'insensitive' } },
-        { ubicacion: { contains: search, mode: 'insensitive' } },
-        { categoria: { nombre: { contains: search, mode: 'insensitive' } } },
-        { sucursal: { nombre: { contains: search, mode: 'insensitive' } } },
-      ] });
-    }
     if (and.length > 0) where.AND = and;
+
+    if (search) {
+      const candidates = await prisma.producto.findMany({
+        where,
+        include: productInclude,
+        orderBy: { createdAt: 'desc' },
+      });
+      const matchedItems = filterAndSortBySearch(
+        candidates.map((item) => this.applySucursalStock(item, params.sucursalId)),
+        search,
+        productSearchFields,
+        (product) => product.descripcion,
+      );
+      const total = matchedItems.length;
+      const start = (page - 1) * limit;
+      const items = matchedItems.slice(start, start + limit);
+      return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+
     const [items, total] = await Promise.all([
       prisma.producto.findMany({
         where,
@@ -135,16 +154,9 @@ export class ProductService {
 
   async getCustomerCatalog(params: { search?: string }) {
     const where: Prisma.ProductoWhereInput = { estado: 'ACTIVO', activo: true };
-    if (params.search) {
-      where.OR = [
-        { descripcion: { contains: params.search, mode: 'insensitive' } },
-        { codigo: { contains: params.search, mode: 'insensitive' } },
-        { codigoRepuesto: { contains: params.search, mode: 'insensitive' } },
-        { marca: { contains: params.search, mode: 'insensitive' } },
-      ];
-    }
+    const search = typeof params.search === 'string' ? params.search.trim() : '';
 
-    return prisma.producto.findMany({
+    const products = await prisma.producto.findMany({
       where,
       select: {
         id: true,
@@ -171,8 +183,11 @@ export class ProductService {
         sucursal: { select: { id: true, nombre: true, whatsapp: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 100,
     });
+    const items = search
+      ? filterAndSortBySearch(products, search, productSearchFields, (product) => product.descripcion)
+      : products;
+    return items.slice(0, 100);
   }
 
   async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }) {
