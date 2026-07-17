@@ -18,6 +18,7 @@ import type { PaymentMethod, Product, RemachadoMedida, RemachadoRemache, Remacha
 type DetailItem = { id: string; product: Product; quantity: number; price: number };
 
 const paymentMethods: PaymentMethod[] = ['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA'];
+const THERMAL_PRINT_WIDTH_PT = 198;
 const money = (value: number) => `Bs ${value.toFixed(2)}`;
 const toNumber = (value: string) => {
   const parsed = Number(value.replace(',', '.'));
@@ -145,7 +146,7 @@ export default function RemachadoScreen({ session }: { session: Session }) {
   const printTrabajo = async (trabajo: RemachadoTrabajo) => {
     if (!trabajo.venta) return;
     try {
-      await Print.printAsync({ html: buildThermalReceiptHtml(trabajo.venta, session.user.nombre), width: 227 });
+      await Print.printAsync({ html: buildThermalReceiptHtml(trabajo.venta, session.user.nombre), width: THERMAL_PRINT_WIDTH_PT });
     } catch (err) {
       Alert.alert('No se pudo imprimir', err instanceof Error ? err.message : 'Revisa la impresora.');
     }

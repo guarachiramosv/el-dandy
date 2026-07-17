@@ -87,7 +87,7 @@ const acceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 const apiOrigin = process.env.EXPO_PUBLIC_API_URL
   ? process.env.EXPO_PUBLIC_API_URL.replace(/\/api\/?$/, '')
-  : 'http://192.168.0.4:4000';
+  : 'https://sistema-el-dandy.onrender.com';
 
 function money(value?: number) {
   return `Bs ${(value || 0).toFixed(2)}`;

@@ -16,6 +16,7 @@ import { buildThermalReceiptHtml, ReceiptSale } from '../thermalReceipt';
 import { CartItem, Customer, PaymentMethod, Product, Session } from '../types';
 
 const paymentMethods: PaymentMethod[] = ['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA'];
+const THERMAL_PRINT_WIDTH_PT = 198;
 
 export default function SaleScreen({ session }: { session: Session }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -89,7 +90,7 @@ export default function SaleScreen({ session }: { session: Session }) {
     try {
       await Print.printAsync({
         html: buildThermalReceiptHtml(sale, session.user.nombre),
-        width: 227,
+        width: THERMAL_PRINT_WIDTH_PT,
       });
     } catch (err) {
       Alert.alert(

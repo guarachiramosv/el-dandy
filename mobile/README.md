@@ -1,49 +1,51 @@
-# El Dandy Móvil
+# El Dandy Mobile
 
-Aplicación React Native con Expo para Android y iOS.
+Aplicacion React Native con Expo para Android y iOS.
 
-El proyecto usa Expo SDK 54, compatible con Expo Go distribuido actualmente en el App Store para dispositivos físicos.
+El proyecto usa el backend hosteado:
+
+```env
+EXPO_PUBLIC_API_URL=https://sistema-el-dandy.onrender.com/api
+```
+
+El frontend web hosteado esta en:
+
+```text
+https://sistema-el-dandy-ibb8.onrender.com
+```
+
+## Ejecutar en un telefono
+
+Desde esta carpeta:
+
+```powershell
+cd C:\Users\guara\Documents\Tienda\el-dandy\mobile
+npm start
+```
+
+Tambien puedes usar el comando que ya venias usando:
+
+```powershell
+npm run start:lan
+```
+
+Ambos comandos usan el backend publico. Ya no intentan conectar a
+`http://192.168.0.54:4000/api`.
+
+Si el QR no abre en Expo Go por LAN, usa tunel:
+
+```powershell
+npm run start:tunnel
+```
+
+El tunel suele funcionar mejor cuando Windows Firewall, la red Wi-Fi o el router
+bloquean la conexion local entre el telefono y la computadora.
 
 ## Funciones incluidas
 
 - Login con usuarios y roles del sistema.
-- Consulta y búsqueda de inventario.
+- Consulta y busqueda de inventario.
 - Registro de ventas al contado.
 - Alertas de stock.
-- Persistencia segura de la sesión en el dispositivo.
-- Restricción de productos y alertas a la sucursal del vendedor.
-
-## Ejecutar en un teléfono
-
-1. Inicia el backend desde `backend`:
-
-   ```powershell
-   npm run build
-   npm start
-   ```
-
-2. Verifica que el teléfono y la computadora estén conectados al mismo Wi-Fi.
-
-3. Configura `.env` con la IP local de la computadora:
-
-   ```env
-   EXPO_PUBLIC_API_URL=http://192.168.0.4:4000/api
-   ```
-
-4. Inicia la aplicación:
-
-   ```powershell
-   npm run start:lan
-   ```
-
-5. Escanea el QR con Expo Go en Android o con la cámara en iPhone.
-
-El comando `start:lan` detecta automáticamente la IP actual de la computadora.
-
-### iPhone: permiso de red local
-
-En el iPhone abre:
-
-`Configuración > Apps > Expo Go > Red local`
-
-Activa **Red local**. Este permiso es necesario porque la app consulta el backend de la computadora.
+- Persistencia de la sesion en el dispositivo.
+- Restriccion de productos y alertas a la sucursal del vendedor.

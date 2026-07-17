@@ -18,7 +18,7 @@ import {
 } from './types';
 import type { ReceiptSale } from './thermalReceipt';
 
-const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.4:4000/api').replace(/\/$/, '');
+const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'https://sistema-el-dandy.onrender.com/api').replace(/\/$/, '');
 
 type ApiEnvelope<T> = {
   success: boolean;

@@ -4,7 +4,7 @@
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~54.0.34",
+    "expo": "~54.0.36",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-print": "~15.0.8",
@@ -19,9 +19,10 @@
     "typescript": "~5.9.2"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "npm run start:remote",
+    "start:remote": "node scripts/start-remote.mjs",
     "start:lan": "node scripts/start-lan.mjs",
-    "start:tunnel": "expo start --tunnel --clear",
+    "start:tunnel": "node scripts/start-remote.mjs --tunnel",
     "build:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1",
     "android": "expo run:android",
     "ios": "expo run:ios",

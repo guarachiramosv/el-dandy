@@ -27,6 +27,17 @@ if (-not (Test-Path $envFile)) {
   Write-Warning "Se creo mobile\.env desde .env.example. Edita EXPO_PUBLIC_API_URL con la URL publica del backend antes del APK final."
 }
 
+$envLines = Get-Content $envFile
+foreach ($line in $envLines) {
+  if ($line -match '^\s*EXPO_PUBLIC_API_URL\s*=\s*"?([^"#]+)"?\s*$') {
+    $env:EXPO_PUBLIC_API_URL = $matches[1].Trim()
+  }
+}
+
+if (-not $env:EXPO_PUBLIC_API_URL -or $env:EXPO_PUBLIC_API_URL -match '192\.168\.|localhost|tu-backend') {
+  throw "Configura mobile\.env con EXPO_PUBLIC_API_URL=https://sistema-el-dandy.onrender.com/api antes de generar el APK."
+}
+
 if (-not (Test-Path $androidDir)) {
   Push-Location $projectRoot
   try {
@@ -115,6 +126,42 @@ def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
     'signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug'
   )
   Set-Content -Encoding UTF8 $appBuildGradle $gradleText
+}
+
+$gradleText = Get-Content $appBuildGradle -Raw
+if ($gradleText -notmatch "react_native_dev_server_ip") {
+  $gradleText = $gradleText.Replace(
+    @'
+            def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
+            crunchPngs enablePngCrunchInRelease.toBoolean()
+'@,
+    @'
+            def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
+            crunchPngs enablePngCrunchInRelease.toBoolean()
+            resValue "string", "react_native_dev_server_ip", ""
+'@
+  )
+  Set-Content -Encoding UTF8 $appBuildGradle $gradleText
+}
+
+$androidFullPath = [System.IO.Path]::GetFullPath($androidDir).TrimEnd('\') + '\'
+$releaseArtifacts = @(
+  (Join-Path $androidDir "app\build\generated\assets\createBundleReleaseJsAndAssets"),
+  (Join-Path $androidDir "app\build\generated\sourcemaps\react\release"),
+  (Join-Path $androidDir "app\build\intermediates\assets\release\mergeReleaseAssets\index.android.bundle"),
+  (Join-Path $androidDir "app\build\intermediates\sourcemaps\react\release"),
+  (Join-Path $androidDir "app\build\outputs\apk\release\app-release.apk"),
+  (Join-Path $androidDir "app\build\outputs\apk\release\output-metadata.json")
+)
+
+foreach ($artifact in $releaseArtifacts) {
+  if (Test-Path $artifact) {
+    $artifactFullPath = [System.IO.Path]::GetFullPath($artifact)
+    if (-not $artifactFullPath.StartsWith($androidFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Ruta de build invalida para limpiar: $artifactFullPath"
+    }
+    Remove-Item -LiteralPath $artifactFullPath -Recurse -Force
+  }
 }
 
 Push-Location $androidDir

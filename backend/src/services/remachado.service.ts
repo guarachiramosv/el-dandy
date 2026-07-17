@@ -56,7 +56,7 @@ const trabajoInclude = {
   seguroProducto: true,
   usuario: { select: { id: true, nombre: true, email: true } },
   sucursal: true,
-  venta: { include: { detalles: true, cliente: true } },
+  venta: { include: { detalles: { include: { producto: true } }, cliente: true } },
 } satisfies Prisma.RemachadoTrabajoInclude;
 
 export class RemachadoService {
@@ -426,7 +426,7 @@ export class RemachadoService {
         return {
           tipoLinea: 'PRODUCTO' as const,
           productoId: producto.id,
-          descripcion: `${accessory.role}: ${producto.descripcion}`,
+          descripcion: producto.descripcion,
           unidadVenta: producto.unidadVenta,
           cantidad: accessory.cantidad,
           precioUnitario: accessory.precioUnitario,

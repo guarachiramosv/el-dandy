@@ -114,9 +114,34 @@ const escapeHtml = (value: string | number | null | undefined) =>
 const salePaymentLabel = (tipoVenta: 'CONTADO' | 'CREDITO', metodoPago: PaymentMethod) =>
   tipoVenta === 'CREDITO' ? 'CREDITO' : metodoPago;
 
-const productConditionLabel = (condition?: string | null) => condition === 'USADO' ? 'Usado' : 'Nuevo';
+const brandLogoHtml = () => `
+  <svg class="brand-logo" viewBox="0 0 280 78" role="img" aria-label="Repuestos Diesel Dandy">
+    <g transform="translate(13 12)">
+      <circle cx="24" cy="24" r="21" fill="none" stroke="#000" stroke-width="5"/>
+      <circle cx="24" cy="24" r="12" fill="none" stroke="#000" stroke-width="4"/>
+      <g fill="#000">
+        <rect x="21" y="-2" width="6" height="10" rx="1"/>
+        <rect x="21" y="40" width="6" height="10" rx="1"/>
+        <rect x="-2" y="21" width="10" height="6" rx="1"/>
+        <rect x="40" y="21" width="10" height="6" rx="1"/>
+      </g>
+      <g transform="translate(18 12) rotate(-28 16 22)">
+        <rect x="8" y="0" width="23" height="19" rx="2" fill="#000"/>
+        <rect x="13" y="18" width="6" height="28" rx="2" fill="#000"/>
+        <circle cx="16" cy="48" r="7" fill="none" stroke="#000" stroke-width="5"/>
+      </g>
+    </g>
+    <text x="72" y="23" fill="#000" font-family="Arial Black, Impact, sans-serif" font-size="17" font-weight="900">REPUESTOS</text>
+    <text x="72" y="50" fill="#000" font-family="Arial Black, Impact, sans-serif" font-size="26" font-weight="900">DIESEL DANDY</text>
+    <text x="74" y="67" fill="#000" font-family="Arial, sans-serif" font-size="10" font-weight="900">CALIDAD Y CONFIANZA</text>
+  </svg>
+`;
 
-const quantityLabel = (value: number, unit?: string | null) => {
+const quantityLabel = (value: number, unit?: string | null, tipoLinea?: string | null) => {
+  if (tipoLinea === 'REMACHADO' || unit === 'MEDIO_JUEGO' || unit === 'JUEGO') {
+    if (value === 0.5) return '1/2';
+    if (value === 1) return '1';
+  }
   const quantity = value.toLocaleString('es-BO', { maximumFractionDigits: 2 });
   if (unit === 'METRO') return `${quantity} m`;
   return quantity;
@@ -162,7 +187,7 @@ function buildTicketText(sale: ReceiptSale, fallbackSellerName = '') {
 }
 
 export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = '') {
-  const saleReceiptCopyHtml = (copyLabel: 'COPIA CLIENTE' | 'COPIA VENDEDOR') => {
+  const saleReceiptCopyHtml = () => {
     const details = sale.detalles || [];
     const { date, time } = formatDateParts(sale.createdAt);
     const sellerName = sale.usuario?.nombre || fallbackSellerName || 'Vendedor';
@@ -172,18 +197,15 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
     const paymentLabel = salePaymentLabel(sale.tipoVenta, sale.metodoPago);
     const rows = details.map((detail) => {
       const product = detail.producto;
-      const code = product?.codigo || detail.tipoLinea || '';
       const description = product?.descripcion || detail.descripcion || 'Detalle de venta';
-      const condition = product ? productConditionLabel(product.condicion) : detail.tipoLinea === 'REMACHADO' ? 'Remachado' : '';
       const unit = detail.unidadVenta || product?.unidadVenta;
 
       return `
         <tr>
           <td class="item-description">
             <strong>${escapeHtml(description)}</strong>
-            <span>${escapeHtml([code, condition].filter(Boolean).join(' - '))}</span>
           </td>
-          <td class="numeric">${escapeHtml(quantityLabel(detail.cantidad, unit))}</td>
+          <td class="numeric">${escapeHtml(quantityLabel(detail.cantidad, unit, detail.tipoLinea))}</td>
           <td class="numeric">${escapeHtml(moneyShort(detail.precioUnitario))}</td>
           <td class="numeric strong">${escapeHtml(moneyShort(detail.subtotal))}</td>
         </tr>
@@ -193,16 +215,9 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
     return `
       <section class="receipt-copy">
         <header class="brand-header">
-          <div class="brand-mark">DD</div>
-          <div>
-            <p class="eyebrow">Repuestos Diesel</p>
-            <h1>DANDY</h1>
-            <p class="tagline">Calidad y confianza</p>
-          </div>
+          ${brandLogoHtml()}
         </header>
-        <div class="copy-badge">${copyLabel}</div>
         <div class="meta-grid">
-          <div><span>Nota</span><strong>${escapeHtml(formatSaleNumber(sale.id))}</strong></div>
           <div><span>Fecha</span><strong>${escapeHtml(date)} ${escapeHtml(time)}</strong></div>
           <div><span>Cliente</span><strong>${escapeHtml(customerName)}</strong></div>
           <div><span>NIT/CI</span><strong>${escapeHtml(customerNit || '-')}</strong></div>
@@ -229,8 +244,8 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
         </div>
         <footer>
           <p>${escapeHtml(branchName)} - WhatsApp 76982111</p>
-          <p>Nota de venta sin valor fiscal</p>
-          ${copyLabel === 'COPIA VENDEDOR' ? `<div class="signature">Firma / conformidad</div>` : `<p class="thanks">Gracias por su preferencia.</p>`}
+          <p>Sin valor fiscal</p>
+          <p class="thanks">Gracias por su preferencia.</p>
         </footer>
       </section>
     `;
@@ -243,7 +258,7 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       @page {
-        size: 80mm auto;
+        size: 70mm auto;
         margin: 0;
       }
       * {
@@ -260,126 +275,105 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
         line-height: 1.25;
       }
       body {
-        width: 80mm;
+        width: 70mm;
       }
       .receipt-copy {
-        width: 80mm;
-        padding: 4mm 3mm 6mm;
+        width: 70mm;
+        margin: 0;
+        padding: 2mm 1.2mm 5mm;
         page-break-after: always;
+        color: #000;
+        font-weight: 700;
       }
       .receipt-copy:last-child {
         page-break-after: auto;
       }
       .brand-header {
-        display: grid;
-        grid-template-columns: 13mm 1fr;
-        gap: 2.5mm;
-        align-items: center;
-        border: 1px solid #111;
-        border-bottom: 4px solid #f97316;
-        padding: 2.5mm;
-        background: #111;
-        color: #fff;
-      }
-      .brand-mark {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 11mm;
-        height: 11mm;
-        border: 2px solid #f97316;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 900;
-      }
-      h1, p {
-        margin: 0;
-      }
-      h1 {
-        color: #f97316;
-        font-size: 19px;
-        line-height: 1;
-        letter-spacing: 0;
-      }
-      .eyebrow {
-        font-size: 9px;
-        font-weight: 800;
-        text-transform: uppercase;
-      }
-      .tagline {
-        margin-top: 1mm;
-        font-size: 8px;
-        text-transform: uppercase;
-      }
-      .copy-badge {
-        margin: 2.5mm 0;
-        border: 1px dashed #111;
-        padding: 1.5mm;
+        border-top: 1.5px solid #000;
+        border-bottom: 1.5px solid #000;
+        padding: 1mm 0 1mm;
         text-align: center;
-        font-size: 11px;
-        font-weight: 900;
-        text-transform: uppercase;
+      }
+      .brand-logo {
+        display: block;
+        width: 63mm;
+        height: 17mm;
+        margin: 0 auto;
+      }
+      p {
+        margin: 0;
       }
       .meta-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 1.5mm;
+        gap: 1mm;
+        margin-top: 1.5mm;
       }
       .meta-grid div {
-        border: 1px solid #ddd;
-        padding: 1.5mm;
+        border: 1px solid #000;
+        padding: 1mm;
       }
       .meta-grid span,
       .item-description span,
       footer {
         display: block;
-        color: #555;
-        font-size: 8px;
+        color: #000;
+        font-size: 7.5px;
+        font-weight: 700;
       }
       .meta-grid strong {
         display: block;
-        margin-top: 0.5mm;
+        margin-top: 0.3mm;
         font-size: 9px;
+        font-weight: 900;
       }
       table {
         width: 100%;
-        margin-top: 3mm;
+        margin-top: 2mm;
         border-collapse: collapse;
         table-layout: fixed;
       }
       th {
         border-top: 2px solid #111;
-        border-bottom: 1px solid #111;
-        padding: 1.5mm 0.8mm;
-        font-size: 8px;
+        border-bottom: 2px solid #111;
+        padding: 1mm 0.35mm;
+        font-size: 7.6px;
+        font-weight: 900;
         text-align: left;
         text-transform: uppercase;
       }
       th:first-child {
-        width: 41%;
+        width: 43%;
       }
       th:nth-child(2) {
-        width: 16%;
+        width: 11%;
       }
-      th:nth-child(3),
-      th:nth-child(4) {
-        width: 21.5%;
+      th:nth-child(3), td:nth-child(3) {
+        width: 21%;
+      }
+      th:nth-child(4), td:nth-child(4) {
+        width: 25%;
       }
       td {
-        border-bottom: 1px solid #e5e5e5;
-        padding: 1.8mm 0.8mm;
+        border-bottom: 1px solid #000;
+        padding: 1.3mm 0.35mm;
         vertical-align: top;
         overflow-wrap: anywhere;
+        font-size: 8.8px;
+        font-weight: 800;
       }
       .item-description strong {
         display: block;
-        font-size: 9px;
+        font-size: 9.2px;
+        font-weight: 900;
       }
       .numeric {
         text-align: right;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
       }
       .strong {
-        font-weight: 800;
+        font-weight: 900;
       }
       .empty {
         padding: 4mm 0;
@@ -387,46 +381,46 @@ export function buildThermalReceiptHtml(sale: ReceiptSale, fallbackSellerName = 
         color: #777;
       }
       .summary {
-        margin-top: 3mm;
-        border: 1px solid #111;
+        margin-top: 2.5mm;
+        border: 1.5px solid #111;
       }
       .summary div {
         display: flex;
         justify-content: space-between;
         gap: 2mm;
-        padding: 1.5mm 2mm;
-        border-bottom: 1px solid #ddd;
+        padding: 1.3mm 1.7mm;
+        border-bottom: 1px solid #000;
+        font-size: 9.5px;
       }
       .summary div:last-child {
         border-bottom: 0;
       }
       .grand-total {
-        background: #111;
-        color: #fff;
-        font-size: 13px;
+        background: #fff;
+        color: #000;
+        font-size: 12px;
         font-weight: 900;
       }
       footer {
-        margin-top: 3mm;
+        margin-top: 2.5mm;
         text-align: center;
       }
       .thanks {
         margin-top: 1mm;
-        color: #111;
+        color: #000;
         font-weight: 800;
       }
       .signature {
         margin-top: 8mm;
-        border-top: 1px solid #111;
+        border-top: 2px solid #111;
         padding-top: 1mm;
-        color: #111;
-        font-size: 9px;
+        color: #000;
+        font-size: 10px;
       }
     </style>
   </head>
   <body>
-    ${saleReceiptCopyHtml('COPIA CLIENTE')}
-    ${saleReceiptCopyHtml('COPIA VENDEDOR')}
+    ${saleReceiptCopyHtml()}
   </body>
 </html>`;
 }
