@@ -9,6 +9,7 @@ import { fetchProductInventoryReport, ProductInventoryReport, ReportPeriod } fro
 import ImageLightbox from "../components/ImageLightbox";
 import { productImageUrl } from "../utils/images";
 import { getErrorMessage } from "../utils/errors";
+import { filterAndSortBySearch } from "../utils/fuzzySearch";
 
 const today = new Date();
 const defaultDay = today.toISOString().slice(0, 10);
@@ -208,15 +209,19 @@ export default function Inventario() {
   }, [isSeller, loadMovements]);
 
   const filtered = useMemo(() => {
-    const search = searchTerm.toLowerCase();
-    return products.filter((product) =>
-      product.descripcion.toLowerCase().includes(search) ||
-      product.codigo.toLowerCase().includes(search) ||
-      (product.codigoRepuesto || "").toLowerCase().includes(search) ||
-      product.marca.toLowerCase().includes(search) ||
-      (product.categoria?.nombre || "").toLowerCase().includes(search) ||
-      (product.sucursal?.nombre || "").toLowerCase().includes(search) ||
-      (product.ubicacion || "").toLowerCase().includes(search)
+    return filterAndSortBySearch(
+      products,
+      searchTerm,
+      (product) => [
+        { value: product.codigo, weight: 2 },
+        { value: product.codigoRepuesto, weight: 1.9 },
+        { value: product.descripcion, weight: 1.5 },
+        { value: product.ubicacion, weight: 1.25 },
+        { value: product.marca, weight: 1 },
+        { value: product.categoria?.nombre, weight: 0.9 },
+        { value: product.sucursal?.nombre, weight: 0.7 },
+      ],
+      (product) => product.descripcion,
     );
   }, [products, searchTerm]);
 

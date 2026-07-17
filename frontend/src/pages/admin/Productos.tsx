@@ -16,6 +16,7 @@ import {
 import { fetchCategories, fetchSucursales } from "../../services/catalog";
 import { uploadProductImages } from "../../services/uploads";
 import { getErrorMessage } from "../../utils/errors";
+import { filterAndSortBySearch } from "../../utils/fuzzySearch";
 
 const statusFilterOptions: Array<{ value: ProductStatusFilter | "deleted"; label: string }> = [
   { value: "active", label: "Activos" },
@@ -82,18 +83,20 @@ export default function Productos() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  const filteredProducts = products.filter(p => {
-    const search = searchTerm.toLowerCase();
-    return (
-      p.descripcion.toLowerCase().includes(search) ||
-      p.codigo.toLowerCase().includes(search) ||
-      (p.codigoRepuesto || "").toLowerCase().includes(search) ||
-      p.marca.toLowerCase().includes(search) ||
-      (p.categoria?.nombre || "").toLowerCase().includes(search) ||
-      (p.sucursal?.nombre || "").toLowerCase().includes(search) ||
-      (p.ubicacion || "").toLowerCase().includes(search)
-    );
-  });
+  const filteredProducts = filterAndSortBySearch(
+    products,
+    searchTerm,
+    (product) => [
+      { value: product.codigo, weight: 2 },
+      { value: product.codigoRepuesto, weight: 1.9 },
+      { value: product.descripcion, weight: 1.5 },
+      { value: product.ubicacion, weight: 1.25 },
+      { value: product.marca, weight: 1 },
+      { value: product.categoria?.nombre, weight: 0.9 },
+      { value: product.sucursal?.nombre, weight: 0.7 },
+    ],
+    (product) => product.descripcion,
+  );
 
   const handleNew = () => {
     setSaveError(null);

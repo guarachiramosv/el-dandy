@@ -18,6 +18,7 @@ import { getCurrentUser } from "../services/auth";
 import { createCustomer, fetchCustomers } from "../services/customers";
 import { searchProductsForSale } from "../services/products";
 import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
+import { filterAndSortBySearch, getSearchTerms, normalizeSearchText } from "../utils/fuzzySearch";
 
 interface CartItem {
   product: Product;
@@ -35,12 +36,6 @@ const sellerPaymentOptions = ["EFECTIVO", "QR", "CREDITO"] as const;
 type SellerPaymentOption = (typeof sellerPaymentOptions)[number];
 const salePaymentLabel = (tipoVenta: "CONTADO" | "CREDITO", metodoPago: PaymentMethod) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
-const normalizeSearchText = (value?: string | null) =>
-  (value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
 
 const productUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "unidades";
 const productStep = (product: Product) => product.unidadVenta === "METRO" ? 0.5 : 1;
@@ -153,40 +148,23 @@ export default function Ventas() {
   const clearProductSearch = () => setSearchTerm("");
 
   const filteredProducts = useMemo(() => {
-    const terms = normalizeSearchText(searchTerm).split(/\s+/).filter(Boolean);
+    const terms = getSearchTerms(searchTerm);
     if (terms.length === 0) return [];
-    const sourceProducts = searchResults.length > 0 ? searchResults : products;
-    return sourceProducts
-      .map((product) => {
-        const codigo = normalizeSearchText(product.codigo);
-        const codigoRepuesto = normalizeSearchText(product.codigoRepuesto);
-        const descripcion = normalizeSearchText(product.descripcion);
-        const marca = normalizeSearchText(product.marca);
-        const categoria = normalizeSearchText(product.categoria?.nombre);
-        const sucursal = normalizeSearchText(product.sucursal?.nombre);
-        const ubicacion = normalizeSearchText(product.ubicacion);
-        const haystack = [codigo, codigoRepuesto, descripcion, marca, categoria, sucursal, ubicacion].join(" ");
-        const matches = terms.every((term) => haystack.includes(term));
-        if (!matches) return null;
-
-        const score = terms.reduce((acc, term) => {
-          if (codigo === term || codigoRepuesto === term) return acc + 100;
-          if (codigo.startsWith(term) || codigoRepuesto.startsWith(term)) return acc + 80;
-          if (codigo.includes(term) || codigoRepuesto.includes(term)) return acc + 65;
-          if (descripcion.startsWith(term)) return acc + 50;
-          if (descripcion.includes(term)) return acc + 35;
-          if (ubicacion.startsWith(term)) return acc + 30;
-          if (ubicacion.includes(term)) return acc + 25;
-          if (marca.includes(term) || categoria.includes(term)) return acc + 15;
-          if (sucursal.includes(term)) return acc + 10;
-          return acc + 5;
-        }, 0);
-
-        return { product, score };
-      })
-      .filter((item): item is { product: Product; score: number } => Boolean(item))
-      .sort((a, b) => b.score - a.score || a.product.descripcion.localeCompare(b.product.descripcion))
-      .map((item) => item.product);
+    const sourceProducts = Array.from(new Map([...products, ...searchResults].map((product) => [product.id, product])).values());
+    return filterAndSortBySearch(
+      sourceProducts,
+      searchTerm,
+      (product) => [
+        { value: product.codigo, weight: 2 },
+        { value: product.codigoRepuesto, weight: 1.9 },
+        { value: product.descripcion, weight: 1.5 },
+        { value: product.ubicacion, weight: 1.25 },
+        { value: product.marca, weight: 1 },
+        { value: product.categoria?.nombre, weight: 0.9 },
+        { value: product.sucursal?.nombre, weight: 0.7 },
+      ],
+      (product) => product.descripcion,
+    );
   }, [products, searchResults, searchTerm]);
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
