@@ -20,6 +20,15 @@ const money = (value: number) => `Bs ${value.toLocaleString("es-BO", { minimumFr
 const branchNameFrom = (item: { usuario?: { sucursal?: { nombre: string } }; sucursal?: { nombre: string } }) =>
   item.usuario?.sucursal?.nombre || item.sucursal?.nombre || "Sucursal";
 
+const salePaymentLabel = (tipoVenta: string, metodoPago: string) =>
+  tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
+
+const topSoldProductFrom = (report: SalesHistoryReport) =>
+  [...(report.productosVendidos || [])].sort((a, b) => b.total - a.total || b.cantidad - a.cantidad)[0] || null;
+
+const topExpenseFrom = (report: SalesHistoryReport) =>
+  [...(report.gastos || [])].sort((a, b) => b.monto - a.monto)[0] || null;
+
 const sanitizePdfText = (value: string) =>
   Array.from(value)
     .map((char) => {
@@ -93,7 +102,54 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       branch: branchNameFrom(cierre),
       note: cierre.notas || "",
     }));
-  const rows: Array<{ kind: "section" | "closing" | "sale" | "note"; cells: string[] }> = [
+  const topSoldProduct = topSoldProductFrom(report);
+  const topExpense = topExpenseFrom(report);
+  const rows: Array<{ kind: "section" | "summary" | "closing" | "product" | "expense" | "sale" | "note"; cells: string[] }> = [
+    { kind: "section", cells: ["Resumen del dia"] },
+    {
+      kind: "summary",
+      cells: [
+        "Producto mas vendido",
+        topSoldProduct
+          ? `${topSoldProduct.codigo} - ${topSoldProduct.descripcion} / ${topSoldProduct.cantidad} unid. / ${money(topSoldProduct.total)}`
+          : "Sin ventas registradas",
+      ],
+    },
+    {
+      kind: "summary",
+      cells: [
+        "Mayor gasto",
+        topExpense
+          ? `${topExpense.motivo} / ${money(topExpense.monto)} / ${topExpense.metodoPago} / ${topExpense.usuario?.nombre || "Usuario"}`
+          : "Sin gastos registrados",
+      ],
+    },
+    { kind: "summary", cells: ["Ventas efectivo / QR", `${money(report.totals.totalEfectivo)} / ${money(report.totals.totalQr)}`] },
+    { kind: "summary", cells: ["Gastos efectivo / QR", `${money(report.totals.gastoEfectivo || 0)} / ${money(report.totals.gastoQr || 0)}`] },
+    { kind: "summary", cells: ["Neto efectivo / QR", `${money(report.totals.netoEfectivo || 0)} / ${money(report.totals.netoQr || 0)}`] },
+    { kind: "section", cells: ["Productos vendidos"] },
+    ...(report.productosVendidos || []).map((item) => ({
+      kind: "product" as const,
+      cells: [
+        item.codigo,
+        item.descripcion,
+        item.sucursal,
+        String(item.cantidad),
+        money(item.total),
+      ],
+    })),
+    { kind: "section", cells: ["Gastos registrados"] },
+    ...(report.gastos || []).map((expense) => ({
+      kind: "expense" as const,
+      cells: [
+        new Date(expense.createdAt).toLocaleString("es-BO"),
+        expense.usuario?.nombre || "Usuario",
+        branchNameFrom(expense),
+        expense.motivo,
+        expense.metodoPago,
+        money(expense.monto),
+      ],
+    })),
     { kind: "section", cells: ["Cierres enviados por vendedores"] },
     ...(report.cierres || []).map((cierre) => ({
       kind: "closing" as const,
@@ -117,7 +173,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
         sale.usuario?.nombre || "Usuario",
         branchNameFrom(sale),
         sale.cliente?.nombre || "Sin cliente",
-        `${sale.tipoVenta} / ${sale.metodoPago}`,
+        salePaymentLabel(sale.tipoVenta, sale.metodoPago),
         String(sale.detalles?.length || 0),
         money(sale.total),
       ],
@@ -179,7 +235,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     if (row.kind === "section") {
       page += pdfFillRect(margin, y - 4, pageWidth - margin * 2, 18, "0.92 0.93 0.95");
       page += pdfText(row.cells[0], margin + 6, y + 2, 9, true);
-      if (row.cells[0].startsWith("Notas")) {
+      if (row.cells[0].startsWith("Resumen") || row.cells[0].startsWith("Notas")) {
         y -= 26;
         return;
       }
@@ -194,6 +250,19 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
         page += pdfText("QR", 520, y + 4, 7, true);
         page += pdfText("Declarado", 590, y + 4, 7, true);
         page += pdfText("Dif.", 700, y + 4, 7, true);
+      } else if (row.cells[0].startsWith("Productos")) {
+        page += pdfText("Codigo", 36, y + 4, 7, true);
+        page += pdfText("Producto", 105, y + 4, 7, true);
+        page += pdfText("Sucursal", 420, y + 4, 7, true);
+        page += pdfText("Cant.", 580, y + 4, 7, true);
+        page += pdfText("Total", 670, y + 4, 7, true);
+      } else if (row.cells[0].startsWith("Gastos")) {
+        page += pdfText("Fecha", 36, y + 4, 7, true);
+        page += pdfText("Vendedor", 160, y + 4, 7, true);
+        page += pdfText("Sucursal", 270, y + 4, 7, true);
+        page += pdfText("Motivo", 390, y + 4, 7, true);
+        page += pdfText("Pago", 610, y + 4, 7, true);
+        page += pdfText("Monto", 690, y + 4, 7, true);
       } else {
         page += pdfText("Fecha", 36, y + 4, 7, true);
         page += pdfText("Vendedor", 156, y + 4, 7, true);
@@ -208,7 +277,10 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     }
 
     page += pdfLine(margin, y - 3, pageWidth - margin, y - 3);
-    if (row.kind === "closing") {
+    if (row.kind === "summary") {
+      page += pdfText(fitPdfText(row.cells[0], 28), 42, y + 3, 8, true);
+      page += pdfText(fitPdfText(row.cells[1], 112), 210, y + 3, 8);
+    } else if (row.kind === "closing") {
       page += pdfText(fitPdfText(row.cells[0], 12), 36, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[1], 24), 100, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[2], 14), 230, y + 3, 7);
@@ -225,6 +297,19 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       noteLines.forEach((line, index) => {
         page += pdfText(line, margin + 8, y - 10 - index * 10, 8);
       });
+    } else if (row.kind === "product") {
+      page += pdfText(fitPdfText(row.cells[0], 12), 36, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 50), 105, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 22), 420, y + 3, 7);
+      page += pdfText(row.cells[3], 580, y + 3, 7);
+      page += pdfText(row.cells[4], 670, y + 3, 7);
+    } else if (row.kind === "expense") {
+      page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 18), 160, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 18), 270, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[3], 34), 390, y + 3, 7);
+      page += pdfText(row.cells[4], 610, y + 3, 7);
+      page += pdfText(row.cells[5], 690, y + 3, 7);
     } else {
       page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[1], 20), 156, y + 3, 7);
@@ -320,6 +405,8 @@ export default function Reportes() {
   }, []);
 
   const selectedSucursal = sucursales.find((item) => item.id === sucursalId)?.nombre || "Todas";
+  const topSoldProduct = report ? topSoldProductFrom(report) : null;
+  const topExpense = report ? topExpenseFrom(report) : null;
 
   return (
     <section className="flex h-full flex-col gap-5 p-6 text-gray-100">
@@ -524,6 +611,35 @@ export default function Reportes() {
             </div>
 
             <div>
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Resumen del dia</h3>
+              <div className="grid gap-3 lg:grid-cols-3">
+                <SummaryCard
+                  label="Producto mas vendido"
+                  title={topSoldProduct ? topSoldProduct.descripcion : "Sin ventas registradas"}
+                  detail={
+                    topSoldProduct
+                      ? `${topSoldProduct.codigo} - ${topSoldProduct.cantidad} unid. - ${money(topSoldProduct.total)}`
+                      : "No hay productos vendidos en este periodo."
+                  }
+                />
+                <SummaryCard
+                  label="Mayor gasto"
+                  title={topExpense ? topExpense.motivo : "Sin gastos registrados"}
+                  detail={
+                    topExpense
+                      ? `${money(topExpense.monto)} - ${topExpense.metodoPago} - ${topExpense.usuario?.nombre || "Usuario"}`
+                      : "No hay gastos en este periodo."
+                  }
+                />
+                <SummaryCard
+                  label="Efectivo / QR"
+                  title={`${money(report.totals.totalEfectivo)} / ${money(report.totals.totalQr)}`}
+                  detail={`Gastos: ${money(report.totals.gastoEfectivo || 0)} efectivo / ${money(report.totals.gastoQr || 0)} QR`}
+                />
+              </div>
+            </div>
+
+            <div>
               <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Cierres enviados por vendedores</h3>
               <table className="w-full text-left text-sm">
                 <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
@@ -652,7 +768,7 @@ export default function Reportes() {
                       <td className="p-3">{sale.usuario?.nombre || "Usuario"}</td>
                       <td className="p-3">{branchNameFrom(sale)}</td>
                       <td className="p-3">{sale.cliente?.nombre || "Sin cliente"}</td>
-                      <td className="p-3">{sale.tipoVenta} / {sale.metodoPago}</td>
+                      <td className="p-3">{salePaymentLabel(sale.tipoVenta, sale.metodoPago)}</td>
                       <td className="p-3 text-right">{sale.detalles?.length || 0}</td>
                       <td className="p-3 text-right font-bold">{money(sale.total)}</td>
                     </tr>
@@ -682,6 +798,16 @@ export default function Reportes() {
         )}
       </div>
     </section>
+  );
+}
+
+function SummaryCard({ label, title, detail }: { label: string; title: string; detail: string }) {
+  return (
+    <div className="print-card rounded-lg border border-gray-700 bg-grafito-900 p-4 print:border-gray-300 print:bg-white">
+      <p className="print-muted text-xs uppercase text-gray-500 print:text-gray-600">{label}</p>
+      <p className="print-strong mt-1 text-lg font-black text-white print:text-gray-950">{title}</p>
+      <p className="print-muted mt-1 text-sm text-gray-400 print:text-gray-700">{detail}</p>
+    </div>
   );
 }
 
