@@ -44,12 +44,6 @@ const formatDateParts = (value?: string) => {
   return { date: `${day}/${month}/${year}`, time: `${hours}:${minutes}` };
 };
 
-const formatSaleNumber = (saleId: string) => {
-  const digits = saleId.replace(/\D/g, "");
-  if (digits) return digits.slice(-7).padStart(7, "0");
-  return normalizeText(saleId).replace(/[^a-zA-Z0-9]/g, "").slice(-7).padStart(7, "0").toUpperCase();
-};
-
 const wrapText = (value: string, width: number) => {
   const words = normalizeText(value).split(" ").filter(Boolean);
   const lines: string[] = [];
@@ -164,6 +158,16 @@ function topSoldLines(summary: DailySalesSummary) {
     .slice(0, 5);
 }
 
+function expenseItems(summary: DailySalesSummary) {
+  return [...(summary.gastos?.items || [])].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+function topExpense(summary: DailySalesSummary) {
+  return [...(summary.gastos?.items || [])].sort((a, b) => b.monto - a.monto)[0] || null;
+}
+
 function buildCashClosingText(
   summary: DailySalesSummary,
   fallbackSellerName = "",
@@ -180,6 +184,8 @@ function buildCashClosingText(
   const difference = closing?.diferencia ?? declaredCash - netCash;
   const notes = normalizeText(closing?.notas || options.notes || "");
   const bestSellers = topSoldLines(summary);
+  const expensesDetail = expenseItems(summary);
+  const biggestExpense = topExpense(summary);
 
   const lines = [
     repeat("="),
@@ -222,6 +228,29 @@ function buildCashClosingText(
     center("EFECTIVO PARA DEPOSITO"),
     center(money(declaredCash)),
   );
+
+  if (biggestExpense) {
+    lines.push(repeat("-"), center("GASTO MAYOR"));
+    lines.push(truncate(normalizeText(biggestExpense.motivo), TICKET_WIDTH));
+    lines.push(lineBetween(biggestExpense.metodoPago, money(biggestExpense.monto)));
+  }
+
+  lines.push(repeat("-"), center("DETALLE GASTOS"));
+  if (expensesDetail.length === 0) {
+    lines.push(center("Sin gastos registrados"));
+  } else {
+    expensesDetail.forEach((expense, index) => {
+      const { time: expenseTime } = formatDateParts(expense.createdAt);
+      lines.push(`${index + 1}. ${expenseTime} ${expense.metodoPago}`);
+      wrapText(expense.motivo, TICKET_WIDTH).forEach((line, lineIndex) => {
+        lines.push(lineIndex === 0 ? truncate(line, TICKET_WIDTH) : `  ${truncate(line, TICKET_WIDTH - 2)}`);
+      });
+      if (expense.notas) {
+        wrapText(`Nota: ${expense.notas}`, TICKET_WIDTH).forEach((line) => lines.push(truncate(line, TICKET_WIDTH)));
+      }
+      lines.push(lineBetween("Monto:", money(expense.monto)));
+    });
+  }
 
   if (notes) {
     lines.push(repeat("-"), "Nota:");
