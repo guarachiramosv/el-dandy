@@ -164,10 +164,6 @@ function expenseItems(summary: DailySalesSummary) {
   );
 }
 
-function topExpense(summary: DailySalesSummary) {
-  return [...(summary.gastos?.items || [])].sort((a, b) => b.monto - a.monto)[0] || null;
-}
-
 function buildCashClosingText(
   summary: DailySalesSummary,
   fallbackSellerName = "",
@@ -185,7 +181,6 @@ function buildCashClosingText(
   const notes = normalizeText(closing?.notas || options.notes || "");
   const bestSellers = topSoldLines(summary);
   const expensesDetail = expenseItems(summary);
-  const biggestExpense = topExpense(summary);
 
   const lines = [
     repeat("="),
@@ -228,12 +223,6 @@ function buildCashClosingText(
     center("EFECTIVO PARA DEPOSITO"),
     center(money(declaredCash)),
   );
-
-  if (biggestExpense) {
-    lines.push(repeat("-"), center("GASTO MAYOR"));
-    lines.push(truncate(normalizeText(biggestExpense.motivo), TICKET_WIDTH));
-    lines.push(lineBetween(biggestExpense.metodoPago, money(biggestExpense.monto)));
-  }
 
   lines.push(repeat("-"), center("DETALLE GASTOS"));
   if (expensesDetail.length === 0) {
