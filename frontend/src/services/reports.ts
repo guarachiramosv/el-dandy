@@ -140,6 +140,8 @@ export type SalesHistoryReport = {
       cantidad: number;
       precioUnitario: number;
       subtotal: number;
+      descripcion?: string | null;
+      tipoLinea?: string;
       producto?: {
         codigo: string;
         descripcion: string;

@@ -23,11 +23,24 @@ const branchNameFrom = (item: { usuario?: { sucursal?: { nombre: string } }; suc
 const salePaymentLabel = (tipoVenta: string, metodoPago: string) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
 
-const topSoldProductFrom = (report: SalesHistoryReport) =>
-  [...(report.productosVendidos || [])].sort((a, b) => b.total - a.total || b.cantidad - a.cantidad)[0] || null;
+const remainingAfterExpenses = (report: SalesHistoryReport) =>
+  Math.max((report.totals.totalEfectivo || 0) + (report.totals.totalQr || 0) - (report.totals.totalGastos || 0), 0);
 
-const topExpenseFrom = (report: SalesHistoryReport) =>
-  [...(report.gastos || [])].sort((a, b) => b.monto - a.monto)[0] || null;
+const saleDetailRowsFrom = (report: SalesHistoryReport) =>
+  report.ventas.flatMap((sale) =>
+    (sale.detalles || []).map((detail) => ({
+      id: `${sale.id}-${detail.id}`,
+      fecha: sale.createdAt,
+      vendedor: sale.usuario?.nombre || "Usuario",
+      sucursal: branchNameFrom(sale),
+      pago: salePaymentLabel(sale.tipoVenta, sale.metodoPago),
+      producto: detail.producto?.descripcion || detail.descripcion || "Detalle",
+      codigo: detail.producto?.codigo || detail.tipoLinea || "",
+      cantidad: detail.cantidad,
+      precioUnitario: detail.precioUnitario,
+      total: detail.subtotal,
+    })),
+  );
 
 const sanitizePdfText = (value: string) =>
   Array.from(value)
@@ -102,85 +115,43 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       branch: branchNameFrom(cierre),
       note: cierre.notas || "",
     }));
-  const topSoldProduct = topSoldProductFrom(report);
-  const topExpense = topExpenseFrom(report);
-  const rows: Array<{ kind: "section" | "summary" | "closing" | "product" | "expense" | "sale" | "note"; cells: string[] }> = [
-    { kind: "section", cells: ["Resumen del dia"] },
-    {
-      kind: "summary",
+  const saleDetailRows = saleDetailRowsFrom(report);
+  const rows: Array<{ kind: "section" | "summary" | "saleDetail" | "expense" | "note"; cells: string[] }> = [
+    { kind: "section", cells: ["Resumen de caja"] },
+    { kind: "summary", cells: ["Ventas en efectivo", money(report.totals.totalEfectivo || 0)] },
+    { kind: "summary", cells: ["Ventas por QR", money(report.totals.totalQr || 0)] },
+    { kind: "summary", cells: ["Total ventas EFECTIVO + QR", money((report.totals.totalEfectivo || 0) + (report.totals.totalQr || 0))] },
+    { kind: "summary", cells: ["Gastos en efectivo", money(report.totals.gastoEfectivo || 0)] },
+    { kind: "summary", cells: ["Gastos por QR", money(report.totals.gastoQr || 0)] },
+    { kind: "summary", cells: ["Total gastos", money(report.totals.totalGastos || 0)] },
+    { kind: "summary", cells: ["Queda en caja despues de gastos", money(remainingAfterExpenses(report))] },
+    { kind: "section", cells: ["Detalle de ventas del vendedor"] },
+    ...saleDetailRows.map((item) => ({
+      kind: "saleDetail" as const,
       cells: [
-        "Producto mas vendido",
-        topSoldProduct
-          ? `${topSoldProduct.codigo} - ${topSoldProduct.descripcion} / ${topSoldProduct.cantidad} unid. / ${money(topSoldProduct.total)}`
-          : "Sin ventas registradas",
-      ],
-    },
-    {
-      kind: "summary",
-      cells: [
-        "Mayor gasto",
-        topExpense
-          ? `${topExpense.motivo} / ${money(topExpense.monto)} / ${topExpense.metodoPago} / ${topExpense.usuario?.nombre || "Usuario"}`
-          : "Sin gastos registrados",
-      ],
-    },
-    { kind: "summary", cells: ["Ventas efectivo / QR", `${money(report.totals.totalEfectivo)} / ${money(report.totals.totalQr)}`] },
-    { kind: "summary", cells: ["Gastos efectivo / QR", `${money(report.totals.gastoEfectivo || 0)} / ${money(report.totals.gastoQr || 0)}`] },
-    { kind: "summary", cells: ["Neto efectivo / QR", `${money(report.totals.netoEfectivo || 0)} / ${money(report.totals.netoQr || 0)}`] },
-    { kind: "section", cells: ["Productos vendidos"] },
-    ...(report.productosVendidos || []).map((item) => ({
-      kind: "product" as const,
-      cells: [
+        new Date(item.fecha).toLocaleString("es-BO"),
+        item.vendedor,
+        item.pago,
         item.codigo,
-        item.descripcion,
-        item.sucursal,
         String(item.cantidad),
+        item.producto,
         money(item.total),
       ],
     })),
-    { kind: "section", cells: ["Gastos registrados"] },
+    { kind: "section", cells: ["Detalle de gastos"] },
     ...(report.gastos || []).map((expense) => ({
       kind: "expense" as const,
       cells: [
         new Date(expense.createdAt).toLocaleString("es-BO"),
         expense.usuario?.nombre || "Usuario",
-        branchNameFrom(expense),
         expense.motivo,
         expense.metodoPago,
         money(expense.monto),
       ],
     })),
-    { kind: "section", cells: ["Cierres enviados por vendedores"] },
-    ...(report.cierres || []).map((cierre) => ({
-      kind: "closing" as const,
-      cells: [
-        new Date(cierre.fecha).toLocaleDateString("es-BO"),
-        cierre.usuario?.nombre || "Vendedor",
-        branchNameFrom(cierre),
-        String(cierre.cantidadVentas),
-        money(cierre.totalVentas),
-        money(cierre.netoEfectivo),
-        money(cierre.netoQr),
-        money(cierre.montoDeclarado),
-        money(cierre.diferencia),
-      ],
-    })),
-    { kind: "section", cells: ["Ventas registradas"] },
-    ...report.ventas.map((sale) => ({
-      kind: "sale" as const,
-      cells: [
-        new Date(sale.createdAt).toLocaleString("es-BO"),
-        sale.usuario?.nombre || "Usuario",
-        branchNameFrom(sale),
-        sale.cliente?.nombre || "Sin cliente",
-        salePaymentLabel(sale.tipoVenta, sale.metodoPago),
-        String(sale.detalles?.length || 0),
-        money(sale.total),
-      ],
-    })),
     ...(closingNotes.length
       ? [
-          { kind: "section" as const, cells: ["Notas de cierre"] },
+          { kind: "section" as const, cells: ["Nota final del vendedor"] },
           ...closingNotes.map((item) => ({
             kind: "note" as const,
             cells: [item.seller, item.branch, item.note],
@@ -199,16 +170,15 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
 
     const stats = [
       ["Ventas", report.totals.cantidadVentas],
-      ["Total", money(report.totals.totalVentas)],
-      ["Cierres", report.totals.cantidadCierres || 0],
-      ["Efectivo cierre", money(report.totals.cierreEfectivo || 0)],
-      ["QR cierre", money(report.totals.cierreQr || 0)],
-      ["Declarado", money(report.totals.montoDeclarado || 0)],
-      ["Diferencia", money(report.totals.diferencia || 0)],
+      ["Efectivo", money(report.totals.totalEfectivo || 0)],
+      ["QR", money(report.totals.totalQr || 0)],
+      ["Total ventas", money(report.totals.totalVentas)],
+      ["Gastos", money(report.totals.totalGastos || 0)],
+      ["Queda caja", money(remainingAfterExpenses(report))],
     ];
     stats.forEach(([label, value], index) => {
-      const x = margin + index * 111;
-      content += pdfFillRect(x, 470, 103, 34, "0.96 0.97 0.98");
+      const x = margin + index * 128;
+      content += pdfFillRect(x, 470, 120, 34, "0.96 0.97 0.98");
       content += pdfText(label, x + 7, 489, 7, true);
       content += pdfText(value, x + 7, 476, 9, true);
     });
@@ -235,42 +205,25 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     if (row.kind === "section") {
       page += pdfFillRect(margin, y - 4, pageWidth - margin * 2, 18, "0.92 0.93 0.95");
       page += pdfText(row.cells[0], margin + 6, y + 2, 9, true);
-      if (row.cells[0].startsWith("Resumen") || row.cells[0].startsWith("Notas")) {
+      if (row.cells[0].startsWith("Resumen") || row.cells[0].startsWith("Nota")) {
         y -= 26;
         return;
       }
       y -= 24;
-      if (row.cells[0].startsWith("Cierres")) {
+      if (row.cells[0].startsWith("Detalle de ventas")) {
         page += pdfText("Fecha", 36, y + 4, 7, true);
-        page += pdfText("Vendedor", 100, y + 4, 7, true);
-        page += pdfText("Sucursal", 230, y + 4, 7, true);
-        page += pdfText("Ventas", 315, y + 4, 7, true);
-        page += pdfText("Total", 360, y + 4, 7, true);
-        page += pdfText("Efectivo", 435, y + 4, 7, true);
-        page += pdfText("QR", 520, y + 4, 7, true);
-        page += pdfText("Declarado", 590, y + 4, 7, true);
-        page += pdfText("Dif.", 700, y + 4, 7, true);
-      } else if (row.cells[0].startsWith("Productos")) {
-        page += pdfText("Codigo", 36, y + 4, 7, true);
-        page += pdfText("Producto", 105, y + 4, 7, true);
-        page += pdfText("Sucursal", 420, y + 4, 7, true);
-        page += pdfText("Cant.", 580, y + 4, 7, true);
-        page += pdfText("Total", 670, y + 4, 7, true);
-      } else if (row.cells[0].startsWith("Gastos")) {
-        page += pdfText("Fecha", 36, y + 4, 7, true);
-        page += pdfText("Vendedor", 160, y + 4, 7, true);
-        page += pdfText("Sucursal", 270, y + 4, 7, true);
-        page += pdfText("Motivo", 390, y + 4, 7, true);
-        page += pdfText("Pago", 610, y + 4, 7, true);
-        page += pdfText("Monto", 690, y + 4, 7, true);
+        page += pdfText("Vendedor", 155, y + 4, 7, true);
+        page += pdfText("Pago", 255, y + 4, 7, true);
+        page += pdfText("Codigo", 320, y + 4, 7, true);
+        page += pdfText("Cant.", 375, y + 4, 7, true);
+        page += pdfText("Producto", 430, y + 4, 7, true);
+        page += pdfText("Total", 720, y + 4, 7, true);
       } else {
         page += pdfText("Fecha", 36, y + 4, 7, true);
-        page += pdfText("Vendedor", 156, y + 4, 7, true);
-        page += pdfText("Sucursal", 270, y + 4, 7, true);
-        page += pdfText("Cliente", 380, y + 4, 7, true);
-        page += pdfText("Pago", 510, y + 4, 7, true);
-        page += pdfText("Items", 630, y + 4, 7, true);
-        page += pdfText("Total", 700, y + 4, 7, true);
+        page += pdfText("Vendedor", 160, y + 4, 7, true);
+        page += pdfText("Detalle del gasto", 285, y + 4, 7, true);
+        page += pdfText("Pago", 610, y + 4, 7, true);
+        page += pdfText("Monto", 700, y + 4, 7, true);
       }
       y -= rowHeight;
       return;
@@ -280,16 +233,6 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     if (row.kind === "summary") {
       page += pdfText(fitPdfText(row.cells[0], 28), 42, y + 3, 8, true);
       page += pdfText(fitPdfText(row.cells[1], 112), 210, y + 3, 8);
-    } else if (row.kind === "closing") {
-      page += pdfText(fitPdfText(row.cells[0], 12), 36, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[1], 24), 100, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[2], 14), 230, y + 3, 7);
-      page += pdfText(row.cells[3], 315, y + 3, 7);
-      page += pdfText(row.cells[4], 360, y + 3, 7);
-      page += pdfText(row.cells[5], 435, y + 3, 7);
-      page += pdfText(row.cells[6], 520, y + 3, 7);
-      page += pdfText(row.cells[7], 590, y + 3, 7);
-      page += pdfText(row.cells[8], 700, y + 3, 7);
     } else if (row.kind === "note") {
       const boxHeight = Math.max(22, 14 + noteLines.length * 10);
       page += pdfFillRect(margin, y - boxHeight + 6, pageWidth - margin * 2, boxHeight, "0.98 0.98 0.98");
@@ -297,27 +240,20 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       noteLines.forEach((line, index) => {
         page += pdfText(line, margin + 8, y - 10 - index * 10, 8);
       });
-    } else if (row.kind === "product") {
-      page += pdfText(fitPdfText(row.cells[0], 12), 36, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[1], 50), 105, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[2], 22), 420, y + 3, 7);
-      page += pdfText(row.cells[3], 580, y + 3, 7);
-      page += pdfText(row.cells[4], 670, y + 3, 7);
+    } else if (row.kind === "saleDetail") {
+      page += pdfText(fitPdfText(row.cells[0], 21), 36, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 18), 155, y + 3, 7);
+      page += pdfText(row.cells[2], 255, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[3], 9), 320, y + 3, 7);
+      page += pdfText(row.cells[4], 375, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[5], 45), 430, y + 3, 7);
+      page += pdfText(row.cells[6], 720, y + 3, 7);
     } else if (row.kind === "expense") {
       page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[1], 18), 160, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[2], 18), 270, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[3], 34), 390, y + 3, 7);
-      page += pdfText(row.cells[4], 610, y + 3, 7);
-      page += pdfText(row.cells[5], 690, y + 3, 7);
-    } else {
-      page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[1], 20), 156, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[2], 18), 270, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[3], 20), 380, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[4], 18), 510, y + 3, 7);
-      page += pdfText(row.cells[5], 630, y + 3, 7);
-      page += pdfText(row.cells[6], 700, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 44), 285, y + 3, 7);
+      page += pdfText(row.cells[3], 610, y + 3, 7);
+      page += pdfText(row.cells[4], 700, y + 3, 7);
     }
     y -= row.kind === "note" ? Math.max(28, 20 + noteLines.length * 10) : rowHeight;
   });
@@ -405,8 +341,7 @@ export default function Reportes() {
   }, []);
 
   const selectedSucursal = sucursales.find((item) => item.id === sucursalId)?.nombre || "Todas";
-  const topSoldProduct = report ? topSoldProductFrom(report) : null;
-  const topExpense = report ? topExpenseFrom(report) : null;
+  const saleDetailRows = report ? saleDetailRowsFrom(report) : [];
 
   return (
     <section className="flex h-full flex-col gap-5 p-6 text-gray-100">
@@ -595,118 +530,75 @@ export default function Reportes() {
           <div className="space-y-6">
             <div className="sales-stats-grid grid gap-3 md:grid-cols-4">
               <Stat label="Ventas" value={String(report.totals.cantidadVentas)} />
-              <Stat label="Total" value={money(report.totals.totalVentas)} />
-              <Stat label="Gastos" value={money(report.totals.totalGastos || 0)} />
-              <Stat label="Disponible" value={money(report.totals.totalDisponible ?? report.totals.totalVentas)} />
-              <Stat label="Efectivo neto" value={money(report.totals.netoEfectivo ?? report.totals.totalEfectivo)} />
-              <Stat label="QR neto" value={money(report.totals.netoQr ?? report.totals.totalQr)} />
+              <Stat label="Ventas efectivo" value={money(report.totals.totalEfectivo || 0)} />
+              <Stat label="Ventas QR" value={money(report.totals.totalQr || 0)} />
+              <Stat label="Total ventas" value={money(report.totals.totalVentas)} />
+              <Stat label="Total gastos" value={money(report.totals.totalGastos || 0)} />
+              <Stat label="Queda en caja" value={money(remainingAfterExpenses(report))} />
               <Stat label="Unidades" value={String(report.totals.unidadesVendidas)} />
               <Stat label="Descuento" value={money(report.totals.descuento)} />
-              <Stat label="Items" value={String(report.totals.cantidadItems)} />
-              <Stat label="Cierres recibidos" value={String(report.totals.cantidadCierres || 0)} />
-              <Stat label="Efectivo cierre" value={money(report.totals.cierreEfectivo || 0)} />
-              <Stat label="QR cierre" value={money(report.totals.cierreQr || 0)} />
-              <Stat label="Declarado" value={money(report.totals.montoDeclarado || 0)} />
-              <Stat label="Diferencia" value={money(report.totals.diferencia || 0)} />
             </div>
 
             <div>
-              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Resumen del dia</h3>
-              <div className="grid gap-3 lg:grid-cols-3">
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Resumen de caja</h3>
+              <div className="grid gap-3 lg:grid-cols-4">
                 <SummaryCard
-                  label="Producto mas vendido"
-                  title={topSoldProduct ? topSoldProduct.descripcion : "Sin ventas registradas"}
-                  detail={
-                    topSoldProduct
-                      ? `${topSoldProduct.codigo} - ${topSoldProduct.cantidad} unid. - ${money(topSoldProduct.total)}`
-                      : "No hay productos vendidos en este periodo."
-                  }
+                  label="Ventas"
+                  title={`${money(report.totals.totalEfectivo || 0)} efectivo`}
+                  detail={`${money(report.totals.totalQr || 0)} QR`}
                 />
                 <SummaryCard
-                  label="Mayor gasto"
-                  title={topExpense ? topExpense.motivo : "Sin gastos registrados"}
-                  detail={
-                    topExpense
-                      ? `${money(topExpense.monto)} - ${topExpense.metodoPago} - ${topExpense.usuario?.nombre || "Usuario"}`
-                      : "No hay gastos en este periodo."
-                  }
+                  label="Gastos"
+                  title={`${money(report.totals.gastoEfectivo || 0)} efectivo`}
+                  detail={`${money(report.totals.gastoQr || 0)} QR`}
                 />
                 <SummaryCard
-                  label="Efectivo / QR"
-                  title={`${money(report.totals.totalEfectivo)} / ${money(report.totals.totalQr)}`}
-                  detail={`Gastos: ${money(report.totals.gastoEfectivo || 0)} efectivo / ${money(report.totals.gastoQr || 0)} QR`}
+                  label="Caja"
+                  title={money(remainingAfterExpenses(report))}
+                  detail="Ventas en efectivo/QR menos gastos"
+                />
+                <SummaryCard
+                  label="Nota"
+                  title={`${(report.cierres || []).filter((cierre) => cierre.notas?.trim()).length} nota(s)`}
+                  detail="La nota del vendedor aparece al final."
                 />
               </div>
             </div>
 
             <div>
-              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Cierres enviados por vendedores</h3>
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Detalle de ventas del vendedor</h3>
               <table className="w-full text-left text-sm">
                 <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
                   <tr>
-                    <th className="p-3">Fecha</th>
-                    <th className="p-3">Vendedor</th>
-                    <th className="p-3">Sucursal</th>
-                    <th className="p-3 text-right">Ventas</th>
-                    <th className="p-3 text-right">Total ventas</th>
-                    <th className="p-3 text-right">Efectivo cierre</th>
-                    <th className="p-3 text-right">QR cierre</th>
-                    <th className="p-3 text-right">Declarado</th>
-                    <th className="p-3 text-right">Diferencia</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800 print:divide-gray-200">
-                  {(report.cierres || []).map((cierre) => (
-                    <tr key={cierre.id}>
-                      <td className="p-3">{new Date(cierre.fecha).toLocaleDateString("es-BO")}</td>
-                      <td className="p-3">{cierre.usuario?.nombre || "Vendedor"}</td>
-                      <td className="p-3">{branchNameFrom(cierre)}</td>
-                      <td className="p-3 text-right">{cierre.cantidadVentas}</td>
-                      <td className="p-3 text-right font-bold">{money(cierre.totalVentas)}</td>
-                      <td className="p-3 text-right font-bold text-green-300 print:text-gray-950">{money(cierre.netoEfectivo)}</td>
-                      <td className="p-3 text-right font-bold text-sky-300 print:text-gray-950">{money(cierre.netoQr)}</td>
-                      <td className="p-3 text-right">{money(cierre.montoDeclarado)}</td>
-                      <td className={`p-3 text-right font-bold ${cierre.diferencia === 0 ? "text-green-300 print:text-gray-950" : "text-red-300 print:text-gray-950"}`}>
-                        {money(cierre.diferencia)}
-                      </td>
-                    </tr>
-                  ))}
-                  {(report.cierres || []).length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="p-4 text-center text-gray-500">
-                        No hay cierre de caja para este periodo o sucursal.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div>
-              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Productos vendidos</h3>
-              <table className="w-full text-left text-sm">
-                <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
-                  <tr>
+                    <th className="col-date p-3">Fecha</th>
+                    <th className="col-seller p-3">Vendedor</th>
+                    <th className="col-payment p-3">Pago</th>
                     <th className="col-code p-3">Codigo</th>
                     <th className="col-product p-3">Producto</th>
-                    <th className="col-branch p-3">Sucursal</th>
                     <th className="col-qty p-3 text-right">Cantidad</th>
                     <th className="col-total p-3 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800 print:divide-gray-200">
-                  {report.productosVendidos.map((item) => (
-                    <tr key={item.productoId}>
+                  {saleDetailRows.map((item) => (
+                    <tr key={item.id}>
+                      <td className="p-3">{new Date(item.fecha).toLocaleString("es-BO")}</td>
+                      <td className="p-3">{item.vendedor}</td>
+                      <td className="p-3 font-bold">{item.pago}</td>
                       <td className="p-3 font-mono">{item.codigo}</td>
                       <td className="p-3">
-                        <p className="font-semibold">{item.descripcion}</p>
-                        <p className="print-muted text-xs text-gray-500 print:text-gray-600">{item.marca} - {item.categoria}</p>
+                        <p className="font-semibold">{item.producto}</p>
+                        <p className="print-muted text-xs text-gray-500 print:text-gray-600">{money(item.precioUnitario)} unit.</p>
                       </td>
-                      <td className="p-3">{item.sucursal}</td>
                       <td className="p-3 text-right">{item.cantidad}</td>
                       <td className="p-3 text-right">{money(item.total)}</td>
                     </tr>
                   ))}
+                  {saleDetailRows.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-4 text-center text-gray-500">Sin ventas en este periodo.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -718,9 +610,8 @@ export default function Reportes() {
                   <tr>
                     <th className="p-3">Fecha</th>
                     <th className="p-3">Vendedor</th>
-                    <th className="p-3">Sucursal</th>
-                    <th className="p-3">Motivo</th>
-                    <th className="p-3">Origen</th>
+                    <th className="p-3">Detalle del gasto</th>
+                    <th className="p-3">Pago</th>
                     <th className="p-3 text-right">Monto</th>
                   </tr>
                 </thead>
@@ -729,7 +620,6 @@ export default function Reportes() {
                     <tr key={expense.id}>
                       <td className="p-3">{new Date(expense.createdAt).toLocaleString("es-BO")}</td>
                       <td className="p-3">{expense.usuario?.nombre || "Usuario"}</td>
-                      <td className="p-3">{branchNameFrom(expense)}</td>
                       <td className="p-3">
                         <p className="font-semibold">{expense.motivo}</p>
                         {expense.notas && <p className="print-muted text-xs text-gray-500 print:text-gray-600">{expense.notas}</p>}
@@ -740,46 +630,16 @@ export default function Reportes() {
                   ))}
                   {(report.gastos || []).length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-4 text-center text-gray-500">Sin gastos en este periodo.</td>
+                      <td colSpan={5} className="p-4 text-center text-gray-500">Sin gastos en este periodo.</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
 
-            <div>
-              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Ventas registradas</h3>
-              <table className="w-full text-left text-sm">
-                <thead className="bg-grafito-800 text-gray-300 print:bg-gray-100 print:text-gray-900">
-                  <tr>
-                    <th className="col-date p-3">Fecha</th>
-                    <th className="col-seller p-3">Vendedor</th>
-                    <th className="p-3">Sucursal</th>
-                    <th className="col-client p-3">Cliente</th>
-                    <th className="col-payment p-3">Pago</th>
-                    <th className="col-items p-3 text-right">Items</th>
-                    <th className="col-sale-total p-3 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800 print:divide-gray-200">
-                  {report.ventas.map((sale) => (
-                    <tr key={sale.id}>
-                      <td className="p-3">{new Date(sale.createdAt).toLocaleString("es-BO")}</td>
-                      <td className="p-3">{sale.usuario?.nombre || "Usuario"}</td>
-                      <td className="p-3">{branchNameFrom(sale)}</td>
-                      <td className="p-3">{sale.cliente?.nombre || "Sin cliente"}</td>
-                      <td className="p-3">{salePaymentLabel(sale.tipoVenta, sale.metodoPago)}</td>
-                      <td className="p-3 text-right">{sale.detalles?.length || 0}</td>
-                      <td className="p-3 text-right font-bold">{money(sale.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
             {(report.cierres || []).some((cierre) => cierre.notas?.trim()) && (
               <div>
-                <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Notas de cierre</h3>
+                <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Nota final del vendedor</h3>
                 <div className="space-y-2">
                   {(report.cierres || [])
                     .filter((cierre) => cierre.notas?.trim())
