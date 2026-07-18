@@ -42,6 +42,13 @@ const saleDetailRowsFrom = (report: SalesHistoryReport) =>
     })),
   );
 
+const closingNotesFrom = (report: SalesHistoryReport) =>
+  (report.cierres || []).map((cierre) => ({
+    seller: cierre.usuario?.nombre || "Vendedor",
+    branch: branchNameFrom(cierre),
+    note: cierre.notas?.trim() || "Sin nota registrada al cerrar caja.",
+  }));
+
 const sanitizePdfText = (value: string) =>
   Array.from(value)
     .map((char) => {
@@ -108,13 +115,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
   const bottom = 34;
   const rowHeight = 18;
   const pages: string[] = [];
-  const closingNotes = (report.cierres || [])
-    .filter((cierre) => cierre.notas?.trim())
-    .map((cierre) => ({
-      seller: cierre.usuario?.nombre || "Vendedor",
-      branch: branchNameFrom(cierre),
-      note: cierre.notas || "",
-    }));
+  const closingNotes = closingNotesFrom(report);
   const saleDetailRows = saleDetailRowsFrom(report);
   const rows: Array<{ kind: "section" | "summary" | "saleDetail" | "expense" | "note"; cells: string[] }> = [
     { kind: "section", cells: ["Resumen de caja"] },
@@ -125,6 +126,16 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     { kind: "summary", cells: ["Gastos por QR", money(report.totals.gastoQr || 0)] },
     { kind: "summary", cells: ["Total gastos", money(report.totals.totalGastos || 0)] },
     { kind: "summary", cells: ["Queda en caja despues de gastos", money(remainingAfterExpenses(report))] },
+    { kind: "section", cells: ["Nota del vendedor al cerrar caja"] },
+    ...(closingNotes.length
+      ? closingNotes.map((item) => ({
+          kind: "note" as const,
+          cells: [item.seller, item.branch, item.note],
+        }))
+      : [{
+          kind: "note" as const,
+          cells: ["Vendedor", sucursal, "Sin cierre de caja registrado para este dia."],
+        }]),
     { kind: "section", cells: ["Detalle de ventas del vendedor"] },
     ...saleDetailRows.map((item) => ({
       kind: "saleDetail" as const,
@@ -149,15 +160,6 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
         money(expense.monto),
       ],
     })),
-    ...(closingNotes.length
-      ? [
-          { kind: "section" as const, cells: ["Nota final del vendedor"] },
-          ...closingNotes.map((item) => ({
-            kind: "note" as const,
-            cells: [item.seller, item.branch, item.note],
-          })),
-        ]
-      : []),
   ];
 
   const drawHeader = (pageNumber: number) => {
@@ -342,6 +344,7 @@ export default function Reportes() {
 
   const selectedSucursal = sucursales.find((item) => item.id === sucursalId)?.nombre || "Todas";
   const saleDetailRows = report ? saleDetailRowsFrom(report) : [];
+  const closingNotes = report ? closingNotesFrom(report) : [];
 
   return (
     <section className="flex h-full flex-col gap-5 p-6 text-gray-100">
@@ -559,9 +562,27 @@ export default function Reportes() {
                 />
                 <SummaryCard
                   label="Nota"
-                  title={`${(report.cierres || []).filter((cierre) => cierre.notas?.trim()).length} nota(s)`}
-                  detail="La nota del vendedor aparece al final."
+                  title={closingNotes.length > 0 ? `${closingNotes.length} cierre(s)` : "Sin cierre"}
+                  detail="La nota del vendedor aparece debajo."
                 />
+              </div>
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Nota del vendedor al cerrar caja</h3>
+              <div className="space-y-2">
+                {closingNotes.length > 0 ? (
+                  closingNotes.map((item, index) => (
+                    <div key={`${item.seller}-${index}`} className="rounded border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100 print:border-gray-300 print:bg-gray-50 print:text-gray-800">
+                      <p className="font-bold print:text-gray-950">{item.seller} / {item.branch}</p>
+                      <p className="mt-1">{item.note}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded border border-gray-700 bg-grafito-900 p-3 text-sm text-gray-300 print:border-gray-300 print:bg-gray-50 print:text-gray-800">
+                    Sin cierre de caja registrado para este dia.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -637,23 +658,6 @@ export default function Reportes() {
               </table>
             </div>
 
-            {(report.cierres || []).some((cierre) => cierre.notas?.trim()) && (
-              <div>
-                <h3 className="mb-3 text-lg font-bold text-white print:text-gray-950">Nota final del vendedor</h3>
-                <div className="space-y-2">
-                  {(report.cierres || [])
-                    .filter((cierre) => cierre.notas?.trim())
-                    .map((cierre) => (
-                      <div key={`nota-${cierre.id}`} className="rounded border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100 print:border-gray-300 print:bg-gray-50 print:text-gray-800">
-                        <p className="font-bold print:text-gray-950">
-                          Nota del vendedor - {cierre.usuario?.nombre || "Vendedor"} / {branchNameFrom(cierre)}
-                        </p>
-                        <p className="mt-1">{cierre.notas}</p>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
