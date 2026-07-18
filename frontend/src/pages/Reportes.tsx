@@ -23,8 +23,11 @@ const branchNameFrom = (item: { usuario?: { sucursal?: { nombre: string } }; suc
 const salePaymentLabel = (tipoVenta: string, metodoPago: string) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
 
-const remainingAfterExpenses = (report: SalesHistoryReport) =>
-  Math.max((report.totals.totalEfectivo || 0) + (report.totals.totalQr || 0) - (report.totals.totalGastos || 0), 0);
+const remainingCashAfterExpenses = (report: SalesHistoryReport) =>
+  Math.max((report.totals.totalEfectivo || 0) - (report.totals.gastoEfectivo || 0), 0);
+
+const remainingQrAfterExpenses = (report: SalesHistoryReport) =>
+  Math.max((report.totals.totalQr || 0) - (report.totals.gastoQr || 0), 0);
 
 const saleDetailRowsFrom = (report: SalesHistoryReport) =>
   report.ventas.flatMap((sale) =>
@@ -125,7 +128,8 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
     { kind: "summary", cells: ["Gastos en efectivo", money(report.totals.gastoEfectivo || 0)] },
     { kind: "summary", cells: ["Gastos por QR", money(report.totals.gastoQr || 0)] },
     { kind: "summary", cells: ["Total gastos", money(report.totals.totalGastos || 0)] },
-    { kind: "summary", cells: ["Queda en caja despues de gastos", money(remainingAfterExpenses(report))] },
+    { kind: "summary", cells: ["Queda en efectivo despues de gastos", money(remainingCashAfterExpenses(report))] },
+    { kind: "summary", cells: ["Queda en QR despues de gastos", money(remainingQrAfterExpenses(report))] },
     { kind: "section", cells: ["Nota del vendedor al cerrar caja"] },
     ...(closingNotes.length
       ? closingNotes.map((item) => ({
@@ -176,7 +180,8 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       ["QR", money(report.totals.totalQr || 0)],
       ["Total ventas", money(report.totals.totalVentas)],
       ["Gastos", money(report.totals.totalGastos || 0)],
-      ["Queda caja", money(remainingAfterExpenses(report))],
+      ["Queda efectivo", money(remainingCashAfterExpenses(report))],
+      ["Queda QR", money(remainingQrAfterExpenses(report))],
     ];
     stats.forEach(([label, value], index) => {
       const x = margin + index * 128;
@@ -537,7 +542,8 @@ export default function Reportes() {
               <Stat label="Ventas QR" value={money(report.totals.totalQr || 0)} />
               <Stat label="Total ventas" value={money(report.totals.totalVentas)} />
               <Stat label="Total gastos" value={money(report.totals.totalGastos || 0)} />
-              <Stat label="Queda en caja" value={money(remainingAfterExpenses(report))} />
+              <Stat label="Queda efectivo" value={money(remainingCashAfterExpenses(report))} />
+              <Stat label="Queda QR" value={money(remainingQrAfterExpenses(report))} />
               <Stat label="Unidades" value={String(report.totals.unidadesVendidas)} />
               <Stat label="Descuento" value={money(report.totals.descuento)} />
             </div>
@@ -556,9 +562,9 @@ export default function Reportes() {
                   detail={`${money(report.totals.gastoQr || 0)} QR`}
                 />
                 <SummaryCard
-                  label="Caja"
-                  title={money(remainingAfterExpenses(report))}
-                  detail="Ventas en efectivo/QR menos gastos"
+                  label="Queda despues de gastos"
+                  title={`${money(remainingCashAfterExpenses(report))} efectivo`}
+                  detail={`${money(remainingQrAfterExpenses(report))} QR`}
                 />
                 <SummaryCard
                   label="Nota"
