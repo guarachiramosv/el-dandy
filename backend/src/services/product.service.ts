@@ -222,7 +222,7 @@ export class ProductService {
     });
   }
 
-  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput & { deletedImageUrls?: string[] }) {
+  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput & { deletedImageUrls?: string[] }, usuarioId?: string | null) {
     const current = await prisma.producto.findUnique({ where: { id }, select: { codigo: true, sucursalId: true, imagen: true } });
     if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
 
@@ -267,16 +267,32 @@ export class ProductService {
         const existingStock = await tx.productoStockSucursal.findUnique({
           where: { productoId_sucursalId: { productoId: id, sucursalId: nextSucursalId } },
         });
+        const stockAnterior = existingStock?.stock ?? 0;
+        const stockNuevo = nextStock ?? stockAnterior;
         await tx.productoStockSucursal.upsert({
           where: { productoId_sucursalId: { productoId: id, sucursalId: nextSucursalId } },
-          update: { stock: nextStock ?? existingStock?.stock ?? 0 },
+          update: { stock: stockNuevo },
           create: {
             productoId: id,
             sucursalId: nextSucursalId,
-            stock: nextStock ?? 0,
+            stock: stockNuevo,
           },
         });
         await this.syncProductTotalStock(tx, id);
+
+        if (nextStock !== undefined && stockNuevo !== stockAnterior) {
+          await stockService.recordMovement(tx, {
+            tipoMovimiento: 'AJUSTE',
+            productoId: id,
+            sucursalId: nextSucursalId,
+            stockAnterior,
+            stockNuevo,
+            cantidad: stockNuevo - stockAnterior,
+            usuarioId,
+            referenciaTipo: 'EDICION_STOCK_ADMIN',
+            notas: 'Ajuste manual desde edicion de producto',
+          });
+        }
       }
 
       return tx.producto.findUnique({

@@ -236,8 +236,7 @@ export default function Productos() {
       const productPayload: Partial<ProductFormData> = { ...pendingSaveProduct };
       delete productPayload.imageFiles;
       if (modalMode !== "CREATE") {
-        delete productPayload.stock;
-        delete productPayload.sucursalId;
+        productPayload.sucursalId = selectedSucursalId || pendingSaveProduct.sucursalId;
       }
       const normalizedCode = pendingSaveProduct.codigo.trim().toLowerCase();
       const duplicatedProduct = products.find((product) =>

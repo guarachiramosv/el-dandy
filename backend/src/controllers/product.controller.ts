@@ -40,7 +40,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const parsed = updateProductSchema.parse(req.body);
-  const product = await service.update(id, parsed as any);
+  const product = await service.update(id, parsed as any, req.user?.id || null);
   res.json({ success: true, data: product });
 });
 

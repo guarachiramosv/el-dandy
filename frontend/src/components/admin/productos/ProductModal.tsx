@@ -198,8 +198,8 @@ function ProductModalContent({
 
   const isReadOnly = mode === "VIEW";
   const isCreateMode = mode === "CREATE";
-  const isStockReadOnly = mode !== "CREATE";
   const selectedBranch = product?.stockSucursales?.find((item) => item.sucursalId === selectedSucursalId);
+  const selectedBranchName = selectedBranch?.sucursal?.nombre || product?.sucursal?.nombre || "Sucursal seleccionada";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
 
   return (
@@ -390,8 +390,10 @@ function ProductModalContent({
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">{isCreateMode ? "Stock Inicial" : "Stock Total"} {formData.unidadVenta === "METRO" ? "(m)" : ""}</label>
-                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stock" value={formData.stock} onChange={handleChange} readOnly={isStockReadOnly} className="premium-input" />
+                  <label className="text-sm font-medium text-gray-300">
+                    {isCreateMode ? "Stock Inicial" : `Stock ${selectedBranchName}`} {formData.unidadVenta === "METRO" ? "(m)" : ""}
+                  </label>
+                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stock" value={formData.stock} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Stock Minimo</label>
