@@ -13,6 +13,7 @@ import {
   updateRemachadoRemache,
 } from "../services/remachado";
 import { useProducts } from "../hooks/useProducts";
+import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
 import { PaymentMethod, RemachadoMedida, RemachadoMovimiento, RemachadoRemache, RemachadoTrabajo } from "../types";
 
 type Tab = "TRABAJO" | "BALATAS" | "REMACHES" | "HISTORIAL";
@@ -278,48 +279,10 @@ export default function Remachado() {
   };
 
   const printTrabajo = (trabajo: RemachadoTrabajo) => {
-    const details = trabajo.venta?.detalles || [];
-    const printWindow = window.open("", "_blank", "width=350,height=600");
+    if (!trabajo.venta) return setMessage("No se encontro la nota de venta para imprimir.");
+    const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
-    const rows = details.map((detail) => `
-      <tr>
-        <td class="center">${detail.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
-        <td>${detail.producto?.descripcion || detail.descripcion || "Detalle"}</td>
-        <td class="right">${money(detail.subtotal)}</td>
-      </tr>
-    `).join("");
-    const printDescuento = trabajo.venta?.descuento ? `<div class="right" style="margin-top: 5px;">SUBTOTAL: ${money(trabajo.venta.subtotal)}</div>
-    <div class="right">DESCUENTO: -${money(trabajo.venta.descuento)}</div>` : "";
-    printWindow.document.write(`<!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Ticket Remachado</title>
-          <style>
-            body { font-family: monospace; color: #000; padding: 0; margin: 0; width: 78mm; font-size: 12px; }
-            h1 { font-size: 16px; margin: 5px 0; text-align: center; }
-            p { margin: 2px 0; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-            th, td { border-bottom: 1px dashed #000; padding: 4px 2px; text-align: left; vertical-align: top; }
-            .right { text-align: right; }
-            .center { text-align: center; }
-            .total { margin-top: 10px; text-align: right; font-size: 16px; font-weight: bold; border-top: 1px solid #000; padding-top: 5px; }
-            @media print { body { padding: 0; margin: 0; } }
-          </style>
-        </head>
-        <body>
-          <h1>TICKET DE REMACHADO</h1>
-          <p class="center">Fecha: ${new Date().toLocaleString("es-BO")}</p>
-          <table>
-            <thead><tr><th class="center">Cant.</th><th>Detalle</th><th class="right">Total</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-          ${printDescuento}
-          <div class="total">TOTAL: ${money(trabajo.venta?.total || trabajo.total)}</div>
-          <p class="center" style="margin-top: 10px;">¡Gracias por su preferencia!</p>
-          <script>window.addEventListener("load", () => { window.print(); });</script>
-        </body>
-      </html>`);
+    printWindow.document.write(buildThermalReceiptHtml(trabajo.venta, user?.nombre || ""));
     printWindow.document.close();
   };
 
@@ -907,20 +870,20 @@ export default function Remachado() {
       )}
 
       {detailOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto p-3 sm:p-5 lg:left-64">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={saving ? undefined : () => setDetailOpen(false)} />
-          <div className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
-            <div className="flex items-center justify-between border-b border-gray-700 bg-grafito-900/80 p-5">
-              <div>
-                <h3 className="text-xl font-bold text-white">Detalle de venta</h3>
-                <p className="text-sm text-gray-400">Agrega solo los productos que llevo este remachado.</p>
+          <div className="relative my-auto flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-700 bg-grafito-900/80 p-4 sm:p-5">
+              <div className="min-w-0">
+                <h3 className="truncate text-xl font-bold text-white">Detalle de venta</h3>
+                <p className="mt-1 text-sm text-gray-400">Agrega solo los productos que llevo este remachado.</p>
               </div>
-              <button onClick={() => setDetailOpen(false)} disabled={saving} className="text-gray-400 hover:text-white disabled:opacity-50">
+              <button onClick={() => setDetailOpen(false)} disabled={saving} className="shrink-0 rounded-lg p-1 text-gray-400 hover:bg-white/5 hover:text-white disabled:opacity-50">
                 <X size={22} />
               </button>
             </div>
 
-            <div className="overflow-y-auto p-5">
+            <div className="overflow-y-auto p-4 sm:p-5">
               {message && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-500">{message}</div>}
 
               <div className="rounded-xl border border-primary/30 bg-primary/10 p-4">
@@ -933,8 +896,8 @@ export default function Remachado() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_120px_150px_auto] lg:items-end">
-                <div>
+              <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+                <div className="min-w-0">
                   <span className="mb-1 block text-sm text-gray-300">Producto del inventario</span>
                   <div className="relative mb-2">
                     <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -988,32 +951,35 @@ export default function Remachado() {
                     </div>
                   )}
                 </div>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-gray-300">Cantidad</span>
-                  <input
-                    className="premium-input"
-                    inputMode="numeric"
-                    value={detailQuantity}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      if (quantityInputPattern.test(value)) setDetailQuantity(value);
-                    }}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-gray-300">Precio</span>
-                  <input
-                    className="premium-input text-primary-light"
-                    value={selectedDetailProduct ? money(selectedDetailProduct.precioVenta) : "Bs 0,00"}
-                    readOnly
-                  />
-                </label>
-                <button onClick={addDetailProduct} className="btn-secondary flex h-12 items-center justify-center gap-2 rounded-lg px-4 py-0">
-                  <Plus size={18} /> Agregar
-                </button>
+
+                <div className="grid gap-3 rounded-xl border border-gray-700 bg-grafito-900/40 p-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-gray-300">Cantidad</span>
+                    <input
+                      className="premium-input"
+                      inputMode="numeric"
+                      value={detailQuantity}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (quantityInputPattern.test(value)) setDetailQuantity(value);
+                      }}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-sm text-gray-300">Precio</span>
+                    <input
+                      className="premium-input text-primary-light"
+                      value={selectedDetailProduct ? money(selectedDetailProduct.precioVenta) : "Bs 0,00"}
+                      readOnly
+                    />
+                  </label>
+                  <button onClick={addDetailProduct} className="btn-secondary flex h-12 items-center justify-center gap-2 rounded-lg px-4 py-0 sm:col-span-2 xl:col-span-1">
+                    <Plus size={18} /> Agregar
+                  </button>
+                </div>
               </div>
 
-              <div className="mt-5 overflow-hidden rounded-xl border border-gray-700">
+              <div className="mt-5 overflow-x-auto rounded-xl border border-gray-700">
                 <table className="w-full text-left">
                   <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
                     <tr>
@@ -1084,7 +1050,7 @@ export default function Remachado() {
               </div>
             </div>
 
-            <div className="flex flex-col-reverse gap-3 border-t border-gray-700 bg-grafito-900/60 p-5 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-3 border-t border-gray-700 bg-grafito-900/60 p-4 sm:flex-row sm:justify-end sm:p-5">
               <button onClick={() => setDetailOpen(false)} disabled={saving} className="btn-secondary disabled:opacity-50">Volver</button>
               <button onClick={submitTrabajo} disabled={saving} className="btn-primary flex items-center justify-center gap-2 disabled:opacity-60">
                 {saving ? "Registrando..." : "Registrar e imprimir"} <Printer size={18} />

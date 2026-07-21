@@ -118,34 +118,54 @@ const quantityShort = (value: number, unit?: string | null, tipoLinea?: string |
   return unit === "METRO" ? label : `${label} u`;
 };
 
-function topSoldLines(summary: DailySalesSummary) {
+function soldProductLines(summary: DailySalesSummary) {
   const sold = new Map<string, {
     description: string;
     quantity: number;
     subtotal: number;
+    discount: number;
+    total: number;
     unit?: string | null;
     tipoLinea?: string | null;
   }>();
 
   (summary.ventas || []).forEach((sale) => {
-    (sale.detalles || []).forEach((detail) => {
+    const details = sale.detalles || [];
+    const saleSubtotal = sale.subtotal || details.reduce((sum, detail) => sum + (detail.subtotal || 0), 0);
+    const saleDiscount = Math.min(Math.max(sale.descuento || 0, 0), saleSubtotal);
+    let appliedDiscount = 0;
+
+    details.forEach((detail, index) => {
       const product = detail.producto;
       const description = product?.descripcion || detail.descripcion || "Detalle de venta";
       const unit = detail.unidadVenta || product?.unidadVenta || null;
       const tipoLinea = detail.tipoLinea || null;
       const key = detail.productoId || `${tipoLinea || "LINEA"}:${description}:${unit || ""}`;
       const current = sold.get(key);
+      const lineSubtotal = detail.subtotal || 0;
+      const remainingDiscount = Math.max(saleDiscount - appliedDiscount, 0);
+      const lineDiscount = saleSubtotal > 0
+        ? index === details.length - 1
+          ? remainingDiscount
+          : Math.min(remainingDiscount, (lineSubtotal / saleSubtotal) * saleDiscount)
+        : 0;
+      appliedDiscount += lineDiscount;
+      const lineTotal = Math.max(lineSubtotal - lineDiscount, 0);
 
       if (current) {
         current.quantity += detail.cantidad || 0;
-        current.subtotal += detail.subtotal || 0;
+        current.subtotal += lineSubtotal;
+        current.discount += lineDiscount;
+        current.total += lineTotal;
         return;
       }
 
       sold.set(key, {
         description,
         quantity: detail.cantidad || 0,
-        subtotal: detail.subtotal || 0,
+        subtotal: lineSubtotal,
+        discount: lineDiscount,
+        total: lineTotal,
         unit,
         tipoLinea,
       });
@@ -154,8 +174,15 @@ function topSoldLines(summary: DailySalesSummary) {
 
   return Array.from(sold.values())
     .filter((item) => item.quantity > 0)
-    .sort((a, b) => b.quantity - a.quantity || b.subtotal - a.subtotal)
-    .slice(0, 5);
+    .sort((a, b) => normalizeText(a.description).localeCompare(normalizeText(b.description), "es"));
+}
+
+function salesDiscountTotal(summary: DailySalesSummary) {
+  return (summary.ventas || []).reduce((sum, sale) => sum + (sale.descuento || 0), 0);
+}
+
+function salesSubtotal(summary: DailySalesSummary) {
+  return (summary.ventas || []).reduce((sum, sale) => sum + (sale.subtotal || 0), 0);
 }
 
 function expenseItems(summary: DailySalesSummary) {
@@ -179,7 +206,9 @@ function buildCashClosingText(
   const declaredCash = closing?.montoDeclarado ?? options.declaredCash ?? netCash;
   const difference = closing?.diferencia ?? declaredCash - netCash;
   const notes = normalizeText(closing?.notas || options.notes || "");
-  const bestSellers = topSoldLines(summary);
+  const soldLines = soldProductLines(summary);
+  const discountTotal = salesDiscountTotal(summary);
+  const subtotalSales = salesSubtotal(summary);
   const expensesDetail = expenseItems(summary);
 
   const lines = [
@@ -192,16 +221,26 @@ function buildCashClosingText(
     `Estado: ${summary.cerrado ? "CERRADO" : "PRECIERRE"}`,
     repeat("-"),
     lineBetween("Ventas:", String(summary.totals.cantidadVentas || 0)),
-    lineBetween("Total ventas:", money(summary.totals.totalVentas || 0)),
   ];
 
-  if (bestSellers.length) {
-    lines.push(repeat("-"), center("MAS VENDIDO"));
-    bestSellers.forEach((item, index) => {
+  if (discountTotal > 0) {
+    lines.push(
+      lineBetween("Subtotal ventas:", money(subtotalSales)),
+      lineBetween("Descuentos:", `-${money(discountTotal)}`),
+    );
+  }
+  lines.push(lineBetween("Total ventas:", money(summary.totals.totalVentas || 0)));
+
+  if (soldLines.length) {
+    lines.push(repeat("-"), center("PRODUCTOS VENDIDOS"));
+    soldLines.forEach((item, index) => {
       const rank = `${index + 1}. `;
       const nameWidth = TICKET_WIDTH - rank.length;
       lines.push(`${rank}${truncate(normalizeText(item.description), nameWidth)}`);
-      lines.push(lineBetween(quantityShort(item.quantity, item.unit, item.tipoLinea), money(item.subtotal)));
+      lines.push(lineBetween(quantityShort(item.quantity, item.unit, item.tipoLinea), money(item.total)));
+      if (item.discount > 0.004) {
+        lines.push(lineBetween("Desc aplicado:", `-${money(item.discount)}`));
+      }
     });
   }
 
