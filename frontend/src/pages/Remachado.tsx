@@ -34,6 +34,64 @@ const money = (value: number) => `Bs ${value.toLocaleString("es-BO", { minimumFr
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 
+const normalizeSearch = (value: string | number | null | undefined) =>
+  String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+const quantityInputPattern = /^[0-9]*$/;
+
+const levenshteinDistance = (left: string, right: string) => {
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+  for (let i = 1; i <= left.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+};
+
+const getApproxSearchScore = (query: string, values: Array<string | number | null | undefined>) => {
+  const q = normalizeSearch(query);
+  if (!q) return 0;
+  const text = normalizeSearch(values.filter(Boolean).join(" "));
+  if (!text) return 0;
+  if (text.includes(q)) return 1000 - text.indexOf(q);
+
+  const words = text.split(/\s+/).filter(Boolean);
+  const queryWords = q.split(/\s+/).filter(Boolean);
+  let score = 0;
+
+  for (const queryWord of queryWords) {
+    let best = 0;
+    for (const word of words) {
+      if (word.includes(queryWord) || queryWord.includes(word)) {
+        best = Math.max(best, 120 - Math.abs(word.length - queryWord.length));
+        continue;
+      }
+      const distance = levenshteinDistance(queryWord, word);
+      const maxDistance = queryWord.length <= 4 ? 1 : Math.max(1, Math.floor(queryWord.length * 0.35));
+      if (distance <= maxDistance) best = Math.max(best, 90 - distance * 18);
+    }
+    if (best === 0) return 0;
+    score += best;
+  }
+
+  return score;
+};
+
+const escapeHtml = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
 const getStockTextClass = (stock: number, stockMinimo: number) => {
   if (stock <= 0) return "p-4 font-bold text-red-300";
   if (stock <= stockMinimo) return "p-4 font-bold text-amber-300";
@@ -60,8 +118,8 @@ export default function Remachado() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailItems, setDetailItems] = useState<DetailProductLine[]>([]);
   const [detailProductId, setDetailProductId] = useState("");
-  const [detailQuantity, setDetailQuantity] = useState(1);
-  const [detailPrice, setDetailPrice] = useState(0);
+  const [detailProductSearch, setDetailProductSearch] = useState("");
+  const [detailQuantity, setDetailQuantity] = useState("1");
   const [descuento, setDescuento] = useState(0);
 
   const [trabajoForm, setTrabajoForm] = useState({
@@ -140,6 +198,32 @@ export default function Remachado() {
     return medidas.filter((item) => item.medida.toLowerCase().includes(q) || (item.descripcion || "").toLowerCase().includes(q));
   }, [medidas, search]);
 
+  const filteredDetailProducts = useMemo(() => {
+    if (!normalizeSearch(detailProductSearch)) return [];
+    return unitProducts
+      .map((product) => ({
+        product,
+        score: getApproxSearchScore(detailProductSearch, [
+          product.codigo,
+          product.codigoRepuesto,
+          product.descripcion,
+          product.marca,
+          product.ubicacion,
+        ]),
+      }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.product.descripcion.localeCompare(b.product.descripcion))
+      .slice(0, 8)
+      .map((item) => item.product);
+  }, [detailProductSearch, unitProducts]);
+  const selectedDetailProduct = products.find((item) => item.id === detailProductId);
+
+  const selectDetailProduct = (productId: string) => {
+    setDetailProductId(productId);
+    const product = products.find((item) => item.id === productId);
+    if (product) setDetailProductSearch(`${product.codigo} - ${product.descripcion}`);
+  };
+
   const addToCart = () => {
     if (!trabajoForm.medidaId) return setMessage("Selecciona la medida de balata.");
     setCartTrabajos(prev => [
@@ -169,22 +253,24 @@ export default function Remachado() {
 
   const addDetailProduct = () => {
     const product = products.find((item) => item.id === detailProductId);
+    const cantidad = Number(detailQuantity);
     if (!product) return setMessage("Selecciona un producto del inventario.");
-    if (!Number.isFinite(detailQuantity) || detailQuantity <= 0) return setMessage("La cantidad debe ser mayor a cero.");
-    if (!Number.isFinite(detailPrice) || detailPrice < 0) return setMessage("El precio no puede ser negativo.");
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return setMessage("La cantidad debe ser mayor a cero.");
+    const precioUnitario = product.precioVenta;
+    if (!Number.isFinite(precioUnitario) || precioUnitario < 0) return setMessage("El producto no tiene un precio valido.");
     setMessage(null);
     setDetailItems((prev) => [
       ...prev,
       {
         id: `${product.id}-${Date.now()}`,
         productoId: product.id,
-        cantidad: detailQuantity,
-        precioUnitario: detailPrice,
+        cantidad,
+        precioUnitario,
       },
     ]);
     setDetailProductId("");
-    setDetailQuantity(1);
-    setDetailPrice(0);
+    setDetailProductSearch("");
+    setDetailQuantity("1");
   };
 
   const removeDetailProduct = (id: string) => {
@@ -235,6 +321,104 @@ export default function Remachado() {
         </body>
       </html>`);
     printWindow.document.close();
+  };
+
+  const getMovimientoSubject = (item: RemachadoMovimiento) => {
+    if (item.medida?.medida) return item.medida.medida;
+    if (item.remache?.codigo || item.remache?.nombre) {
+      return [item.remache?.codigo, item.remache?.nombre].filter(Boolean).join(" - ");
+    }
+    return "-";
+  };
+
+  const writePrintDocument = (title: string, body: string) => {
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      setMessage("No se pudo abrir la ventana de impresion.");
+      return;
+    }
+    printWindow.document.write(`<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111; margin: 24px; font-size: 12px; }
+            h1 { font-size: 20px; margin: 0 0 4px; }
+            .meta { margin-bottom: 18px; color: #444; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #bbb; padding: 7px; text-align: left; vertical-align: top; }
+            th { background: #f0f0f0; }
+            .right { text-align: right; }
+            .center { text-align: center; }
+            @media print { body { margin: 10mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(title)}</h1>
+          <div class="meta">Impreso: ${escapeHtml(new Date().toLocaleString("es-BO"))}</div>
+          ${body}
+          <script>window.addEventListener("load", () => { window.print(); });</script>
+        </body>
+      </html>`);
+    printWindow.document.close();
+  };
+
+  const printHistorialReporte = () => {
+    const trabajoRows = trabajos.map((item) => `
+      <tr>
+        <td>${escapeHtml(new Date(item.createdAt).toLocaleString("es-BO"))}</td>
+        <td>${escapeHtml(item.medida?.medida || "-")}</td>
+        <td>${escapeHtml(item.tipoTrabajo === "MEDIO_JUEGO" ? "1/2 juego" : "1 juego")}</td>
+        <td>${escapeHtml(`${item.cantidadBalatas} balatas / ${item.cantidadRemaches} remaches`)}</td>
+        <td>${escapeHtml(`Resortes: ${item.cantidadResortes} | Gomas: ${item.cantidadGomas} | Seguros: ${item.cantidadSeguros}`)}</td>
+        <td class="right">${escapeHtml(money(item.total))}</td>
+      </tr>
+    `).join("");
+    const movimientoRows = movimientos.map((item) => `
+      <tr>
+        <td>${escapeHtml(new Date(item.createdAt).toLocaleString("es-BO"))}</td>
+        <td>${escapeHtml(item.tipo)}</td>
+        <td>${escapeHtml(getMovimientoSubject(item))}</td>
+        <td class="right">${escapeHtml(item.stockAnterior)}</td>
+        <td class="right">${escapeHtml(`${item.cantidad > 0 ? "+" : ""}${item.cantidad}`)}</td>
+        <td class="right">${escapeHtml(item.stockNuevo)}</td>
+        <td>${escapeHtml(item.usuario?.nombre || "-")}</td>
+        <td>${escapeHtml(item.notas || "-")}</td>
+      </tr>
+    `).join("");
+    writePrintDocument("Reporte de Historial de Remachado", `
+      <h2>Trabajos registrados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Medida</th>
+            <th>Trabajo</th>
+            <th>Balatas / Remaches</th>
+            <th>Accesorios</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>${trabajoRows || `<tr><td colspan="6" class="center">Sin trabajos registrados.</td></tr>`}</tbody>
+      </table>
+      <h2>Movimientos, ingresos y ediciones</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Medida / Remache</th>
+            <th>Stock Ant.</th>
+            <th>Cant.</th>
+            <th>Stock Nvo.</th>
+            <th>Usuario</th>
+            <th>Notas</th>
+          </tr>
+        </thead>
+        <tbody>${movimientoRows || `<tr><td colspan="8" class="center">Sin movimientos registrados.</td></tr>`}</tbody>
+      </table>
+    `);
   };
 
   const submitTrabajo = async () => {
@@ -653,6 +837,20 @@ export default function Remachado() {
 
       {tab === "HISTORIAL" && (
         <div className="space-y-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-white">Reporte de Historial de Remachado</h3>
+              <p className="mt-1 text-sm text-gray-400">Incluye trabajos, ingresos, ajustes y ediciones registradas.</p>
+            </div>
+            <button
+              type="button"
+              onClick={printHistorialReporte}
+              className="btn-secondary flex items-center justify-center gap-2"
+            >
+              <Printer size={18} /> Imprimir reporte
+            </button>
+          </div>
+
           <div>
             <h3 className="mb-4 text-xl font-bold text-white">Historial de Trabajos</h3>
             <TablePanel headers={["Fecha", "Medida", "Trabajo", "Balatas", "Accesorios", "Total"]}>
@@ -674,7 +872,7 @@ export default function Remachado() {
           </div>
 
           <div>
-            <h3 className="mb-4 text-xl font-bold text-white">Historial de Movimientos de Stock</h3>
+            <h3 className="mb-4 text-xl font-bold text-white">Historial de Movimientos y Ediciones</h3>
             <TablePanel headers={["Fecha", "Tipo", "Medida / Remache", "Stock Ant.", "Cant.", "Stock Nvo.", "Usuario", "Notas"]}>
               {movimientos.map((item) => (
                 <tr key={item.id}>
@@ -736,16 +934,80 @@ export default function Remachado() {
               </div>
 
               <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_120px_150px_auto] lg:items-end">
-                <Select label="Producto del inventario" value={detailProductId} onChange={setDetailProductId}>
-                  <option value="">Seleccionar producto</option>
-                  {unitProducts.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.codigo} - {product.descripcion} - stock {product.stock}
-                    </option>
-                  ))}
-                </Select>
-                <Input label="Cantidad" type="number" value={detailQuantity} onChange={(value) => setDetailQuantity(Number(value))} />
-                <Input label="Precio" type="number" value={detailPrice} onChange={(value) => setDetailPrice(Number(value))} />
+                <div>
+                  <span className="mb-1 block text-sm text-gray-300">Producto del inventario</span>
+                  <div className="relative mb-2">
+                    <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input
+                      className="premium-input pl-10"
+                      value={detailProductSearch}
+                      onChange={(event) => {
+                        setDetailProductSearch(event.target.value);
+                        selectDetailProduct("");
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && filteredDetailProducts[0]) {
+                          event.preventDefault();
+                          selectDetailProduct(filteredDetailProducts[0].id);
+                        }
+                      }}
+                      placeholder="Buscar por codigo o producto"
+                    />
+                  </div>
+                  {detailProductSearch.trim() && !selectedDetailProduct && (
+                    <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-700 bg-grafito-900/90">
+                      {filteredDetailProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => selectDetailProduct(product.id)}
+                          className="flex w-full items-center justify-between gap-3 border-b border-gray-800 px-3 py-3 text-left last:border-b-0 hover:bg-primary/10"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold text-white">{product.codigo} - {product.descripcion}</span>
+                            <span className="block text-xs text-gray-500">
+                              Stock {product.stock}{product.marca ? ` - ${product.marca}` : ""}
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-bold text-primary-light">{money(product.precioVenta)}</span>
+                        </button>
+                      ))}
+                      {filteredDetailProducts.length === 0 && (
+                        <div className="px-3 py-4 text-sm text-gray-500">Sin productos encontrados.</div>
+                      )}
+                    </div>
+                  )}
+                  {selectedDetailProduct && (
+                    <div className="mt-2 rounded-lg border border-gray-700 bg-grafito-900/50 p-3 text-sm">
+                      <p className="font-semibold text-white">{selectedDetailProduct.descripcion}</p>
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
+                        <span>Codigo: {selectedDetailProduct.codigo}</span>
+                        <span>Stock: {selectedDetailProduct.stock}</span>
+                        <span className="font-bold text-primary-light">{money(selectedDetailProduct.precioVenta)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <label className="block">
+                  <span className="mb-1 block text-sm text-gray-300">Cantidad</span>
+                  <input
+                    className="premium-input"
+                    inputMode="numeric"
+                    value={detailQuantity}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (quantityInputPattern.test(value)) setDetailQuantity(value);
+                    }}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-sm text-gray-300">Precio</span>
+                  <input
+                    className="premium-input text-primary-light"
+                    value={selectedDetailProduct ? money(selectedDetailProduct.precioVenta) : "Bs 0,00"}
+                    readOnly
+                  />
+                </label>
                 <button onClick={addDetailProduct} className="btn-secondary flex h-12 items-center justify-center gap-2 rounded-lg px-4 py-0">
                   <Plus size={18} /> Agregar
                 </button>

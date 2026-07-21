@@ -67,6 +67,10 @@ function getBusinessDay(dateValue?: string | null) {
   return { start, end, label };
 }
 
+function getBusinessDayLabel(date: Date) {
+  return getBusinessDay(date.toISOString()).label;
+}
+
 function sellerBusinessDayScope(usuarioId: string, sucursalId: string) {
   return {
     usuarioId,
@@ -371,6 +375,61 @@ export class SaleService {
       netos: getNetTotals(totals, gastosTotals),
       ventas,
     };
+  }
+
+  async getPendingCashClosings(params: { usuarioId: string; sucursalId: string }) {
+    const today = getBusinessDay();
+    const scope = sellerBusinessDayScope(params.usuarioId, params.sucursalId);
+    const [ventas, gastos, cierres] = await Promise.all([
+      prisma.venta.findMany({
+        where: {
+          ...scope,
+          createdAt: { lt: today.start },
+        },
+        select: { createdAt: true, total: true },
+      }),
+      prisma.gastoCaja.findMany({
+        where: {
+          ...scope,
+          createdAt: { lt: today.start },
+        },
+        select: { createdAt: true, monto: true },
+      }),
+      prisma.cierreCaja.findMany({
+        where: {
+          ...scope,
+          fecha: { lt: today.start },
+        },
+        select: { fecha: true },
+      }),
+    ]);
+
+    const closedDays = new Set(cierres.map((cierre) => getBusinessDayLabel(cierre.fecha)));
+    const pendingByDay = new Map<string, {
+      fecha: string;
+      cantidadVentas: number;
+      totalVentas: number;
+      totalGastos: number;
+    }>();
+
+    ventas.forEach((venta) => {
+      const fecha = getBusinessDayLabel(venta.createdAt);
+      if (closedDays.has(fecha)) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
+      current.cantidadVentas += 1;
+      current.totalVentas += venta.total;
+      pendingByDay.set(fecha, current);
+    });
+
+    gastos.forEach((gasto) => {
+      const fecha = getBusinessDayLabel(gasto.createdAt);
+      if (closedDays.has(fecha)) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
+      current.totalGastos += gasto.monto;
+      pendingByDay.set(fecha, current);
+    });
+
+    return Array.from(pendingByDay.values()).sort((a, b) => b.fecha.localeCompare(a.fecha));
   }
 
   async createCashExpense(data: CreateCashExpenseInput) {

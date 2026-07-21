@@ -1,18 +1,39 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History, Hammer } from "lucide-react";
+import { AlertTriangle, ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History, Hammer } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
+import { fetchPendingCashClosings } from "../services/sales";
+import { PendingCashClosing } from "../types";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
 import ConfirmLogoutModal from "../components/ConfirmLogoutModal";
+
+const money = (value: number) =>
+  `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function SellerLayout() {
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [pendingClosings, setPendingClosings] = useState<PendingCashClosing[]>([]);
   const user = getCurrentUser();
+
+  useEffect(() => {
+    if (user?.role !== "SELLER") return;
+    let mounted = true;
+    fetchPendingCashClosings()
+      .then((items) => {
+        if (mounted) setPendingClosings(items);
+      })
+      .catch(() => {
+        if (mounted) setPendingClosings([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [user?.role]);
 
   const handleLogout = () => {
     setShowDropdown(false);
@@ -117,6 +138,32 @@ export default function SellerLayout() {
 
         {/* Page Content */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-grafito-800 p-6">
+          {pendingClosings.length > 0 && (
+            <div className="mb-5 rounded-xl border border-red-500/40 bg-red-500/10 p-4 shadow-lg">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex gap-3">
+                  <AlertTriangle className="mt-0.5 shrink-0 text-red-300" size={24} />
+                  <div>
+                    <p className="font-black uppercase tracking-wide text-red-100">Caja pendiente de cierre</p>
+                    <p className="mt-1 text-sm text-red-100/90">
+                      Tienes una caja sin cerrar del {pendingClosings[0].fecha}.
+                      {pendingClosings.length > 1 ? ` Hay ${pendingClosings.length} dias pendientes.` : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-red-200/80">
+                      Ventas: {pendingClosings[0].cantidadVentas} - Total vendido: {money(pendingClosings[0].totalVentas)} - Gastos: {money(pendingClosings[0].totalGastos)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/seller/historial?fecha=${pendingClosings[0].fecha}`)}
+                  className="btn-primary whitespace-nowrap"
+                >
+                  Cerrar caja pendiente
+                </button>
+              </div>
+            </div>
+          )}
           <Outlet />
         </main>
         

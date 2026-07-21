@@ -298,6 +298,13 @@ export interface CashClosing {
   createdAt: string;
 }
 
+export interface PendingCashClosing {
+  fecha: string;
+  cantidadVentas: number;
+  totalVentas: number;
+  totalGastos: number;
+}
+
 export interface PaginatedProducts {
   items: Product[];
   total: number;

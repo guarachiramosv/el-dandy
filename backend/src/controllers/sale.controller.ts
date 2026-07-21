@@ -48,6 +48,18 @@ export const getDailySalesSummary = asyncHandler(async (req: Request, res: Respo
   res.json({ success: true, data });
 });
 
+export const getPendingCashClosings = asyncHandler(async (req: Request, res: Response) => {
+  const usuarioId = req.user?.id || '';
+  const sucursalId = req.user?.sucursalId || '';
+
+  if (!usuarioId || !sucursalId) {
+    return res.status(400).json({ success: false, error: 'Usuario y sucursal requeridos' });
+  }
+
+  const data = await service.getPendingCashClosings({ usuarioId, sucursalId });
+  res.json({ success: true, data });
+});
+
 export const closeCashRegister = asyncHandler(async (req: Request, res: Response) => {
   const parsed = closeCashRegisterSchema.parse(req.body);
   const usuarioId = req.user?.id ?? String(req.body.usuarioId || '');

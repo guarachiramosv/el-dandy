@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } from "lucide-react";
 import { CashClosing, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
@@ -24,17 +25,23 @@ const productConditionClass = (condition?: string | null) =>
   condition === "USADO"
     ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
     : "border-green-500/40 bg-green-500/10 text-green-200";
+type ExpenseMethod = "EFECTIVO" | "QR";
+const expenseMethods: ExpenseMethod[] = ["EFECTIVO", "QR"];
+const moneyInputPattern = /^[0-9]*([.,][0-9]{0,2})?$/;
+const parseMoneyInput = (value: string) => Number(value.trim().replace(",", "."));
 
 export default function HistorialVentas() {
   const user = getCurrentUser();
-  const [reportDate, setReportDate] = useState(defaultDay);
+  const [searchParams] = useSearchParams();
+  const pendingDate = searchParams.get("fecha");
+  const [reportDate, setReportDate] = useState(pendingDate || defaultDay);
   const [summary, setSummary] = useState<DailySalesSummary | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [declaredCash, setDeclaredCash] = useState(0);
   const [closeNotes, setCloseNotes] = useState("");
   const [expenseReason, setExpenseReason] = useState("");
-  const [expenseAmount, setExpenseAmount] = useState(0);
-  const [expenseMethod, setExpenseMethod] = useState<"EFECTIVO" | "QR">("EFECTIVO");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseMethod, setExpenseMethod] = useState<ExpenseMethod>("EFECTIVO");
   const [expenseNotes, setExpenseNotes] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +69,10 @@ export default function HistorialVentas() {
     return () => window.clearTimeout(timer);
   }, [loadSummary]);
 
+  useEffect(() => {
+    if (pendingDate && pendingDate !== reportDate) setReportDate(pendingDate);
+  }, [pendingDate, reportDate]);
+
   const handleCloseCash = async () => {
     setMessage(null);
     setClosingCash(true);
@@ -79,20 +90,21 @@ export default function HistorialVentas() {
   const handleAddExpense = async () => {
     setMessage(null);
     const motivo = expenseReason.trim();
+    const monto = parseMoneyInput(expenseAmount);
     if (!motivo) return setMessage("Indica para que se saco dinero.");
-    if (expenseAmount <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
+    if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
     if (summary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
 
     setSavingExpense(true);
     try {
       await createCashExpense({
         motivo,
-        monto: expenseAmount,
+        monto,
         metodoPago: expenseMethod,
         notas: expenseNotes.trim() || null,
       });
       setExpenseReason("");
-      setExpenseAmount(0);
+      setExpenseAmount("");
       setExpenseMethod("EFECTIVO");
       setExpenseNotes("");
       setMessage("Gasto registrado correctamente.");
@@ -233,7 +245,7 @@ export default function HistorialVentas() {
                 </h4>
                 <span className="text-sm font-semibold text-amber-200">{money(expenseTotals.totalGastos)}</span>
               </div>
-              <div className="grid gap-3 md:grid-cols-[1fr_140px_140px]">
+              <div className="grid gap-3 md:grid-cols-[1fr_150px_180px]">
                 <input
                   type="text"
                   value={expenseReason}
@@ -243,22 +255,35 @@ export default function HistorialVentas() {
                   className="premium-input"
                 />
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   value={expenseAmount}
-                  onChange={(event) => setExpenseAmount(Number(event.target.value))}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (moneyInputPattern.test(value)) setExpenseAmount(value);
+                  }}
                   disabled={summary?.cerrado}
+                  placeholder="Cuanto gasto"
+                  aria-label="Cuanto gasto"
                   className="premium-input"
                 />
-                <select
-                  value={expenseMethod}
-                  onChange={(event) => setExpenseMethod(event.target.value as "EFECTIVO" | "QR")}
-                  disabled={summary?.cerrado}
-                  className="premium-input"
-                >
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="QR">QR</option>
-                </select>
+                <div className="grid grid-cols-2 gap-2" role="group" aria-label="Origen del gasto">
+                  {expenseMethods.map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setExpenseMethod(method)}
+                      disabled={summary?.cerrado}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${
+                        expenseMethod === method
+                          ? "border-amber-400/60 bg-amber-400/15 text-amber-100"
+                          : "border-gray-700 bg-grafito-800 text-gray-300 hover:border-gray-500"
+                      }`}
+                    >
+                      {method === "EFECTIVO" ? "Efectivo" : "QR"}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="mt-3 grid gap-3 md:grid-cols-[1fr_180px]">
                 <input
