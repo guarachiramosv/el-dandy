@@ -216,6 +216,7 @@ export default function Inventario() {
         { value: product.codigo, weight: 2 },
         { value: product.codigoRepuesto, weight: 1.9 },
         { value: product.descripcion, weight: 1.5 },
+        { value: product.descripcionDetallada, weight: 0.8 },
         { value: product.ubicacion, weight: 1.25 },
         { value: product.marca, weight: 1 },
         { value: product.categoria?.nombre, weight: 0.9 },
@@ -609,6 +610,13 @@ function ProductDetailModal({
               <DetailCard label="Precio venta" value={`Bs ${product.precioVenta.toLocaleString("es-BO")}`} highlight />
               <DetailCard label="Precio compra" value={`Bs ${product.precioCompra.toLocaleString("es-BO")}`} />
             </div>
+
+            {product.descripcionDetallada?.trim() && (
+              <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+                <p className="text-sm font-bold uppercase text-gray-400">Descripcion profunda</p>
+                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-gray-200">{product.descripcionDetallada}</p>
+              </div>
+            )}
 
             <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -9,6 +9,7 @@ export const createProductSchema = z.object({
   codigo: z.string().trim().optional().nullable(),
   codigoRepuesto: z.string().trim().optional().nullable(),
   descripcion: z.string().min(1, 'Descripcion es requerida'),
+  descripcionDetallada: z.string().trim().max(3000, 'Descripcion detallada demasiado larga').optional().nullable(),
   marca: z.string().trim().optional().nullable(),
   condicion: z.enum(['NUEVO', 'USADO']).optional(),
   unidadVenta: z.enum(['UNIDAD', 'METRO']).optional(),

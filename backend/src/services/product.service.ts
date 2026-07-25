@@ -22,6 +22,7 @@ const productSearchFields = (product: any) => [
   { value: product.codigo, weight: 2 },
   { value: product.codigoRepuesto, weight: 1.9 },
   { value: product.descripcion, weight: 1.5 },
+  { value: product.descripcionDetallada, weight: 0.8 },
   { value: product.ubicacion, weight: 1.25 },
   { value: product.marca, weight: 1 },
   { value: product.categoria?.nombre, weight: 0.9 },
@@ -163,6 +164,7 @@ export class ProductService {
         codigo: true,
         codigoRepuesto: true,
         descripcion: true,
+        descripcionDetallada: true,
         marca: true,
         condicion: true,
         unidadVenta: true,
@@ -193,6 +195,9 @@ export class ProductService {
   async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }) {
     if (typeof data.codigoRepuesto === 'string') {
       data.codigoRepuesto = data.codigoRepuesto.trim() || null;
+    }
+    if (typeof data.descripcionDetallada === 'string') {
+      data.descripcionDetallada = data.descripcionDetallada.trim() || null;
     }
     data.marca = typeof data.marca === 'string' && data.marca.trim()
       ? data.marca.trim()
@@ -232,6 +237,7 @@ export class ProductService {
 
     if (typeof data.codigo === 'string') data.codigo = nextCodigo;
     if (typeof data.codigoRepuesto === 'string') data.codigoRepuesto = data.codigoRepuesto.trim() || null;
+    if (typeof data.descripcionDetallada === 'string') data.descripcionDetallada = data.descripcionDetallada.trim() || null;
     if (typeof data.marca === 'string') data.marca = data.marca.trim() || DEFAULT_PRODUCT_BRAND;
     else if (data.marca === null) data.marca = DEFAULT_PRODUCT_BRAND;
     if (nextCodigo !== current.codigo) {

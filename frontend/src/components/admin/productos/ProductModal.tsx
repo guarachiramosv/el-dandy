@@ -11,6 +11,7 @@ type ProductFormData = {
   codigo: string;
   codigoRepuesto?: string | null;
   descripcion: string;
+  descripcionDetallada?: string | null;
   categoriaId: string;
   marca: string;
   condicion: "NUEVO" | "USADO";
@@ -54,6 +55,7 @@ const buildInitialFormData = (
       codigo: product.codigo,
       codigoRepuesto: product.codigoRepuesto || "",
       descripcion: product.descripcion,
+      descripcionDetallada: product.descripcionDetallada || "",
       categoriaId: product.categoriaId,
       marca: product.marca,
       condicion: product.condicion === "USADO" ? "USADO" : "NUEVO",
@@ -74,6 +76,7 @@ const buildInitialFormData = (
     codigo: "",
     codigoRepuesto: "",
     descripcion: "",
+    descripcionDetallada: "",
     categoriaId: defaultCategoryId,
     marca: "Universal",
     condicion: "NUEVO",
@@ -139,7 +142,7 @@ function ProductModalContent({
     return () => selectedPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
   }, [selectedPreviewUrls]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormError(null);
     setFormData(prev => ({
@@ -182,6 +185,7 @@ function ProductModalContent({
       codigo: formData.codigo.trim(),
       codigoRepuesto: formData.codigoRepuesto?.trim() || null,
       descripcion: formData.descripcion.trim(),
+      descripcionDetallada: formData.descripcionDetallada?.trim() || null,
       marca: formData.marca.trim(),
       ubicacion: formData.ubicacion?.trim() || null,
     };
@@ -335,8 +339,19 @@ function ProductModalContent({
                     <input type="text" name="codigoRepuesto" value={formData.codigoRepuesto || ""} onChange={handleChange} readOnly={isReadOnly} className="premium-input" placeholder="Ej. ALT-001" />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="text-sm font-medium text-gray-300">Descripcion</label>
-                    <input required type="text" name="descripcion" value={formData.descripcion} onChange={handleChange} readOnly={isReadOnly} className="premium-input" placeholder="Descripcion completa" />
+                    <label className="text-sm font-medium text-gray-300">Nombre del producto</label>
+                    <input required type="text" name="descripcion" value={formData.descripcion} onChange={handleChange} readOnly={isReadOnly} className="premium-input" placeholder="Ej. Polea de alternador MB O400" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-sm font-medium text-gray-300">Descripcion profunda</label>
+                    <textarea
+                      name="descripcionDetallada"
+                      value={formData.descripcionDetallada || ""}
+                      onChange={handleChange}
+                      readOnly={isReadOnly}
+                      className="premium-input min-h-28 resize-y"
+                      placeholder="Para que sirve, compatibilidad, recomendaciones, medidas o detalles importantes del producto."
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-300">Categoria</label>

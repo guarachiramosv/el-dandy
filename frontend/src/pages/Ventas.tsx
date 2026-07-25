@@ -165,6 +165,7 @@ export default function Ventas() {
         { value: product.codigo, weight: 2 },
         { value: product.codigoRepuesto, weight: 1.9 },
         { value: product.descripcion, weight: 1.5 },
+        { value: product.descripcionDetallada, weight: 0.8 },
         { value: product.ubicacion, weight: 1.25 },
         { value: product.marca, weight: 1 },
         { value: product.categoria?.nombre, weight: 0.9 },

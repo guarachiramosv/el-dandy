@@ -167,6 +167,7 @@ model Producto {
   codigo       String
   codigoRepuesto String?
   descripcion  String
+  descripcionDetallada String?
   marca        String
   condicion    ProductCondition @default(NUEVO)
   unidadVenta  ProductSaleUnit  @default(UNIDAD)

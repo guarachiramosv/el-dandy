@@ -18,6 +18,7 @@ export interface Product {
   codigo: string;
   codigoRepuesto?: string | null;
   descripcion: string;
+  descripcionDetallada?: string | null;
   marca: string;
   condicion: string;
   unidadVenta?: 'UNIDAD' | 'METRO';
