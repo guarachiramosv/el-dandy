@@ -2,10 +2,11 @@
 import { prisma } from '../lib/prisma';
 import { Prisma, ProductStatus } from '@prisma/client';
 import { StockService } from './stock.service';
-import { filterAndSortBySearch } from '../utils/fuzzySearch';
+import { filterAndSortBySearch, getSearchTerms } from '../utils/fuzzySearch';
 
 const stockService = new StockService();
 const DEFAULT_PRODUCT_BRAND = 'Sin marca';
+const SEARCH_CANDIDATE_LIMIT = 1000;
 
 const productInclude = {
   categoria: true,
@@ -30,6 +31,26 @@ const productSearchFields = (product: any) => [
 ];
 
 export class ProductService {
+  private buildSearchFilter(search: string): Prisma.ProductoWhereInput {
+    const terms = getSearchTerms(search).slice(0, 6);
+    if (terms.length === 0) return {};
+
+    return {
+      AND: terms.map((term) => ({
+        OR: [
+          { codigo: { contains: term, mode: 'insensitive' as const } },
+          { codigoRepuesto: { contains: term, mode: 'insensitive' as const } },
+          { descripcion: { contains: term, mode: 'insensitive' as const } },
+          { descripcionDetallada: { contains: term, mode: 'insensitive' as const } },
+          { ubicacion: { contains: term, mode: 'insensitive' as const } },
+          { marca: { contains: term, mode: 'insensitive' as const } },
+          { categoria: { nombre: { contains: term, mode: 'insensitive' as const } } },
+          { sucursal: { nombre: { contains: term, mode: 'insensitive' as const } } },
+        ],
+      })),
+    };
+  }
+
   private formatSequentialCode(value: number) {
     return String(value).padStart(4, '0');
   }
@@ -113,14 +134,29 @@ export class ProductService {
     if (params.status === 'inactive') where.estado = 'INACTIVO';
     else if (params.status === 'discontinued') where.estado = 'DESCONTINUADO';
     else if (params.status !== 'all') where.estado = 'ACTIVO';
+    const baseWhere: Prisma.ProductoWhereInput = {
+      ...where,
+      ...(and.length > 0 ? { AND: [...and] } : {}),
+    };
+    if (search) and.push(this.buildSearchFilter(search));
     if (and.length > 0) where.AND = and;
 
     if (search) {
-      const candidates = await prisma.producto.findMany({
+      const candidateLimit = Math.min(Math.max(page * limit * 4, 200), SEARCH_CANDIDATE_LIMIT);
+      let candidates = await prisma.producto.findMany({
         where,
         include: productInclude,
+        take: candidateLimit,
         orderBy: { createdAt: 'desc' },
       });
+      if (candidates.length === 0) {
+        candidates = await prisma.producto.findMany({
+          where: baseWhere,
+          include: productInclude,
+          take: candidateLimit,
+          orderBy: { createdAt: 'desc' },
+        });
+      }
       const matchedItems = filterAndSortBySearch(
         candidates.map((item) => this.applySucursalStock(item, params.sucursalId)),
         search,
@@ -154,10 +190,12 @@ export class ProductService {
   }
 
   async getCustomerCatalog(params: { search?: string }) {
-    const where: Prisma.ProductoWhereInput = { estado: 'ACTIVO', activo: true };
+    const baseWhere: Prisma.ProductoWhereInput = { estado: 'ACTIVO', activo: true };
+    const where: Prisma.ProductoWhereInput = { ...baseWhere };
     const search = typeof params.search === 'string' ? params.search.trim() : '';
+    if (search) where.AND = [this.buildSearchFilter(search)];
 
-    const products = await prisma.producto.findMany({
+    let products = await prisma.producto.findMany({
       where,
       select: {
         id: true,
@@ -185,7 +223,40 @@ export class ProductService {
         sucursal: { select: { id: true, nombre: true, whatsapp: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: search ? SEARCH_CANDIDATE_LIMIT : 100,
     });
+    if (search && products.length === 0) {
+      products = await prisma.producto.findMany({
+        where: baseWhere,
+        select: {
+          id: true,
+          codigo: true,
+          codigoRepuesto: true,
+          descripcion: true,
+          descripcionDetallada: true,
+          marca: true,
+          condicion: true,
+          unidadVenta: true,
+          stock: true,
+          stockMinimo: true,
+          ubicacion: true,
+          precioVenta: true,
+          imagen: true,
+          imagenes: { select: { id: true, url: true, orden: true }, orderBy: { orden: 'asc' } },
+          categoriaId: true,
+          sucursalId: true,
+          stockSucursales: {
+            select: { id: true, sucursalId: true, stock: true, activo: true, estado: true, sucursal: { select: { id: true, nombre: true, whatsapp: true } } },
+            orderBy: { createdAt: 'asc' },
+          },
+          createdAt: true,
+          categoria: { select: { id: true, nombre: true } },
+          sucursal: { select: { id: true, nombre: true, whatsapp: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: SEARCH_CANDIDATE_LIMIT,
+      });
+    }
     const items = search
       ? filterAndSortBySearch(products, search, productSearchFields, (product) => product.descripcion)
       : products;

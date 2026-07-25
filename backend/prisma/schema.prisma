@@ -200,6 +200,10 @@ model Producto {
   createdAt    DateTime         @default(now())
 
   @@unique([codigo, sucursalId])
+  @@index([estado, createdAt])
+  @@index([sucursalId, estado])
+  @@index([codigo])
+  @@index([codigoRepuesto])
 }
 
 model ProductoEliminacionHistorial {
