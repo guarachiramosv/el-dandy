@@ -71,6 +71,11 @@ function emptyClosingTotals() {
     totalQr: 0,
     totalTarjeta: 0,
     totalCredito: 0,
+    totalCobrosCredito: 0,
+    cobroCreditoEfectivo: 0,
+    cobroCreditoTransferencia: 0,
+    cobroCreditoQr: 0,
+    cobroCreditoTarjeta: 0,
     gastoEfectivo: 0,
     gastoQr: 0,
     totalGastos: 0,
@@ -94,6 +99,11 @@ function emptySalesTotals() {
     totalQr: 0,
     totalTarjeta: 0,
     totalCredito: 0,
+    totalCobrosCredito: 0,
+    cobroCreditoEfectivo: 0,
+    cobroCreditoTransferencia: 0,
+    cobroCreditoQr: 0,
+    cobroCreditoTarjeta: 0,
     gastoEfectivo: 0,
     gastoQr: 0,
     totalGastos: 0,
@@ -188,16 +198,35 @@ export class ReportService {
       acc.totalCierreVentas += cierre.totalVentas;
       acc.cierreEfectivo += cierre.netoEfectivo;
       acc.cierreQr += cierre.netoQr;
+      acc.totalCobrosCredito += cierre.totalCobrosCredito;
+      acc.cobroCreditoEfectivo += cierre.cobroCreditoEfectivo;
+      acc.cobroCreditoTransferencia += cierre.cobroCreditoTransferencia;
+      acc.cobroCreditoQr += cierre.cobroCreditoQr;
+      acc.cobroCreditoTarjeta += cierre.cobroCreditoTarjeta;
       return acc;
-    }, { cantidadCierres: 0, montoDeclarado: 0, diferencia: 0, totalCierreVentas: 0, cierreEfectivo: 0, cierreQr: 0 });
+    }, {
+      cantidadCierres: 0,
+      montoDeclarado: 0,
+      diferencia: 0,
+      totalCierreVentas: 0,
+      cierreEfectivo: 0,
+      cierreQr: 0,
+      totalCobrosCredito: 0,
+      cobroCreditoEfectivo: 0,
+      cobroCreditoTransferencia: 0,
+      cobroCreditoQr: 0,
+      cobroCreditoTarjeta: 0,
+    });
     Object.assign(totals, cierreTotals);
-    totals.netoEfectivo = Math.max(totals.totalEfectivo - totals.gastoEfectivo, 0);
-    totals.netoQr = Math.max(totals.totalQr - totals.gastoQr, 0);
+    totals.netoEfectivo = Math.max(totals.totalEfectivo + totals.cobroCreditoEfectivo - totals.gastoEfectivo, 0);
+    totals.netoQr = Math.max(totals.totalQr + totals.cobroCreditoQr - totals.gastoQr, 0);
     totals.totalDisponible =
       totals.netoEfectivo +
       totals.totalTransferencia +
+      totals.cobroCreditoTransferencia +
       totals.netoQr +
-      totals.totalTarjeta;
+      totals.totalTarjeta +
+      totals.cobroCreditoTarjeta;
 
     const productMap = new Map<string, {
       productoId: string;
@@ -289,6 +318,11 @@ export class ReportService {
       acc.totalQr += cierre.totalQr;
       acc.totalTarjeta += cierre.totalTarjeta;
       acc.totalCredito += cierre.totalCredito;
+      acc.totalCobrosCredito += cierre.totalCobrosCredito;
+      acc.cobroCreditoEfectivo += cierre.cobroCreditoEfectivo;
+      acc.cobroCreditoTransferencia += cierre.cobroCreditoTransferencia;
+      acc.cobroCreditoQr += cierre.cobroCreditoQr;
+      acc.cobroCreditoTarjeta += cierre.cobroCreditoTarjeta;
       acc.gastoEfectivo += cierre.gastoEfectivo;
       acc.gastoQr += cierre.gastoQr;
       acc.totalGastos += cierre.totalGastos;

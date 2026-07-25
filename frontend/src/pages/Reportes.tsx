@@ -24,10 +24,10 @@ const salePaymentLabel = (tipoVenta: string, metodoPago: string) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
 
 const remainingCashAfterExpenses = (report: SalesHistoryReport) =>
-  Math.max((report.totals.totalEfectivo || 0) - (report.totals.gastoEfectivo || 0), 0);
+  Math.max((report.totals.totalEfectivo || 0) + (report.totals.cobroCreditoEfectivo || 0) - (report.totals.gastoEfectivo || 0), 0);
 
 const remainingQrAfterExpenses = (report: SalesHistoryReport) =>
-  Math.max((report.totals.totalQr || 0) - (report.totals.gastoQr || 0), 0);
+  Math.max((report.totals.totalQr || 0) + (report.totals.cobroCreditoQr || 0) - (report.totals.gastoQr || 0), 0);
 
 const saleDetailRowsFrom = (report: SalesHistoryReport) =>
   report.ventas.flatMap((sale) =>
@@ -540,6 +540,7 @@ export default function Reportes() {
               <Stat label="Ventas" value={String(report.totals.cantidadVentas)} />
               <Stat label="Ventas efectivo" value={money(report.totals.totalEfectivo || 0)} />
               <Stat label="Ventas QR" value={money(report.totals.totalQr || 0)} />
+              <Stat label="Cobros credito" value={money(report.totals.totalCobrosCredito || 0)} />
               <Stat label="Total ventas" value={money(report.totals.totalVentas)} />
               <Stat label="Total gastos" value={money(report.totals.totalGastos || 0)} />
               <Stat label="Queda efectivo" value={money(remainingCashAfterExpenses(report))} />

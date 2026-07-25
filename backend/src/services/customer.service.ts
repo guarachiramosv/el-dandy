@@ -25,6 +25,23 @@ type CustomerRegisterInput = {
 };
 
 const SALT_ROUNDS = 10;
+const BOLIVIA_UTC_OFFSET_HOURS = 4;
+
+function getBusinessDay(dateValue?: string | null) {
+  const base = dateValue ? new Date(dateValue) : new Date();
+  if (Number.isNaN(base.getTime())) {
+    throw Object.assign(new Error('Fecha invalida'), { status: 400 });
+  }
+
+  const boliviaTime = new Date(base.getTime() - BOLIVIA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const year = boliviaTime.getUTCFullYear();
+  const month = boliviaTime.getUTCMonth();
+  const day = boliviaTime.getUTCDate();
+  const start = new Date(Date.UTC(year, month, day, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  const label = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { start, end, label };
+}
 
 export class CustomerService {
   private includeSummary = {
@@ -169,6 +186,17 @@ export class CustomerService {
     return prisma.$transaction(async (tx) => {
       const cuenta = await tx.cuentaCobrar.findUnique({ where: { id: cuentaId } });
       if (!cuenta) throw Object.assign(new Error('Cuenta por cobrar no encontrada'), { status: 404 });
+      const businessDay = getBusinessDay();
+      const cierre = await tx.cierreCaja.findFirst({
+        where: {
+          fecha: businessDay.start,
+          usuarioId: data.usuarioId,
+          sucursalId: cuenta.sucursalId,
+        },
+      });
+      if (cierre) {
+        throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar cobros de credito.'), { status: 409 });
+      }
       if (data.monto > cuenta.saldo) {
         throw Object.assign(new Error(`El pago excede el saldo pendiente de Bs ${cuenta.saldo}`), { status: 400 });
       }

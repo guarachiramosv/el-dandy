@@ -71,6 +71,19 @@ function getBusinessDayLabel(date: Date) {
   return getBusinessDay(date.toISOString()).label;
 }
 
+function parseDueDate(dateValue?: string | null) {
+  if (!dateValue) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  }
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) {
+    throw Object.assign(new Error('Fecha de pago invalida'), { status: 400 });
+  }
+  return parsed;
+}
+
 function sellerBusinessDayScope(usuarioId: string, sucursalId: string) {
   return {
     usuarioId,
@@ -101,20 +114,33 @@ function emptyExpenseTotals() {
   };
 }
 
+function emptyCreditPaymentTotals() {
+  return {
+    totalCobrosCredito: 0,
+    totalEfectivo: 0,
+    totalTransferencia: 0,
+    totalQr: 0,
+    totalTarjeta: 0,
+  };
+}
+
 function getNetTotals(
   totals: ReturnType<typeof emptyTotals>,
-  gastos: ReturnType<typeof emptyExpenseTotals>
+  gastos: ReturnType<typeof emptyExpenseTotals>,
+  cobrosCredito: ReturnType<typeof emptyCreditPaymentTotals> = emptyCreditPaymentTotals()
 ) {
-  const netoEfectivo = Math.max(totals.totalEfectivo - gastos.totalEfectivo, 0);
-  const netoQr = Math.max(totals.totalQr - gastos.totalQr, 0);
+  const netoEfectivo = Math.max(totals.totalEfectivo + cobrosCredito.totalEfectivo - gastos.totalEfectivo, 0);
+  const netoQr = Math.max(totals.totalQr + cobrosCredito.totalQr - gastos.totalQr, 0);
   return {
     totalEfectivo: netoEfectivo,
     totalQr: netoQr,
     totalDisponible:
       netoEfectivo +
       totals.totalTransferencia +
+      cobrosCredito.totalTransferencia +
       netoQr +
-      totals.totalTarjeta,
+      totals.totalTarjeta +
+      cobrosCredito.totalTarjeta,
   };
 }
 
@@ -170,6 +196,15 @@ export class SaleService {
     const ventaId = await prisma.$transaction(async (tx) => {
       if (data.tipoVenta === 'CREDITO' && !data.clienteId) {
         throw Object.assign(new Error('Selecciona un cliente para venta a credito'), { status: 400 });
+      }
+      if (data.tipoVenta === 'CREDITO') {
+        if (!data.fechaVencimiento) {
+          throw Object.assign(new Error('Indica la fecha de pago para venta a credito'), { status: 400 });
+        }
+        const clienteCredito = await tx.cliente.findUnique({ where: { id: data.clienteId! } });
+        if (!clienteCredito?.telefono?.trim()) {
+          throw Object.assign(new Error('Registra el celular del cliente para venta a credito'), { status: 400 });
+        }
       }
 
       const businessDay = getBusinessDay();
@@ -278,7 +313,7 @@ export class SaleService {
             sucursalId: data.sucursalId,
             montoTotal: total,
             saldo: total,
-            fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : null,
+            fechaVencimiento: parseDueDate(data.fechaVencimiento),
             estado: 'PENDIENTE',
           },
         });
@@ -320,7 +355,7 @@ export class SaleService {
       ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
     };
 
-    const [ventas, cierre, gastos] = await Promise.all([
+    const [ventas, cierre, gastos, pagosCredito] = await Promise.all([
       prisma.venta.findMany({
         where,
         include: {
@@ -338,6 +373,17 @@ export class SaleService {
         include: {
           usuario: { select: { id: true, nombre: true, email: true } },
           sucursal: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.pagoCredito.findMany({
+        where: {
+          usuarioId: params.usuarioId,
+          createdAt: { gte: businessDay.start, lt: businessDay.end },
+          cuenta: { sucursalId: params.sucursalId },
+        },
+        include: {
+          cuenta: { include: { cliente: true, venta: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -361,6 +407,15 @@ export class SaleService {
       return acc;
     }, emptyExpenseTotals());
 
+    const cobrosCreditoTotals = pagosCredito.reduce((acc, pago) => {
+      acc.totalCobrosCredito += pago.monto;
+      if (pago.metodoPago === 'EFECTIVO') acc.totalEfectivo += pago.monto;
+      else if (pago.metodoPago === 'TRANSFERENCIA') acc.totalTransferencia += pago.monto;
+      else if (pago.metodoPago === 'QR') acc.totalQr += pago.monto;
+      else if (pago.metodoPago === 'TARJETA') acc.totalTarjeta += pago.monto;
+      return acc;
+    }, emptyCreditPaymentTotals());
+
     return {
       fecha: businessDay.label,
       desde: businessDay.start,
@@ -372,7 +427,11 @@ export class SaleService {
         totals: gastosTotals,
         items: gastos,
       },
-      netos: getNetTotals(totals, gastosTotals),
+      cobrosCredito: {
+        totals: cobrosCreditoTotals,
+        items: pagosCredito,
+      },
+      netos: getNetTotals(totals, gastosTotals, cobrosCreditoTotals),
       ventas,
     };
   }
@@ -380,7 +439,7 @@ export class SaleService {
   async getPendingCashClosings(params: { usuarioId: string; sucursalId: string }) {
     const today = getBusinessDay();
     const scope = sellerBusinessDayScope(params.usuarioId, params.sucursalId);
-    const [ventas, gastos, cierres] = await Promise.all([
+    const [ventas, gastos, pagosCredito, cierres] = await Promise.all([
       prisma.venta.findMany({
         where: {
           ...scope,
@@ -392,6 +451,14 @@ export class SaleService {
         where: {
           ...scope,
           createdAt: { lt: today.start },
+        },
+        select: { createdAt: true, monto: true },
+      }),
+      prisma.pagoCredito.findMany({
+        where: {
+          usuarioId: params.usuarioId,
+          createdAt: { lt: today.start },
+          cuenta: { sucursalId: params.sucursalId },
         },
         select: { createdAt: true, monto: true },
       }),
@@ -426,6 +493,12 @@ export class SaleService {
       if (closedDays.has(fecha)) return;
       const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
       current.totalGastos += gasto.monto;
+      pendingByDay.set(fecha, current);
+    });
+    pagosCredito.forEach((pago) => {
+      const fecha = getBusinessDayLabel(pago.createdAt);
+      if (closedDays.has(fecha)) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
       pendingByDay.set(fecha, current);
     });
 
@@ -480,6 +553,11 @@ export class SaleService {
         totalQr: summary.totals.totalQr,
         totalTarjeta: summary.totals.totalTarjeta,
         totalCredito: summary.totals.totalCredito,
+        totalCobrosCredito: summary.cobrosCredito.totals.totalCobrosCredito,
+        cobroCreditoEfectivo: summary.cobrosCredito.totals.totalEfectivo,
+        cobroCreditoTransferencia: summary.cobrosCredito.totals.totalTransferencia,
+        cobroCreditoQr: summary.cobrosCredito.totals.totalQr,
+        cobroCreditoTarjeta: summary.cobrosCredito.totals.totalTarjeta,
         gastoEfectivo: summary.gastos.totals.totalEfectivo,
         gastoQr: summary.gastos.totals.totalQr,
         totalGastos: summary.gastos.totals.totalGastos,

@@ -1,8 +1,9 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, Edit, Eye, Plus, Search, Star, Trash2, UserRound, X } from "lucide-react";
-import { Customer } from "../types";
-import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer, type CustomerInput } from "../services/customers";
+import { CreditAccount, Customer } from "../types";
+import { addCreditPayment, createCustomer, deleteCustomer, fetchCustomers, updateCustomer, type CustomerInput } from "../services/customers";
+import { getCurrentUser } from "../services/auth";
 import { getErrorMessage } from "../utils/errors";
 
 const emptyForm: CustomerInput = {
@@ -17,7 +18,17 @@ const emptyForm: CustomerInput = {
   activo: true,
 };
 
+const money = (value: number) =>
+  `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const moneyInputPattern = /^[0-9]*([.,][0-9]{0,2})?$/;
+const parseMoneyInput = (value: string) => Number(value.trim().replace(",", "."));
+
+const formatDateOnly = (value?: string | null) =>
+  value ? new Date(value).toLocaleDateString("es-BO", { timeZone: "America/La_Paz" }) : "-";
+
 export default function Clientes() {
+  const user = getCurrentUser();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"TODOS" | "FRECUENTES" | "DEUDA">("TODOS");
@@ -26,6 +37,11 @@ export default function Clientes() {
   const [modalMode, setModalMode] = useState<"CREATE" | "EDIT" | "VIEW" | null>(null);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [form, setForm] = useState<CustomerInput>(emptyForm);
+  const [paymentAccount, setPaymentAccount] = useState<CreditAccount | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"EFECTIVO" | "QR">("EFECTIVO");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const loadCustomers = useCallback(async () => {
     setLoading(true);
@@ -101,6 +117,49 @@ export default function Clientes() {
     if (!confirm(`Eliminar cliente ${customer.nombre}?`)) return;
     await deleteCustomer(customer.id);
     setCustomers(prev => prev.filter(item => item.id !== customer.id));
+  };
+
+  const openPayment = (account: CreditAccount) => {
+    setError(null);
+    setPaymentAccount(account);
+    setPaymentAmount(String(account.saldo || 0));
+    setPaymentMethod("EFECTIVO");
+    setPaymentNotes("");
+  };
+
+  const handleCreditPayment = async () => {
+    setError(null);
+    if (!user?.id) return setError("Debes iniciar sesion nuevamente.");
+    if (!paymentAccount) return;
+    const monto = parseMoneyInput(paymentAmount);
+    if (!Number.isFinite(monto) || monto <= 0) return setError("Ingresa un monto de pago mayor a cero.");
+
+    setSavingPayment(true);
+    try {
+      const updatedAccount = await addCreditPayment(paymentAccount.id, {
+        monto,
+        metodoPago: paymentMethod,
+        usuarioId: user.id,
+        notas: paymentNotes.trim() || null,
+      });
+      const updateCustomerAccount = (customer: Customer): Customer => {
+        if (customer.id !== updatedAccount.clienteId) return customer;
+        const cuentas = (customer.cuentas || []).map((account) =>
+          account.id === updatedAccount.id ? updatedAccount : account,
+        );
+        const saldoPendiente = cuentas.reduce((sum, account) => sum + (account.saldo || 0), 0);
+        return { ...customer, cuentas, saldoPendiente };
+      };
+      setCustomers((prev) => prev.map(updateCustomerAccount));
+      setSelected((customer) => customer ? updateCustomerAccount(customer) : customer);
+      setPaymentAccount(null);
+      setPaymentAmount("");
+      setPaymentNotes("");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSavingPayment(false);
+    }
   };
 
   return (
@@ -216,8 +275,23 @@ export default function Clientes() {
           customer={selected}
           form={form}
           setForm={setForm}
+          onPayCredit={openPayment}
           onClose={() => setModalMode(null)}
           onSubmit={handleSubmit}
+        />
+      )}
+      {paymentAccount && (
+        <CreditPaymentModal
+          account={paymentAccount}
+          amount={paymentAmount}
+          method={paymentMethod}
+          notes={paymentNotes}
+          saving={savingPayment}
+          onAmountChange={setPaymentAmount}
+          onMethodChange={setPaymentMethod}
+          onNotesChange={setPaymentNotes}
+          onClose={() => setPaymentAccount(null)}
+          onConfirm={handleCreditPayment}
         />
       )}
     </div>
@@ -238,6 +312,7 @@ function CustomerModal({
   customer,
   form,
   setForm,
+  onPayCredit,
   onClose,
   onSubmit,
 }: {
@@ -245,6 +320,7 @@ function CustomerModal({
   customer: Customer | null;
   form: CustomerInput;
   setForm: React.Dispatch<React.SetStateAction<CustomerInput>>;
+  onPayCredit: (account: CreditAccount) => void;
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
 }) {
@@ -291,6 +367,36 @@ function CustomerModal({
                   </div>
                 )}
               </div>
+              <div className="rounded-xl border border-gray-700 overflow-hidden">
+                <div className="bg-grafito-900/60 p-3 font-semibold text-white">Creditos</div>
+                {(customer.cuentas || []).length === 0 ? (
+                  <p className="p-4 text-gray-400">Sin creditos registrados.</p>
+                ) : (
+                  <div className="divide-y divide-gray-800">
+                    {(customer.cuentas || []).map((account) => (
+                      <div key={account.id} className="grid gap-3 p-3 text-gray-300 md:grid-cols-[1fr_120px_120px_130px] md:items-center">
+                        <div>
+                          <p className="font-semibold text-white">{account.estado}</p>
+                          <p className="text-sm text-gray-500">Vence {formatDateOnly(account.fechaVencimiento)}</p>
+                        </div>
+                        <span>Pagado {money(account.montoPagado || 0)}</span>
+                        <span className={account.saldo > 0 ? "font-semibold text-red-300" : "font-semibold text-green-300"}>
+                          {money(account.saldo || 0)}
+                        </span>
+                        {account.saldo > 0 ? (
+                          <button type="button" onClick={() => onPayCredit(account)} className="btn-secondary py-2 text-sm">
+                            Registrar pago
+                          </button>
+                        ) : (
+                          <span className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-center text-sm font-semibold text-green-200">
+                            Pagado
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -330,6 +436,88 @@ function Info({ label, value }: { label: string; value?: string | null }) {
     <div className="rounded-lg border border-gray-700 bg-grafito-900/40 p-3">
       <p className="text-xs uppercase text-gray-500">{label}</p>
       <p className="text-gray-100 mt-1">{value || "-"}</p>
+    </div>
+  );
+}
+
+function CreditPaymentModal({
+  account,
+  amount,
+  method,
+  notes,
+  saving,
+  onAmountChange,
+  onMethodChange,
+  onNotesChange,
+  onClose,
+  onConfirm,
+}: {
+  account: CreditAccount;
+  amount: string;
+  method: "EFECTIVO" | "QR";
+  notes: string;
+  saving: boolean;
+  onAmountChange: (value: string) => void;
+  onMethodChange: (value: "EFECTIVO" | "QR") => void;
+  onNotesChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={saving ? undefined : onClose} />
+      <div className="relative w-full max-w-md rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+        <div className="flex items-center justify-between border-b border-gray-700 p-5">
+          <div>
+            <h3 className="text-xl font-bold text-white">Registrar pago de credito</h3>
+            <p className="text-sm text-gray-400">Saldo pendiente {money(account.saldo || 0)}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} className="text-gray-400 hover:text-white disabled:opacity-50">
+            <X size={22} />
+          </button>
+        </div>
+        <div className="space-y-4 p-5">
+          <label className="block text-sm text-gray-300">
+            <span className="mb-1 block">Monto recibido</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (moneyInputPattern.test(value)) onAmountChange(value);
+              }}
+              className="premium-input"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["EFECTIVO", "QR"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => onMethodChange(item)}
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                  method === item
+                    ? "border-primary/60 bg-primary/15 text-primary-light"
+                    : "border-gray-700 bg-grafito-900 text-gray-300 hover:border-gray-500"
+                }`}
+              >
+                {item === "EFECTIVO" ? "Efectivo" : "QR"}
+              </button>
+            ))}
+          </div>
+          <label className="block text-sm text-gray-300">
+            <span className="mb-1 block">Nota opcional</span>
+            <textarea value={notes} onChange={(event) => onNotesChange(event.target.value)} className="premium-input min-h-20" />
+          </label>
+        </div>
+        <div className="flex flex-col-reverse gap-3 border-t border-gray-700 p-5 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} disabled={saving} className="btn-secondary disabled:opacity-50">Cancelar</button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="btn-primary disabled:opacity-60">
+            {saving ? "Guardando..." : "Guardar pago"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

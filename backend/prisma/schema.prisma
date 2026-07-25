@@ -392,6 +392,11 @@ model CierreCaja {
   totalQr           Float
   totalTarjeta      Float
   totalCredito      Float
+  totalCobrosCredito Float   @default(0)
+  cobroCreditoEfectivo Float @default(0)
+  cobroCreditoTransferencia Float @default(0)
+  cobroCreditoQr    Float    @default(0)
+  cobroCreditoTarjeta Float  @default(0)
   gastoEfectivo     Float    @default(0)
   gastoQr           Float    @default(0)
   totalGastos       Float    @default(0)

@@ -4,6 +4,7 @@ import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } fr
 import { CashClosing, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
 import { closeCashRegister, createCashExpense, fetchDailySalesSummary, updateSalePaymentMethod } from "../services/sales";
+import { addCreditPayment } from "../services/customers";
 import { getErrorMessage } from "../utils/errors";
 import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
 
@@ -12,6 +13,9 @@ const money = (value: number) =>
 
 const formatDateTime = (value: string) =>
   new Date(value).toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" });
+
+const formatDateOnly = (value?: string | null) =>
+  value ? new Date(value).toLocaleDateString("es-BO", { timeZone: "America/La_Paz" }) : "-";
 
 const defaultDay = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/La_Paz",
@@ -43,10 +47,15 @@ export default function HistorialVentas() {
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseMethod, setExpenseMethod] = useState<ExpenseMethod>("EFECTIVO");
   const [expenseNotes, setExpenseNotes] = useState("");
+  const [paymentSale, setPaymentSale] = useState<Sale | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"EFECTIVO" | "QR">("EFECTIVO");
+  const [paymentNotes, setPaymentNotes] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [closingCash, setClosingCash] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
@@ -143,11 +152,49 @@ export default function HistorialVentas() {
     printWindow.document.close();
   };
 
+  const openCreditPayment = (sale: Sale) => {
+    setMessage(null);
+    setPaymentSale(sale);
+    setPaymentAmount(String(sale.cuenta?.saldo || sale.total || 0));
+    setPaymentMethod("EFECTIVO");
+    setPaymentNotes("");
+  };
+
+  const handleCreditPayment = async () => {
+    setMessage(null);
+    if (!user?.id) return setMessage("Debes iniciar sesion nuevamente.");
+    if (!paymentSale?.cuenta) return setMessage("Esta venta no tiene cuenta de credito.");
+    const monto = parseMoneyInput(paymentAmount);
+    if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de pago mayor a cero.");
+
+    setSavingPayment(true);
+    try {
+      const cuenta = await addCreditPayment(paymentSale.cuenta.id, {
+        monto,
+        metodoPago: paymentMethod,
+        usuarioId: user.id,
+        notas: paymentNotes.trim() || null,
+      });
+      const updateSaleAccount = (sale: Sale) => sale.id === paymentSale.id ? { ...sale, cuenta } : sale;
+      setSelectedSale((sale) => sale ? updateSaleAccount(sale) : sale);
+      setPaymentSale(null);
+      setPaymentAmount("");
+      setPaymentNotes("");
+      setMessage(cuenta.saldo === 0 ? "Credito pagado completamente." : `Pago registrado. Saldo pendiente: ${money(cuenta.saldo)}.`);
+      await loadSummary();
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err));
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
   const grossCash = summary?.totals.totalEfectivo || 0;
   const grossQr = summary?.totals.totalQr || 0;
+  const creditPaymentTotals = summary?.cobrosCredito?.totals || { totalCobrosCredito: 0, totalEfectivo: 0, totalTransferencia: 0, totalQr: 0, totalTarjeta: 0 };
   const expenseTotals = summary?.gastos?.totals || { totalGastos: 0, totalEfectivo: 0, totalQr: 0 };
-  const expectedCash = summary?.netos?.totalEfectivo ?? Math.max(grossCash - expenseTotals.totalEfectivo, 0);
-  const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr - expenseTotals.totalQr, 0);
+  const expectedCash = summary?.netos?.totalEfectivo ?? Math.max(grossCash + creditPaymentTotals.totalEfectivo - expenseTotals.totalEfectivo, 0);
+  const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr + creditPaymentTotals.totalQr - expenseTotals.totalQr, 0);
   const difference = declaredCash - expectedCash;
 
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
@@ -193,13 +240,14 @@ export default function HistorialVentas() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 p-4 border-b border-gray-800">
+        <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 p-4 border-b border-gray-800">
           <Stat label="Total" value={money(summary?.totals.totalVentas || 0)} />
           <Stat label="Efectivo" value={money(summary?.totals.totalEfectivo || 0)} />
           <Stat label="Transferencia" value={money(summary?.totals.totalTransferencia || 0)} />
           <Stat label="QR" value={money(summary?.totals.totalQr || 0)} />
           <Stat label="Tarjeta" value={money(summary?.totals.totalTarjeta || 0)} />
           <Stat label="Credito" value={money(summary?.totals.totalCredito || 0)} />
+          <Stat label="Cobros cred." value={money(creditPaymentTotals.totalCobrosCredito)} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 p-4">
@@ -345,6 +393,10 @@ export default function HistorialVentas() {
               <span className="font-semibold text-white">{money(grossCash)}</span>
             </div>
             <div className="flex justify-between text-sm text-gray-400">
+              <span>Cobros credito efectivo</span>
+              <span className="font-semibold text-green-200">+{money(creditPaymentTotals.totalEfectivo)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-gray-400">
               <span>Gastos efectivo</span>
               <span className="font-semibold text-amber-200">-{money(expenseTotals.totalEfectivo)}</span>
             </div>
@@ -355,6 +407,10 @@ export default function HistorialVentas() {
             <div className="flex justify-between text-sm text-gray-400">
               <span>QR neto</span>
               <span className="font-semibold text-blue-200">{money(expectedQr)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-gray-400">
+              <span>Cobros credito QR</span>
+              <span className="font-semibold text-blue-200">+{money(creditPaymentTotals.totalQr)}</span>
             </div>
             <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
               Si el efectivo se deposita al banco al cerrar, cuenta el dinero en caja, deja ese monto en el cierre y registra la nota de deposito.
@@ -429,10 +485,25 @@ export default function HistorialVentas() {
           sale={selectedSale} 
           onClose={() => setSelectedSale(null)} 
           onPrint={() => printSale(selectedSale)} 
+          onRegisterCreditPayment={openCreditPayment}
           onPaymentUpdated={(newMethod) => {
             setSelectedSale({ ...selectedSale, metodoPago: newMethod });
             loadSummary();
           }} 
+        />
+      )}
+      {paymentSale && (
+        <CreditPaymentModal
+          sale={paymentSale}
+          amount={paymentAmount}
+          method={paymentMethod}
+          notes={paymentNotes}
+          saving={savingPayment}
+          onAmountChange={setPaymentAmount}
+          onMethodChange={setPaymentMethod}
+          onNotesChange={setPaymentNotes}
+          onClose={() => setPaymentSale(null)}
+          onConfirm={handleCreditPayment}
         />
       )}
     </div>
@@ -443,15 +514,29 @@ function ClosedCashBox({ closing }: { closing?: CashClosing | null }) {
   return (
     <div className="space-y-1 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-200">
       <p>Cerrado con {money(closing?.montoDeclarado || 0)} en caja.</p>
+      <p>Cobros de credito {money(closing?.totalCobrosCredito || 0)}.</p>
       <p>Efectivo neto esperado {money(closing?.netoEfectivo ?? closing?.totalEfectivo ?? 0)}.</p>
       <p>Gastos descontados {money(closing?.totalGastos || 0)}. Diferencia {money(closing?.diferencia || 0)}.</p>
     </div>
   );
 }
 
-function SaleDetailModal({ sale, onClose, onPrint, onPaymentUpdated }: { sale: Sale; onClose: () => void; onPrint: () => void; onPaymentUpdated: (method: "EFECTIVO" | "QR") => void }) {
+function SaleDetailModal({
+  sale,
+  onClose,
+  onPrint,
+  onRegisterCreditPayment,
+  onPaymentUpdated,
+}: {
+  sale: Sale;
+  onClose: () => void;
+  onPrint: () => void;
+  onRegisterCreditPayment: (sale: Sale) => void;
+  onPaymentUpdated: (method: "EFECTIVO" | "QR") => void;
+}) {
   const [updating, setUpdating] = useState(false);
   const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
+  const creditBalance = sale.cuenta?.saldo || 0;
 
   const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
     setUpdating(true);
@@ -512,6 +597,16 @@ function SaleDetailModal({ sale, onClose, onPrint, onPaymentUpdated }: { sale: S
             </table>
           </div>
           <div className="space-y-2 border-t border-gray-700 pt-4">
+            {sale.tipoVenta === "CREDITO" && sale.cuenta && (
+              <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <Stat label="Credito" value={sale.cuenta.estado} />
+                  <Stat label="Vence" value={formatDateOnly(sale.cuenta.fechaVencimiento)} />
+                  <Stat label="Pagado" value={money(sale.cuenta.montoPagado || 0)} />
+                  <Stat label="Saldo" value={money(creditBalance)} />
+                </div>
+              </div>
+            )}
             <div className="flex justify-between text-gray-400">
               <span>Subtotal</span>
               <span>{money(sale.subtotal || 0)}</span>
@@ -527,8 +622,10 @@ function SaleDetailModal({ sale, onClose, onPrint, onPaymentUpdated }: { sale: S
           </div>
           <div className="flex items-center justify-between border-t border-gray-700 pt-4">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400">Pago actual: <strong className="text-white">{sale.metodoPago}</strong></span>
-              {sale.metodoPago === "EFECTIVO" ? (
+              <span className="text-sm text-gray-400">Pago actual: <strong className="text-white">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</strong></span>
+              {sale.tipoVenta === "CREDITO" && sale.cuenta && creditBalance > 0 ? (
+                <button onClick={() => onRegisterCreditPayment(sale)} className="btn-secondary py-1 px-2 text-xs">Registrar pago</button>
+              ) : sale.metodoPago === "EFECTIVO" ? (
                 <button onClick={() => setConfirmMethod("QR")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a QR</button>
               ) : sale.metodoPago === "QR" ? (
                 <button onClick={() => setConfirmMethod("EFECTIVO")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a Efectivo</button>
@@ -561,6 +658,90 @@ function SaleDetailModal({ sale, onClose, onPrint, onPaymentUpdated }: { sale: S
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CreditPaymentModal({
+  sale,
+  amount,
+  method,
+  notes,
+  saving,
+  onAmountChange,
+  onMethodChange,
+  onNotesChange,
+  onClose,
+  onConfirm,
+}: {
+  sale: Sale;
+  amount: string;
+  method: "EFECTIVO" | "QR";
+  notes: string;
+  saving: boolean;
+  onAmountChange: (value: string) => void;
+  onMethodChange: (value: "EFECTIVO" | "QR") => void;
+  onNotesChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const saldo = sale.cuenta?.saldo || 0;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={saving ? undefined : onClose} />
+      <div className="relative w-full max-w-md rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+        <div className="flex items-center justify-between border-b border-gray-700 p-5">
+          <div>
+            <h3 className="text-xl font-bold text-white">Registrar pago de credito</h3>
+            <p className="text-sm text-gray-400">{sale.cliente?.nombre || "Cliente"} - saldo {money(saldo)}</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} className="text-gray-400 hover:text-white disabled:opacity-50">
+            <X size={22} />
+          </button>
+        </div>
+        <div className="space-y-4 p-5">
+          <label className="block text-sm text-gray-300">
+            <span className="mb-1 block">Monto recibido</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (moneyInputPattern.test(value)) onAmountChange(value);
+              }}
+              className="premium-input"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["EFECTIVO", "QR"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => onMethodChange(item)}
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                  method === item
+                    ? "border-primary/60 bg-primary/15 text-primary-light"
+                    : "border-gray-700 bg-grafito-900 text-gray-300 hover:border-gray-500"
+                }`}
+              >
+                {item === "EFECTIVO" ? "Efectivo" : "QR"}
+              </button>
+            ))}
+          </div>
+          <label className="block text-sm text-gray-300">
+            <span className="mb-1 block">Nota opcional</span>
+            <textarea value={notes} onChange={(event) => onNotesChange(event.target.value)} className="premium-input min-h-20" />
+          </label>
+        </div>
+        <div className="flex flex-col-reverse gap-3 border-t border-gray-700 p-5 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} disabled={saving} className="btn-secondary disabled:opacity-50">Cancelar</button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="btn-primary disabled:opacity-60">
+            {saving ? "Guardando..." : "Guardar pago"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

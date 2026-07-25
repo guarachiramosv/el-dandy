@@ -148,6 +148,10 @@ export interface CreditPayment {
   metodoPago: PaymentMethod;
   usuarioId: string;
   notas?: string | null;
+  cuenta?: CreditAccount & {
+    cliente?: Customer | null;
+    venta?: Sale | null;
+  };
   createdAt: string;
 }
 
@@ -259,6 +263,16 @@ export interface DailySalesSummary {
     totalTarjeta: number;
     totalCredito: number;
   };
+  cobrosCredito: {
+    totals: {
+      totalCobrosCredito: number;
+      totalEfectivo: number;
+      totalTransferencia: number;
+      totalQr: number;
+      totalTarjeta: number;
+    };
+    items: CreditPayment[];
+  };
   gastos: {
     totals: {
       totalGastos: number;
@@ -287,6 +301,11 @@ export interface CashClosing {
   totalQr: number;
   totalTarjeta: number;
   totalCredito: number;
+  totalCobrosCredito: number;
+  cobroCreditoEfectivo: number;
+  cobroCreditoTransferencia: number;
+  cobroCreditoQr: number;
+  cobroCreditoTarjeta: number;
   gastoEfectivo: number;
   gastoQr: number;
   totalGastos: number;

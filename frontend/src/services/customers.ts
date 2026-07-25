@@ -1,5 +1,5 @@
 import api from './api';
-import { Customer, PaymentMethod } from '../types';
+import { CreditAccount, Customer, PaymentMethod } from '../types';
 
 export type CustomerInput = {
   nombre: string;
@@ -42,7 +42,7 @@ export const deleteCustomer = async (id: string): Promise<void> => {
 export const addCreditPayment = async (
   cuentaId: string,
   payment: { monto: number; metodoPago: PaymentMethod; usuarioId: string; notas?: string | null }
-) => {
-  const response = await api.post(`/customers/credits/${cuentaId}/payments`, payment);
+) : Promise<CreditAccount> => {
+  const response = await api.post<{ success: boolean; data: CreditAccount }>(`/customers/credits/${cuentaId}/payments`, payment);
   return response.data.data;
 };

@@ -200,9 +200,10 @@ function buildCashClosingText(
   const { time } = formatDateParts(closing?.createdAt);
   const grossCash = summary.totals.totalEfectivo || 0;
   const grossQr = summary.totals.totalQr || 0;
+  const creditPayments = summary.cobrosCredito?.totals || { totalCobrosCredito: 0, totalEfectivo: 0, totalTransferencia: 0, totalQr: 0, totalTarjeta: 0 };
   const expenses = summary.gastos?.totals || { totalGastos: 0, totalEfectivo: 0, totalQr: 0 };
-  const netCash = closing?.netoEfectivo ?? summary.netos?.totalEfectivo ?? Math.max(grossCash - expenses.totalEfectivo, 0);
-  const netQr = closing?.netoQr ?? summary.netos?.totalQr ?? Math.max(grossQr - expenses.totalQr, 0);
+  const netCash = closing?.netoEfectivo ?? summary.netos?.totalEfectivo ?? Math.max(grossCash + creditPayments.totalEfectivo - expenses.totalEfectivo, 0);
+  const netQr = closing?.netoQr ?? summary.netos?.totalQr ?? Math.max(grossQr + creditPayments.totalQr - expenses.totalQr, 0);
   const declaredCash = closing?.montoDeclarado ?? options.declaredCash ?? netCash;
   const difference = closing?.diferencia ?? declaredCash - netCash;
   const notes = normalizeText(closing?.notas || options.notes || "");
@@ -247,14 +248,17 @@ function buildCashClosingText(
   lines.push(
     repeat("-"),
     lineBetween("Efectivo venta:", money(grossCash)),
+    lineBetween("Cobro cred. efectivo:", money(creditPayments.totalEfectivo)),
     lineBetween("Gastos efectivo:", `-${money(expenses.totalEfectivo || 0)}`),
     lineBetween("EFECTIVO CIERRE:", money(netCash)),
     lineBetween("QR venta:", money(grossQr)),
+    lineBetween("Cobro cred. QR:", money(creditPayments.totalQr)),
     lineBetween("Gastos QR:", `-${money(expenses.totalQr || 0)}`),
     lineBetween("QR CIERRE:", money(netQr)),
     lineBetween("Transferencia:", money(summary.totals.totalTransferencia || 0)),
     lineBetween("Tarjeta:", money(summary.totals.totalTarjeta || 0)),
     lineBetween("Credito:", money(summary.totals.totalCredito || 0)),
+    lineBetween("Cobros credito:", money(creditPayments.totalCobrosCredito)),
     repeat("-"),
     lineBetween("Contado caja:", money(declaredCash)),
     lineBetween("Diferencia:", money(difference)),

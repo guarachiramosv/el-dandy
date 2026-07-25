@@ -17,6 +17,19 @@ function getBusinessDay(dateValue?: string | null) {
   return { start };
 }
 
+function parseDueDate(dateValue?: string | null) {
+  if (!dateValue) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  }
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) {
+    throw Object.assign(new Error('Fecha de pago invalida'), { status: 400 });
+  }
+  return parsed;
+}
+
 function trabajoConfig(tipoTrabajo: RemachadoTrabajoTipo) {
   if (tipoTrabajo === 'MEDIO_JUEGO') {
     return { cantidadJuegos: 0.5, cantidadBalatas: 2, resortes: 2, gomas: 4, seguros: 1 };
@@ -88,19 +101,34 @@ export class RemachadoService {
     remachesPorJuego?: number;
     remachesPorMedioJuego?: number;
     activo?: boolean;
-  }) {
-    return prisma.remachadoMedida.create({
-      data: {
-        medida: data.medida.trim(),
-        descripcion: data.descripcion?.trim() || null,
-        stockJuegos: data.stockJuegos ?? 0,
-        stockMinimoJuegos: data.stockMinimoJuegos ?? 1,
-        precioJuego: data.precioJuego,
-        precioMedioJuego: data.precioMedioJuego,
-        remachesPorJuego: data.remachesPorJuego ?? 8,
-        remachesPorMedioJuego: data.remachesPorMedioJuego ?? 4,
-        activo: data.activo ?? true,
-      },
+  }, usuarioId?: string | null) {
+    return prisma.$transaction(async (tx) => {
+      const stockInicial = data.stockJuegos ?? 0;
+      const medida = await tx.remachadoMedida.create({
+        data: {
+          medida: data.medida.trim(),
+          descripcion: data.descripcion?.trim() || null,
+          stockJuegos: stockInicial,
+          stockMinimoJuegos: data.stockMinimoJuegos ?? 1,
+          precioJuego: data.precioJuego,
+          precioMedioJuego: data.precioMedioJuego,
+          remachesPorJuego: data.remachesPorJuego ?? 8,
+          remachesPorMedioJuego: data.remachesPorMedioJuego ?? 4,
+          activo: data.activo ?? true,
+        },
+      });
+      await tx.remachadoMovimiento.create({
+        data: {
+          tipo: stockInicial > 0 ? 'INGRESO' : 'AJUSTE',
+          medidaId: medida.id,
+          usuarioId: usuarioId || null,
+          stockAnterior: 0,
+          stockNuevo: stockInicial,
+          cantidad: stockInicial,
+          notas: `Creacion de medida ${medida.medida}`,
+        },
+      });
+      return medida;
     });
   }
 
@@ -114,14 +142,31 @@ export class RemachadoService {
     remachesPorJuego: number;
     remachesPorMedioJuego: number;
     activo: boolean;
-  }>) {
-    return prisma.remachadoMedida.update({
-      where: { id },
-      data: {
-        ...data,
-        medida: data.medida?.trim(),
-        descripcion: data.descripcion?.trim() || data.descripcion,
-      },
+  }>, usuarioId?: string | null) {
+    return prisma.$transaction(async (tx) => {
+      const current = await tx.remachadoMedida.findUnique({ where: { id } });
+      if (!current) throw Object.assign(new Error('Medida no encontrada'), { status: 404 });
+
+      const updated = await tx.remachadoMedida.update({
+        where: { id },
+        data: {
+          ...data,
+          medida: data.medida?.trim(),
+          descripcion: data.descripcion?.trim() || data.descripcion,
+        },
+      });
+      await tx.remachadoMovimiento.create({
+        data: {
+          tipo: 'AJUSTE',
+          medidaId: id,
+          usuarioId: usuarioId || null,
+          stockAnterior: current.stockJuegos,
+          stockNuevo: updated.stockJuegos,
+          cantidad: updated.stockJuegos - current.stockJuegos,
+          notas: `Edicion de medida ${updated.medida}`,
+        },
+      });
+      return updated;
     });
   }
 
@@ -155,16 +200,31 @@ export class RemachadoService {
     stock?: number;
     stockMinimo?: number;
     activo?: boolean;
-  }) {
-    return prisma.remachadoRemache.create({
-      data: {
-        codigo: data.codigo.trim(),
-        nombre: data.nombre.trim(),
-        medida: data.medida?.trim() || null,
-        stock: data.stock ?? 0,
-        stockMinimo: data.stockMinimo ?? 20,
-        activo: data.activo ?? true,
-      },
+  }, usuarioId?: string | null) {
+    return prisma.$transaction(async (tx) => {
+      const stockInicial = data.stock ?? 0;
+      const remache = await tx.remachadoRemache.create({
+        data: {
+          codigo: data.codigo.trim(),
+          nombre: data.nombre.trim(),
+          medida: data.medida?.trim() || null,
+          stock: stockInicial,
+          stockMinimo: data.stockMinimo ?? 20,
+          activo: data.activo ?? true,
+        },
+      });
+      await tx.remachadoMovimiento.create({
+        data: {
+          tipo: stockInicial > 0 ? 'INGRESO' : 'AJUSTE',
+          remacheId: remache.id,
+          usuarioId: usuarioId || null,
+          stockAnterior: 0,
+          stockNuevo: stockInicial,
+          cantidad: stockInicial,
+          notas: `Creacion de remache ${remache.codigo} - ${remache.nombre}`,
+        },
+      });
+      return remache;
     });
   }
 
@@ -175,15 +235,32 @@ export class RemachadoService {
     stock: number;
     stockMinimo: number;
     activo: boolean;
-  }>) {
-    return prisma.remachadoRemache.update({
-      where: { id },
-      data: {
-        ...data,
-        codigo: data.codigo?.trim(),
-        nombre: data.nombre?.trim(),
-        medida: data.medida?.trim() || data.medida,
-      },
+  }>, usuarioId?: string | null) {
+    return prisma.$transaction(async (tx) => {
+      const current = await tx.remachadoRemache.findUnique({ where: { id } });
+      if (!current) throw Object.assign(new Error('Remache no encontrado'), { status: 404 });
+
+      const updated = await tx.remachadoRemache.update({
+        where: { id },
+        data: {
+          ...data,
+          codigo: data.codigo?.trim(),
+          nombre: data.nombre?.trim(),
+          medida: data.medida?.trim() || data.medida,
+        },
+      });
+      await tx.remachadoMovimiento.create({
+        data: {
+          tipo: 'AJUSTE',
+          remacheId: id,
+          usuarioId: usuarioId || null,
+          stockAnterior: current.stock,
+          stockNuevo: updated.stock,
+          cantidad: updated.stock - current.stock,
+          notas: `Edicion de remache ${updated.codigo} - ${updated.nombre}`,
+        },
+      });
+      return updated;
     });
   }
 
@@ -237,6 +314,15 @@ export class RemachadoService {
     return prisma.$transaction(async (tx) => {
       if (data.tipoVenta === 'CREDITO' && !data.clienteId) {
         throw Object.assign(new Error('Selecciona un cliente para venta a credito'), { status: 400 });
+      }
+      if (data.tipoVenta === 'CREDITO') {
+        if (!data.fechaVencimiento) {
+          throw Object.assign(new Error('Indica la fecha de pago para venta a credito'), { status: 400 });
+        }
+        const clienteCredito = await tx.cliente.findUnique({ where: { id: data.clienteId! } });
+        if (!clienteCredito?.telefono?.trim()) {
+          throw Object.assign(new Error('Registra el celular del cliente para venta a credito'), { status: 400 });
+        }
       }
 
       const businessDay = getBusinessDay();
@@ -538,7 +624,7 @@ export class RemachadoService {
             sucursalId: data.sucursalId,
             montoTotal: total,
             saldo: total,
-            fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : null,
+            fechaVencimiento: parseDueDate(data.fechaVencimiento),
             estado: 'PENDIENTE',
           },
         });

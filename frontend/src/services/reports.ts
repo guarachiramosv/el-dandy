@@ -23,6 +23,11 @@ export type CashClosingReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    totalCobrosCredito: number;
+    cobroCreditoEfectivo: number;
+    cobroCreditoTransferencia: number;
+    cobroCreditoQr: number;
+    cobroCreditoTarjeta: number;
     gastoEfectivo: number;
     gastoQr: number;
     totalGastos: number;
@@ -41,6 +46,11 @@ export type CashClosingReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    totalCobrosCredito: number;
+    cobroCreditoEfectivo: number;
+    cobroCreditoTransferencia: number;
+    cobroCreditoQr: number;
+    cobroCreditoTarjeta: number;
     gastoEfectivo: number;
     gastoQr: number;
     totalGastos: number;
@@ -101,6 +111,11 @@ export type SalesHistoryReport = {
     totalQr: number;
     totalTarjeta: number;
     totalCredito: number;
+    totalCobrosCredito: number;
+    cobroCreditoEfectivo: number;
+    cobroCreditoTransferencia: number;
+    cobroCreditoQr: number;
+    cobroCreditoTarjeta: number;
     gastoEfectivo: number;
     gastoQr: number;
     totalGastos: number;

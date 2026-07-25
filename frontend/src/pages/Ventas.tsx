@@ -15,7 +15,7 @@ import { Customer, DailySalesSummary, PaymentMethod, Product, Sale } from "../ty
 import { useProducts } from "../hooks/useProducts";
 import { createSale, fetchDailySalesSummary } from "../services/sales";
 import { getCurrentUser } from "../services/auth";
-import { createCustomer, fetchCustomers } from "../services/customers";
+import { createCustomer, fetchCustomers, updateCustomer } from "../services/customers";
 import { searchProductsForSale } from "../services/products";
 import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
 import { filterAndSortBySearch, getSearchTerms, normalizeSearchText } from "../utils/fuzzySearch";
@@ -30,6 +30,12 @@ const money = (value: number) =>
 
 const formatDateTime = (value: string) =>
   new Date(value).toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" });
+
+const formatInputDate = (value: string) => {
+  if (!value) return "-";
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
+};
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
 const sellerPaymentOptions = ["EFECTIVO", "QR", "CREDITO"] as const;
@@ -71,6 +77,7 @@ export default function Ventas() {
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
   const [invoiceCustomerNit, setInvoiceCustomerNit] = useState("");
+  const [invoiceCustomerPhone, setInvoiceCustomerPhone] = useState("");
   const user = getCurrentUser();
 
   const loadDailySummary = useCallback(async () => {
@@ -247,17 +254,23 @@ export default function Ventas() {
     if (!user) return setMessage("Debes iniciar sesion nuevamente.");
     if (cart.length === 0) return setMessage("Agrega al menos un producto.");
     if (dailySummary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
+    if (tipoVenta === "CREDITO" && !fechaVencimiento) return setMessage("Indica la fecha en que el cliente pagara el credito.");
     setInvoiceCustomerName("");
     setInvoiceCustomerNit("");
+    setInvoiceCustomerPhone("");
     setInvoiceOpen(true);
   };
 
   const resolveInvoiceCustomerId = async () => {
     const name = invoiceCustomerName.trim();
     const nit = invoiceCustomerNit.trim();
+    const phone = invoiceCustomerPhone.trim();
 
     if (!name) {
       throw new Error("Ingresa el nombre del cliente o empresa para la factura.");
+    }
+    if (tipoVenta === "CREDITO" && !phone) {
+      throw new Error("Ingresa el numero de celular del cliente para la venta a credito.");
     }
 
     const normalizedName = name.toLowerCase();
@@ -267,11 +280,18 @@ export default function Ventas() {
       return customerName === normalizedName || companyName === normalizedName || (nit && customer.nit === nit);
     });
 
-    if (existing) return existing.id;
+    if (existing) {
+      if (tipoVenta === "CREDITO" && phone && !existing.telefono) {
+        const updated = await updateCustomer(existing.id, { telefono: phone });
+        setCustomers((prev) => prev.map((customer) => customer.id === updated.id ? updated : customer));
+      }
+      return existing.id;
+    }
 
     const created = await createCustomer({
       nombre: name,
       nit: nit || null,
+      telefono: phone || null,
       notas: "Creado desde punto de venta",
     });
     setCustomers((prev) => [created, ...prev]);
@@ -293,7 +313,7 @@ export default function Ventas() {
         clienteId,
         metodoPago,
         tipoVenta,
-        fechaVencimiento: tipoVenta === "CREDITO" && fechaVencimiento ? new Date(fechaVencimiento).toISOString() : null,
+        fechaVencimiento: tipoVenta === "CREDITO" && fechaVencimiento ? fechaVencimiento : null,
         descuento,
         items: cart.map((item) => ({
           productoId: item.product.id,
@@ -308,6 +328,7 @@ export default function Ventas() {
       setInvoiceOpen(false);
       setInvoiceCustomerName("");
       setInvoiceCustomerNit("");
+      setInvoiceCustomerPhone("");
       setLastSale(sale);
       setMessage("Venta registrada correctamente. Ya paso a historial.");
       await Promise.all([refetchProducts(), loadDailySummary()]);
@@ -607,15 +628,18 @@ export default function Ventas() {
           cart={cart}
           customerName={invoiceCustomerName}
           customerNit={invoiceCustomerNit}
+          customerPhone={invoiceCustomerPhone}
           descuento={descuento}
           metodoPago={metodoPago}
           tipoVenta={tipoVenta}
+          fechaVencimiento={fechaVencimiento}
           total={total}
           subtotal={subtotal}
           totalQuantity={totalQuantity}
           saving={saving}
           onCustomerNameChange={setInvoiceCustomerName}
           onCustomerNitChange={setInvoiceCustomerNit}
+          onCustomerPhoneChange={setInvoiceCustomerPhone}
           onClose={() => setInvoiceOpen(false)}
           onConfirm={handleConfirmSale}
         />
@@ -632,30 +656,36 @@ function InvoiceModal({
   cart,
   customerName,
   customerNit,
+  customerPhone,
   descuento,
   metodoPago,
   tipoVenta,
+  fechaVencimiento,
   total,
   subtotal,
   totalQuantity,
   saving,
   onCustomerNameChange,
   onCustomerNitChange,
+  onCustomerPhoneChange,
   onClose,
   onConfirm,
 }: {
   cart: CartItem[];
   customerName: string;
   customerNit: string;
+  customerPhone: string;
   descuento: number;
   metodoPago: PaymentMethod;
   tipoVenta: "CONTADO" | "CREDITO";
+  fechaVencimiento: string;
   total: number;
   subtotal: number;
   totalQuantity: number;
   saving: boolean;
   onCustomerNameChange: (value: string) => void;
   onCustomerNitChange: (value: string) => void;
+  onCustomerPhoneChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -676,6 +706,9 @@ function InvoiceModal({
         <div className="overflow-y-auto p-5 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Input label="Cliente / empresa" value={customerName} onChange={onCustomerNameChange} required />
+            {tipoVenta === "CREDITO" && (
+              <Input label="Celular" value={customerPhone} onChange={onCustomerPhoneChange} required />
+            )}
             <Input label="NIT / CI" value={customerNit} onChange={onCustomerNitChange} />
           </div>
 
@@ -714,6 +747,7 @@ function InvoiceModal({
               <div className="grid grid-cols-2 gap-3">
                 <Stat label="Tipo" value={tipoVenta} />
                 <Stat label="Metodo" value={salePaymentLabel(tipoVenta, metodoPago)} />
+                {tipoVenta === "CREDITO" && <Stat label="Vence" value={formatInputDate(fechaVencimiento)} />}
               </div>
             </div>
             <div className="rounded-xl border border-gray-700 bg-grafito-900/40 p-4 space-y-3">
