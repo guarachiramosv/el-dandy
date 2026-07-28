@@ -1,11 +1,19 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
-export type ReportPeriod = 'day' | 'month' | 'year';
+export type ReportPeriod = 'day' | 'month' | 'year' | 'all';
 
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
 
 function parsePeriod(period: ReportPeriod, value?: string | null) {
+  if (period === 'all') {
+    return {
+      start: new Date(Date.UTC(2000, 0, 1, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0)),
+      end: new Date(Date.UTC(2100, 0, 1, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0)),
+      label: 'Todo el inventario',
+    };
+  }
+
   const now = new Date();
   const fallbackYear = now.getFullYear();
   const fallbackMonth = now.getMonth() + 1;
@@ -112,6 +120,14 @@ function emptySalesTotals() {
     totalDisponible: 0,
   };
 }
+
+const formatDateForReport = (date: Date) => date.toISOString();
+
+const sumMovementQuantity = (movements: Array<{ cantidad: number }>) =>
+  movements.reduce((sum, movement) => sum + movement.cantidad, 0);
+
+const isInitialStockMovement = (movement: { tipoMovimiento: string; referenciaTipo?: string | null }) =>
+  movement.tipoMovimiento === 'AJUSTE' && movement.referenciaTipo === 'ALTA_PRODUCTO';
 
 export class ReportService {
   async getSalesHistoryReport(params: {
@@ -350,7 +366,9 @@ export class ReportService {
     search?: string | null;
   }) {
     const range = parsePeriod(params.period, params.value);
-    const productWhere: Prisma.ProductoWhereInput = {};
+    const productWhere: Prisma.ProductoWhereInput = {
+      createdAt: { lt: range.end },
+    };
     if (params.sucursalId) productWhere.sucursalId = params.sucursalId;
     if (params.search) {
       productWhere.OR = [
@@ -363,65 +381,162 @@ export class ReportService {
 
     const products = await prisma.producto.findMany({
       where: productWhere,
-      include: { categoria: true, sucursal: true },
-      orderBy: [{ sucursal: { nombre: 'asc' } }, { codigo: 'asc' }],
+      include: {
+        categoria: true,
+        sucursal: true,
+        stockSucursales: {
+          include: { sucursal: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: [{ codigo: 'asc' }, { sucursal: { nombre: 'asc' } }],
     });
 
     const productIds = products.map((product) => product.id);
-    const movements = productIds.length
-      ? await prisma.movimientoStock.findMany({
-          where: {
-            productoId: { in: productIds },
-            createdAt: { gte: range.start, lt: range.end },
-          },
-          orderBy: [{ productoId: 'asc' }, { createdAt: 'asc' }],
-        })
-      : [];
+    const movementWhere: Prisma.MovimientoStockWhereInput = {
+      productoId: { in: productIds },
+    };
+    if (params.sucursalId) movementWhere.sucursalId = params.sucursalId;
+    const [periodMovements, movementsSinceStart, saleDetails] = productIds.length
+      ? await Promise.all([
+          prisma.movimientoStock.findMany({
+            where: {
+              ...movementWhere,
+              createdAt: { gte: range.start, lt: range.end },
+            },
+            include: {
+              usuario: { select: { id: true, nombre: true } },
+            },
+            orderBy: [{ productoId: 'asc' }, { createdAt: 'asc' }],
+          }),
+          prisma.movimientoStock.findMany({
+            where: {
+              ...movementWhere,
+              createdAt: { gte: range.start },
+            },
+            orderBy: [{ productoId: 'asc' }, { createdAt: 'asc' }],
+          }),
+          prisma.detalleVenta.findMany({
+            where: {
+              productoId: { in: productIds },
+              venta: { createdAt: { gte: range.start, lt: range.end } },
+            },
+            select: {
+              productoId: true,
+              cantidad: true,
+            },
+          }),
+        ])
+      : [[], [], []];
 
-    const movementMap = new Map<string, typeof movements>();
-    movements.forEach((movement) => {
+    const movementMap = new Map<string, typeof periodMovements>();
+    periodMovements.forEach((movement) => {
       const list = movementMap.get(movement.productoId) || [];
       list.push(movement);
       movementMap.set(movement.productoId, list);
     });
+    const movementSinceStartMap = new Map<string, typeof movementsSinceStart>();
+    movementsSinceStart.forEach((movement) => {
+      const list = movementSinceStartMap.get(movement.productoId) || [];
+      list.push(movement);
+      movementSinceStartMap.set(movement.productoId, list);
+    });
+    const soldByProductMap = new Map<string, number>();
+    saleDetails.forEach((detail) => {
+      if (!detail.productoId) return;
+      soldByProductMap.set(detail.productoId, (soldByProductMap.get(detail.productoId) || 0) + detail.cantidad);
+    });
 
     const items = products.map((product) => {
       const productMovements = movementMap.get(product.id) || [];
-      const firstMovement = productMovements[0];
-      const stockInicial = firstMovement?.stockAnterior ?? product.stock;
-      const vendidos = productMovements
-        .filter((movement) => movement.tipoMovimiento === 'VENTA')
-        .reduce((sum, movement) => sum + Math.abs(movement.cantidad), 0);
-      const otrosMovimientos = productMovements
-        .filter((movement) => movement.tipoMovimiento !== 'VENTA')
-        .reduce((sum, movement) => sum + movement.cantidad, 0);
+      const futureMovements = movementSinceStartMap.get(product.id) || [];
+      const initialStockMovement = futureMovements.find(isInitialStockMovement);
+      const firstKnownMovement = futureMovements[0];
+      const getMovementSucursal = (sucursalId: string) =>
+        product.stockSucursales.find((stock) => stock.sucursalId === sucursalId)?.sucursal?.nombre ||
+        (product.sucursalId === sucursalId ? product.sucursal?.nombre : null) ||
+        'Sucursal';
+      const createdInPeriod = product.createdAt >= range.start && product.createdAt < range.end;
+      const stockInicial = params.period === 'all'
+        ? initialStockMovement?.stockNuevo ?? firstKnownMovement?.stockAnterior ?? product.stock
+        : createdInPeriod ? 0 : product.stock - sumMovementQuantity(futureMovements);
+      const ventasDetalle = productMovements.filter((movement) => movement.tipoMovimiento === 'VENTA');
+      const ingresosDetalle = productMovements.filter(
+        (movement) =>
+          movement.tipoMovimiento !== 'VENTA' &&
+          movement.cantidad > 0 &&
+          (params.period !== 'all' || !isInitialStockMovement(movement)) &&
+          !(movement.tipoMovimiento === 'AJUSTE' && movement.referenciaTipo === 'EDICION_STOCK_ADMIN')
+      );
+      const edicionesDetalle = productMovements.filter(
+        (movement) => movement.tipoMovimiento === 'AJUSTE' && movement.referenciaTipo === 'EDICION_STOCK_ADMIN'
+      );
+      const otrosDetalle = productMovements.filter(
+        (movement) =>
+          movement.tipoMovimiento !== 'VENTA' &&
+          (params.period !== 'all' || !isInitialStockMovement(movement)) &&
+          !ingresosDetalle.some((ingreso) => ingreso.id === movement.id) &&
+          !edicionesDetalle.some((edicion) => edicion.id === movement.id)
+      );
+      const vendidos = soldByProductMap.get(product.id) ?? ventasDetalle.reduce((sum, movement) => sum + Math.abs(movement.cantidad), 0);
+      const ingresados = ingresosDetalle.reduce((sum, movement) => sum + movement.cantidad, 0);
+      const editados = edicionesDetalle.reduce((sum, movement) => sum + movement.cantidad, 0);
+      const otrosMovimientos = otrosDetalle.reduce((sum, movement) => sum + movement.cantidad, 0);
 
       return {
         productoId: product.id,
         codigo: product.codigo,
         descripcion: product.descripcion,
         marca: product.marca,
+        condicion: product.condicion,
         categoria: product.categoria?.nombre || 'Sin categoria',
         sucursal: product.sucursal?.nombre || 'Sin sucursal',
         sucursalId: product.sucursalId,
         ubicacion: product.ubicacion,
+        fechaAgregado: formatDateForReport(product.createdAt),
+        agregadoEnPeriodo: createdInPeriod,
+        stockAlAgregar: createdInPeriod
+          ? product.stock - sumMovementQuantity(futureMovements.filter((movement) => movement.createdAt >= product.createdAt))
+          : null,
         stockInicial,
+        ingresados,
         vendidos,
+        editados,
         otrosMovimientos,
         stockActual: product.stock,
         stockMinimo: product.stockMinimo,
+        stockSucursales: product.stockSucursales.map((stock) => ({
+          sucursalId: stock.sucursalId,
+          sucursal: stock.sucursal?.nombre || 'Sucursal',
+          stock: stock.stock,
+          fechaAgregado: formatDateForReport(stock.createdAt),
+        })),
+        movimientos: productMovements.map((movement) => ({
+          id: movement.id,
+          fecha: formatDateForReport(movement.createdAt),
+          tipo: movement.tipoMovimiento,
+          sucursal: getMovementSucursal(movement.sucursalId),
+          stockAnterior: movement.stockAnterior,
+          stockNuevo: movement.stockNuevo,
+          cantidad: movement.cantidad,
+          usuario: movement.usuario?.nombre || null,
+          referenciaTipo: movement.referenciaTipo,
+          notas: movement.notas,
+        })),
       };
     });
 
     const totals = items.reduce(
       (acc, item) => {
         acc.stockInicial += item.stockInicial;
+        acc.ingresados += item.ingresados;
         acc.vendidos += item.vendidos;
+        acc.editados += item.editados;
         acc.otrosMovimientos += item.otrosMovimientos;
         acc.stockActual += item.stockActual;
         return acc;
       },
-      { productos: items.length, stockInicial: 0, vendidos: 0, otrosMovimientos: 0, stockActual: 0 }
+      { productos: items.length, stockInicial: 0, ingresados: 0, vendidos: 0, editados: 0, otrosMovimientos: 0, stockActual: 0 }
     );
 
     return {

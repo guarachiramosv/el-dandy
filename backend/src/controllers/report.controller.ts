@@ -5,7 +5,7 @@ import { ReportPeriod, ReportService } from '../services/report.service';
 const service = new ReportService();
 
 const getPeriod = (value: unknown): ReportPeriod => {
-  if (value === 'day' || value === 'month' || value === 'year') return value;
+  if (value === 'day' || value === 'month' || value === 'year' || value === 'all') return value;
   return 'day';
 };
 

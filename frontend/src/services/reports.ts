@@ -1,6 +1,6 @@
 import api from './api';
 
-export type ReportPeriod = 'day' | 'month' | 'year';
+export type ReportPeriod = 'day' | 'month' | 'year' | 'all';
 
 type ReportUser = {
   id: string;
@@ -73,7 +73,9 @@ export type ProductInventoryReport = {
   totals: {
     productos: number;
     stockInicial: number;
+    ingresados: number;
     vendidos: number;
+    editados: number;
     otrosMovimientos: number;
     stockActual: number;
   };
@@ -82,15 +84,39 @@ export type ProductInventoryReport = {
     codigo: string;
     descripcion: string;
     marca: string;
+    condicion: string;
     categoria: string;
     sucursal: string;
     sucursalId: string;
     ubicacion?: string | null;
+    fechaAgregado: string;
+    agregadoEnPeriodo: boolean;
+    stockAlAgregar?: number | null;
     stockInicial: number;
+    ingresados: number;
     vendidos: number;
+    editados: number;
     otrosMovimientos: number;
     stockActual: number;
     stockMinimo: number;
+    stockSucursales?: Array<{
+      sucursalId: string;
+      sucursal: string;
+      stock: number;
+      fechaAgregado: string;
+    }>;
+    movimientos: Array<{
+      id: string;
+      fecha: string;
+      tipo: 'VENTA' | 'COMPRA' | 'AJUSTE' | 'TRANSFERENCIA_SALIDA' | 'TRANSFERENCIA_ENTRADA';
+      sucursal: string;
+      stockAnterior: number;
+      stockNuevo: number;
+      cantidad: number;
+      usuario?: string | null;
+      referenciaTipo?: string | null;
+      notas?: string | null;
+    }>;
   }>;
 };
 
@@ -190,12 +216,55 @@ export const fetchCashClosingReport = async (params: {
 
 export const fetchProductInventoryReport = async (params: {
   period: ReportPeriod;
-  value: string;
+  value?: string;
   sucursalId?: string;
   search?: string;
 }): Promise<ProductInventoryReport> => {
   const response = await api.get<{ success: boolean; data: ProductInventoryReport }>('/reports/product-inventory', { params });
-  return response.data.data;
+  const report = response.data.data;
+  if (params.period === 'all' && report.period !== 'all') {
+    throw new Error('El servidor todavia no esta actualizado para descargar todo el historico. Intenta de nuevo despues del despliegue.');
+  }
+  const items = report.items.map((item) => {
+    const stockInicial = item.stockInicial || 0;
+    const vendidos = item.vendidos || 0;
+    const stockActual = item.stockActual || 0;
+    const ingresados = typeof item.ingresados === 'number'
+      ? item.ingresados
+      : Math.max(0, stockActual - stockInicial + vendidos);
+    return {
+      ...item,
+      fechaAgregado: item.fechaAgregado || '',
+      agregadoEnPeriodo: item.agregadoEnPeriodo || false,
+      stockAlAgregar: item.stockAlAgregar ?? null,
+      stockInicial,
+      ingresados,
+      vendidos,
+      stockActual,
+      editados: item.editados || 0,
+      otrosMovimientos: item.otrosMovimientos || 0,
+      stockSucursales: item.stockSucursales || [],
+      movimientos: item.movimientos || [],
+    };
+  });
+  const totals = items.reduce(
+    (acc, item) => {
+      acc.stockInicial += item.stockInicial;
+      acc.ingresados += item.ingresados;
+      acc.vendidos += item.vendidos;
+      acc.editados += item.editados;
+      acc.otrosMovimientos += item.otrosMovimientos;
+      acc.stockActual += item.stockActual;
+      return acc;
+    },
+    { productos: items.length, stockInicial: 0, ingresados: 0, vendidos: 0, editados: 0, otrosMovimientos: 0, stockActual: 0 }
+  );
+
+  return {
+    ...report,
+    totals,
+    items,
+  };
 };
 
 export const fetchSalesHistoryReport = async (params: {

@@ -147,14 +147,14 @@ export class ProductService {
         where,
         include: productInclude,
         take: candidateLimit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { codigo: 'asc' },
       });
       if (candidates.length === 0) {
         candidates = await prisma.producto.findMany({
           where: baseWhere,
           include: productInclude,
           take: candidateLimit,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { codigo: 'asc' },
         });
       }
       const matchedItems = filterAndSortBySearch(
@@ -175,7 +175,7 @@ export class ProductService {
         include: productInclude,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { codigo: 'asc' },
       }),
       prisma.producto.count({ where }),
     ]);
@@ -263,7 +263,7 @@ export class ProductService {
     return items.slice(0, 100);
   }
 
-  async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }) {
+  async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }, usuarioId?: string | null) {
     if (typeof data.codigoRepuesto === 'string') {
       data.codigoRepuesto = data.codigoRepuesto.trim() || null;
     }
@@ -291,6 +291,19 @@ export class ProductService {
           stock: initialStock,
         },
       });
+      if (initialStock > 0) {
+        await stockService.recordMovement(tx, {
+          tipoMovimiento: 'AJUSTE',
+          productoId: product.id,
+          sucursalId: data.sucursalId,
+          stockAnterior: 0,
+          stockNuevo: initialStock,
+          cantidad: initialStock,
+          usuarioId,
+          referenciaTipo: 'ALTA_PRODUCTO',
+          notas: 'Stock inicial al crear producto',
+        });
+      }
       return tx.producto.findUnique({
         where: { id: product.id },
         include: productInclude,

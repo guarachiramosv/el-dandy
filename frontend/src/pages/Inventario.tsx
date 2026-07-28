@@ -17,10 +17,14 @@ const defaultMonth = today.toISOString().slice(0, 7);
 const defaultYear = String(today.getFullYear());
 
 const valueForPeriod = (period: ReportPeriod, day: string, month: string, year: string) => {
+  if (period === "all") return undefined;
   if (period === "year") return year;
   if (period === "month") return month;
   return day;
 };
+
+const inventoryShelf = (ubicacion?: string | null) => ubicacion?.trim() || "Sin estante";
+const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
 
 const sanitizePdfText = (value: string) =>
   Array.from(value)
@@ -55,20 +59,19 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
   const pageWidth = 841.89;
   const pageHeight = 595.28;
   const margin = 28;
-  const tableTop = 438;
-  const rowHeight = 20;
+  const tableTop = 424;
+  const rowHeight = 24;
   const bottom = 34;
   const rowsPerPage = Math.floor((tableTop - bottom) / rowHeight);
   const columns = [
-    { label: "Codigo", x: 34, width: 58, chars: 10, align: "left" },
-    { label: "Producto", x: 96, width: 150, chars: 32, align: "left" },
-    { label: "Sucursal", x: 252, width: 92, chars: 17, align: "left" },
-    { label: "Tenia antes", x: 358, width: 72, chars: 8, align: "right" },
-    { label: "Vendido", x: 440, width: 58, chars: 8, align: "right" },
-    { label: "Otros", x: 508, width: 52, chars: 8, align: "right" },
-    { label: "Tiene ahora", x: 572, width: 72, chars: 8, align: "right" },
-    { label: "Minimo", x: 658, width: 52, chars: 8, align: "right" },
-    { label: "Marca", x: 722, width: 80, chars: 14, align: "left" },
+    { label: "Codigo", x: 34, width: 46, chars: 9, align: "left" },
+    { label: "Producto", x: 88, width: 232, chars: 50, align: "left" },
+    { label: "Condicion", x: 330, width: 58, chars: 10, align: "left" },
+    { label: "Estante", x: 398, width: 104, chars: 20, align: "left" },
+    { label: "Stock inicio", x: 520, width: 70, chars: 10, align: "right" },
+    { label: "Agregado", x: 604, width: 70, chars: 10, align: "right" },
+    { label: "Vendido", x: 682, width: 60, chars: 10, align: "right" },
+    { label: "Stock actual", x: 754, width: 58, chars: 10, align: "right" },
   ];
   const pages: string[] = [];
 
@@ -85,10 +88,10 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
     const statWidth = 146;
     const stats = [
       ["Productos", report.totals.productos],
-      ["Tenia antes", report.totals.stockInicial],
+      ["Stock inicio", report.totals.stockInicial],
+      ["Agregado", report.totals.ingresados],
       ["Vendido", report.totals.vendidos],
-      ["Otros mov.", report.totals.otrosMovimientos],
-      ["Tiene ahora", report.totals.stockActual],
+      ["Stock actual", report.totals.stockActual],
     ];
     stats.forEach(([label, value], index) => {
       const x = margin + index * (statWidth + 8);
@@ -107,13 +110,12 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
       const rowValues = [
         item.codigo,
         item.descripcion,
-        `${item.sucursal} ${item.ubicacion || ""}`.trim(),
+        productConditionLabel(item.condicion),
+        inventoryShelf(item.ubicacion),
         item.stockInicial,
+        item.ingresados,
         item.vendidos,
-        item.otrosMovimientos,
         item.stockActual,
-        item.stockMinimo,
-        item.marca,
       ];
       if (index % 2 === 1) content += pdfFillRect(margin, y - 4, pageWidth - margin * 2, rowHeight, "0.985 0.985 0.985");
       content += pdfLine(margin, y - 5, pageWidth - margin, y - 5);
@@ -298,6 +300,24 @@ export default function Inventario() {
     }
   };
 
+  const handleDownloadAllInventory = async () => {
+    if (isSeller) {
+      setMessage("El vendedor solo puede consultar inventario.");
+      return;
+    }
+    setMessage(null);
+    setDownloadingReport(true);
+    try {
+      const report = await fetchProductInventoryReport({ period: "all" });
+      setInventoryReport(report);
+      downloadInventoryPdf(report);
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, "No se pudo descargar todo el inventario."));
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-white">Cargando inventario...</div>;
   if (error) return <div className="p-6 text-red-400">{error}</div>;
 
@@ -340,7 +360,7 @@ export default function Inventario() {
       {tab === "PRODUCTOS" && (
         <>
           <div className="rounded-xl border border-white/10 bg-grafito-900/80 p-4 shadow-inner">
-            <div className="grid gap-4 xl:grid-cols-[minmax(280px,1fr)_auto] xl:items-center">
+            <div className="grid gap-4">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
                 <input
@@ -352,7 +372,7 @@ export default function Inventario() {
               </div>
 
               {!isSeller && (
-                <div className="grid gap-3 sm:grid-cols-4 xl:w-[780px]">
+                <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_repeat(3,minmax(150px,180px))]">
                   <select className="premium-input h-14 rounded-lg py-0 text-base" value={printPeriod} onChange={(event) => setPrintPeriod(event.target.value as ReportPeriod)}>
                     <option value="day">Imprimir por dia</option>
                     <option value="month">Imprimir por mes</option>
@@ -361,11 +381,14 @@ export default function Inventario() {
                   {printPeriod === "day" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="date" value={printDay} onChange={(event) => setPrintDay(event.target.value)} />}
                   {printPeriod === "month" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="month" value={printMonth} onChange={(event) => setPrintMonth(event.target.value)} />}
                   {printPeriod === "year" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="number" min="2020" max="2100" value={printYear} onChange={(event) => setPrintYear(event.target.value)} />}
-                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base disabled:opacity-60">
+                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Printer size={18} /> {printingReport ? "Preparando..." : "Imprimir"}
                   </button>
-                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base disabled:opacity-60">
-                    <Download size={18} /> {downloadingReport ? "Descargando..." : "Descargar PDF"}
+                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                    <Download size={18} /> {downloadingReport ? "Descargando..." : "Descargar periodo"}
+                  </button>
+                  <button onClick={handleDownloadAllInventory} disabled={printingReport || downloadingReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                    <Download size={18} /> Descargar todo historico
                   </button>
                 </div>
               )}
@@ -788,10 +811,10 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
 
       <div className="mb-5 grid grid-cols-5 gap-3">
         <PrintStat label="Productos" value={String(report.totals.productos)} />
-        <PrintStat label="Tenia antes" value={String(report.totals.stockInicial)} />
+        <PrintStat label="Stock inicio" value={String(report.totals.stockInicial)} />
+        <PrintStat label="Agregado" value={String(report.totals.ingresados)} />
         <PrintStat label="Vendido" value={String(report.totals.vendidos)} />
-        <PrintStat label="Otros mov." value={String(report.totals.otrosMovimientos)} />
-        <PrintStat label="Tiene ahora" value={String(report.totals.stockActual)} />
+        <PrintStat label="Stock actual" value={String(report.totals.stockActual)} />
       </div>
 
       <table className="w-full text-left text-sm text-gray-950">
@@ -799,12 +822,12 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
           <tr>
             <th className="p-2">Codigo</th>
             <th className="p-2">Producto</th>
-            <th className="p-2">Sucursal</th>
-            <th className="p-2 text-right">Tenia antes</th>
+            <th className="p-2">Condicion</th>
+            <th className="p-2">Estante</th>
+            <th className="p-2 text-right">Stock inicio</th>
+            <th className="p-2 text-right">Agregado</th>
             <th className="p-2 text-right">Vendido</th>
-            <th className="p-2 text-right">Otros</th>
-            <th className="p-2 text-right">Tiene ahora</th>
-            <th className="p-2 text-right">Minimo</th>
+            <th className="p-2 text-right">Stock actual</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
@@ -815,15 +838,12 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
                 <p className="font-semibold">{item.descripcion}</p>
                 <p className="text-xs text-gray-600">{item.marca} - {item.categoria}</p>
               </td>
-              <td className="p-2">
-                <p>{item.sucursal}</p>
-                <p className="text-xs text-gray-600">{item.ubicacion || "Sin ubicacion"}</p>
-              </td>
+              <td className="p-2">{productConditionLabel(item.condicion)}</td>
+              <td className="p-2">{inventoryShelf(item.ubicacion)}</td>
               <td className="p-2 text-right">{item.stockInicial}</td>
+              <td className="p-2 text-right">{item.ingresados}</td>
               <td className="p-2 text-right">{item.vendidos}</td>
-              <td className="p-2 text-right">{item.otrosMovimientos}</td>
               <td className="p-2 text-right font-bold">{item.stockActual}</td>
-              <td className="p-2 text-right">{item.stockMinimo}</td>
             </tr>
           ))}
         </tbody>

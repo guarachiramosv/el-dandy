@@ -33,7 +33,7 @@ export const getProductDeletionHistory = asyncHandler(async (_req: Request, res:
 
 export const createProduct = asyncHandler(async (req: Request, res: Response) => {
   const parsed = createProductSchema.parse(req.body);
-  const product = await service.create(parsed as any);
+  const product = await service.create(parsed as any, req.user?.id || null);
   res.status(201).json({ success: true, data: product });
 });
 
