@@ -68,8 +68,8 @@ export const uploadProductImage = asyncHandler(async (req: Request, res: Respons
   if (!req.file) return res.status(400).json({ success: false, error: 'Imagen requerida' });
 
   const result = await uploadToCloudinary(req.file);
-  await productService.update(String(req.params.id), { imagen: result.imageUrl });
-  const product = await productService.addImages(String(req.params.id), [{ url: result.imageUrl, publicId: result.publicId }]);
+  await productService.update(String(req.params.id), { imagen: result.imageUrl }, req.user?.id || null);
+  const product = await productService.addImages(String(req.params.id), [{ url: result.imageUrl, publicId: result.publicId }], req.user?.id || null);
   res.json({ success: true, data: { imageUrl: result.imageUrl, product, publicId: result.publicId } });
 });
 
@@ -80,7 +80,8 @@ export const uploadProductImages = asyncHandler(async (req: Request, res: Respon
   const uploaded = await Promise.all(files.map(uploadToCloudinary));
   const product = await productService.addImages(
     String(req.params.id),
-    uploaded.map((image) => ({ url: image.imageUrl, publicId: image.publicId }))
+    uploaded.map((image) => ({ url: image.imageUrl, publicId: image.publicId })),
+    req.user?.id || null
   );
 
   res.json({

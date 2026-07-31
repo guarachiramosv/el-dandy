@@ -72,6 +72,18 @@ enum StockMovementType {
   TRANSFERENCIA_ENTRADA
 }
 
+enum ProductAuditAction {
+  CREADO
+  EDITADO
+  STOCK_AGREGADO
+  STOCK_AJUSTADO
+  ESTADO_CAMBIADO
+  ELIMINADO
+  RESTAURADO
+  DESCONTINUADO
+  TRANSFERIDO
+}
+
 enum RemachadoTrabajoTipo {
   JUEGO
   MEDIO_JUEGO
@@ -95,6 +107,7 @@ model Sucursal {
   productos Producto[]
   productoStocks ProductoStockSucursal[]
   eliminacionesProducto ProductoEliminacionHistorial[]
+  auditoriasProducto ProductoAuditoria[]
   ventas    Venta[]
   compras   Compra[]
   cierresCaja CierreCaja[]
@@ -122,6 +135,7 @@ model Usuario {
   ventas     Venta[]
   movimientos MovimientoStock[]
   eliminacionesProducto ProductoEliminacionHistorial[]
+  auditoriasProducto ProductoAuditoria[]
   cierresCaja CierreCaja[]
   gastosCaja GastoCaja[]
   remachadoTrabajos RemachadoTrabajo[]
@@ -191,6 +205,7 @@ model Producto {
   detallesCompra DetalleCompra[]
   movimientos  MovimientoStock[]
   eliminacionesHistorial ProductoEliminacionHistorial[]
+  auditorias ProductoAuditoria[]
   alertas      AlertaStock[]
   transferenciasOrigen TransferenciaStock[] @relation("ProductoTransferenciaOrigen")
   transferenciasDestino TransferenciaStock[] @relation("ProductoTransferenciaDestino")
@@ -224,6 +239,33 @@ model ProductoEliminacionHistorial {
   @@index([createdAt])
 }
 
+model ProductoAuditoria {
+  id             String             @id @default(uuid())
+  accion         ProductAuditAction
+  productoId     String?
+  producto       Producto?          @relation(fields: [productoId], references: [id], onDelete: SetNull)
+  codigo         String?
+  descripcion    String?
+  sucursalId     String?
+  sucursal       Sucursal?          @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  usuarioId      String?
+  usuario        Usuario?           @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  stockAnterior  Float?
+  stockNuevo     Float?
+  cantidad       Float?
+  estadoAnterior ProductStatus?
+  estadoNuevo    ProductStatus?
+  detalle        String?
+  cambios        Json?
+  createdAt      DateTime           @default(now())
+
+  @@index([productoId])
+  @@index([sucursalId])
+  @@index([usuarioId])
+  @@index([accion])
+  @@index([createdAt])
+}
+
 model ProductoStockSucursal {
   id         String   @id @default(uuid())
   productoId String
@@ -231,6 +273,7 @@ model ProductoStockSucursal {
   sucursalId String
   sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
   stock      Float    @default(0)
+  ubicacion  String?
   activo     Boolean  @default(true)
   estado     ProductStatus @default(ACTIVO)
   createdAt  DateTime @default(now())

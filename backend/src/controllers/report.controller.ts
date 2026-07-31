@@ -37,3 +37,14 @@ export const getProductInventoryReport = asyncHandler(async (req: Request, res: 
   });
   res.json({ success: true, data });
 });
+
+export const getProductAuditReport = asyncHandler(async (req: Request, res: Response) => {
+  const data = await service.getProductAuditReport({
+    period: getPeriod(req.query.period),
+    value: typeof req.query.value === 'string' ? req.query.value : null,
+    sucursalId: typeof req.query.sucursalId === 'string' ? req.query.sucursalId : null,
+    usuarioId: typeof req.query.usuarioId === 'string' ? req.query.usuarioId : null,
+    productoId: typeof req.query.productoId === 'string' ? req.query.productoId : null,
+  });
+  res.json({ success: true, data });
+});

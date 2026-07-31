@@ -31,7 +31,8 @@ export const updateProductSchema = createProductSchema.partial();
 
 export const addProductStockSchema = z.object({
   sucursalId: uuidLikeSchema,
-  cantidad: z.number().positive('Cantidad debe ser mayor a cero'),
+  cantidad: z.number().min(0, 'Cantidad no puede ser negativa'),
+  ubicacion: z.string().trim().optional().nullable(),
   usuarioId: z.string().uuid('ID de usuario invalido').optional().nullable(),
   notas: z.string().trim().optional().nullable(),
 });

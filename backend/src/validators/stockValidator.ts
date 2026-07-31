@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const transferStockSchema = z.object({
   productoOrigenId: z.string().uuid('Producto origen invalido'),
   productoDestinoId: z.string().uuid('Producto destino invalido'),
+  sucursalOrigenId: z.string().uuid('Sucursal origen invalida').optional(),
+  sucursalDestinoId: z.string().uuid('Sucursal destino invalida').optional(),
   cantidad: z.number().positive('Cantidad debe ser mayor a cero'),
   usuarioId: z.string().uuid('Usuario invalido'),
   notas: z.string().optional().nullable(),

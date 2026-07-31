@@ -11,7 +11,15 @@ export const fetchStockAlerts = async (): Promise<StockAlert[]> => {
   return response.data.data;
 };
 
-export const transferStock = async (data: { productoOrigenId: string; productoDestinoId: string; cantidad: number; usuarioId: string; notas?: string | null }) => {
+export const transferStock = async (data: {
+  productoOrigenId: string;
+  productoDestinoId: string;
+  sucursalOrigenId?: string;
+  sucursalDestinoId?: string;
+  cantidad: number;
+  usuarioId: string;
+  notas?: string | null;
+}) => {
   const response = await api.post('/inventory/transfers', data);
   return response.data.data;
 };

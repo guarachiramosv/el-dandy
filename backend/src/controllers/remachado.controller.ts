@@ -17,12 +17,12 @@ export const getRemachadoSummary = asyncHandler(async (_req: Request, res: Respo
 
 export const createMedida = asyncHandler(async (req: Request, res: Response) => {
   const parsed = upsertRemachadoMedidaSchema.parse(req.body);
-  res.status(201).json({ success: true, data: await service.createMedida(parsed) });
+  res.status(201).json({ success: true, data: await service.createMedida(parsed, req.user?.id || null) });
 });
 
 export const updateMedida = asyncHandler(async (req: Request, res: Response) => {
   const parsed = upsertRemachadoMedidaSchema.partial().parse(req.body);
-  res.json({ success: true, data: await service.updateMedida(String(req.params.id), parsed) });
+  res.json({ success: true, data: await service.updateMedida(String(req.params.id), parsed, req.user?.id || null) });
 });
 
 export const adjustMedidaStock = asyncHandler(async (req: Request, res: Response) => {
@@ -38,12 +38,12 @@ export const adjustMedidaStock = asyncHandler(async (req: Request, res: Response
 
 export const createRemache = asyncHandler(async (req: Request, res: Response) => {
   const parsed = upsertRemachadoRemacheSchema.parse(req.body);
-  res.status(201).json({ success: true, data: await service.createRemache(parsed) });
+  res.status(201).json({ success: true, data: await service.createRemache(parsed, req.user?.id || null) });
 });
 
 export const updateRemache = asyncHandler(async (req: Request, res: Response) => {
   const parsed = upsertRemachadoRemacheSchema.partial().parse(req.body);
-  res.json({ success: true, data: await service.updateRemache(String(req.params.id), parsed) });
+  res.json({ success: true, data: await service.updateRemache(String(req.params.id), parsed, req.user?.id || null) });
 });
 
 export const adjustRemacheStock = asyncHandler(async (req: Request, res: Response) => {

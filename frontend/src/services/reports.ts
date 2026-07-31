@@ -120,6 +120,40 @@ export type ProductInventoryReport = {
   }>;
 };
 
+export type ProductAuditReport = {
+  period: ReportPeriod;
+  label: string;
+  desde: string;
+  hasta: string;
+  totals: {
+    registros: number;
+    acciones: Record<string, number>;
+  };
+  items: Array<{
+    id: string;
+    accion: 'CREADO' | 'EDITADO' | 'STOCK_AGREGADO' | 'STOCK_AJUSTADO' | 'ESTADO_CAMBIADO' | 'ELIMINADO' | 'RESTAURADO' | 'DESCONTINUADO' | 'TRANSFERIDO';
+    fecha: string;
+    productoId?: string | null;
+    codigo: string;
+    codigoRepuesto?: string | null;
+    descripcion: string;
+    marca?: string | null;
+    ubicacion?: string | null;
+    sucursal: string;
+    sucursalId?: string | null;
+    usuario: string;
+    usuarioEmail?: string | null;
+    usuarioId?: string | null;
+    stockAnterior?: number | null;
+    stockNuevo?: number | null;
+    cantidad?: number | null;
+    estadoAnterior?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO' | null;
+    estadoNuevo?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO' | null;
+    detalle?: string | null;
+    cambios?: unknown;
+  }>;
+};
+
 export type SalesHistoryReport = {
   period: ReportPeriod;
   label: string;
@@ -265,6 +299,17 @@ export const fetchProductInventoryReport = async (params: {
     totals,
     items,
   };
+};
+
+export const fetchProductAuditReport = async (params: {
+  period: ReportPeriod;
+  value?: string;
+  sucursalId?: string;
+  usuarioId?: string;
+  productoId?: string;
+}): Promise<ProductAuditReport> => {
+  const response = await api.get<{ success: boolean; data: ProductAuditReport }>('/reports/product-audit', { params });
+  return response.data.data;
 };
 
 export const fetchSalesHistoryReport = async (params: {

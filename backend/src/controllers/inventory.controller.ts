@@ -23,10 +23,10 @@ export const getStockAlerts = asyncHandler(async (req: Request, res: Response) =
 
 export const transferStock = asyncHandler(async (req: Request, res: Response) => {
   const parsed = transferStockSchema.parse(req.body);
-  res.status(201).json({ success: true, data: await service.transfer(parsed) });
+  res.status(201).json({ success: true, data: await service.transfer({ ...parsed, usuarioId: req.user?.id || parsed.usuarioId }) });
 });
 
 export const adjustStock = asyncHandler(async (req: Request, res: Response) => {
   const parsed = adjustStockSchema.parse(req.body);
-  res.status(201).json({ success: true, data: await service.adjust(parsed) });
+  res.status(201).json({ success: true, data: await service.adjust({ ...parsed, usuarioId: req.user?.id || parsed.usuarioId }) });
 });

@@ -48,6 +48,7 @@ export interface ProductBranchStock {
   sucursalId: string;
   sucursal?: Sucursal;
   stock: number;
+  ubicacion?: string | null;
   activo?: boolean;
   estado?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO';
   createdAt?: string;

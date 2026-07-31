@@ -1,8 +1,10 @@
 // src/services/api.ts
 import axios from 'axios';
 
+const DEFAULT_API_URL = 'https://sistema-el-dandy.onrender.com/api';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
+  baseURL: import.meta.env.VITE_API_URL || DEFAULT_API_URL,
 });
 
 // Request interceptor – could add auth token later

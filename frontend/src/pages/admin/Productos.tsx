@@ -37,6 +37,7 @@ export default function Productos() {
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [stockSucursalId, setStockSucursalId] = useState("");
   const [stockCantidad, setStockCantidad] = useState(1);
+  const [stockUbicacion, setStockUbicacion] = useState("");
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionHistory, setDeletionHistory] = useState<ProductDeletionHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -48,6 +49,7 @@ export default function Productos() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingProduct, setSavingProduct] = useState(false);
   const [pendingSaveProduct, setPendingSaveProduct] = useState<ProductFormData | null>(null);
+  const [confirmZeroStock, setConfirmZeroStock] = useState(false);
   const [pendingDeleteAction, setPendingDeleteAction] = useState<{
     product: Product;
     sucursalId: string;
@@ -126,6 +128,7 @@ export default function Productos() {
       sucursalId: product.sucursalId,
       sucursal: product.sucursal,
       stock: product.stock,
+      ubicacion: product.ubicacion,
       estado: product.estado,
       activo: product.activo,
     }];
@@ -148,6 +151,7 @@ export default function Productos() {
       sucursalId,
       sucursal: branch?.sucursal || product.sucursal,
       stock: branch?.stock ?? product.stock,
+      ubicacion: branch?.ubicacion ?? product.ubicacion,
     };
 
     if (action === "VIEW" || action === "EDIT") {
@@ -195,31 +199,55 @@ export default function Productos() {
   const handleAddStockRequest = (product: Product) => {
     setSaveError(null);
     setStockProduct(product);
-    setStockSucursalId(product.stockSucursales?.[0]?.sucursalId || product.sucursalId || sucursales[0]?.id || "");
-    setStockCantidad(1);
+    const initialSucursalId = product.stockSucursales?.[0]?.sucursalId || product.sucursalId || sucursales[0]?.id || "";
+    const initialBranch = product.stockSucursales?.find((item) => item.sucursalId === initialSucursalId);
+    setStockSucursalId(initialSucursalId);
+    setStockCantidad(0);
+    setStockUbicacion(initialBranch?.ubicacion || product.ubicacion || "");
   };
 
-  const handleAddStock = async () => {
-    if (!stockProduct) return;
-    if (!stockSucursalId) return setSaveError("Selecciona una sucursal.");
-    if (!Number.isFinite(stockCantidad) || stockCantidad <= 0) return setSaveError("La cantidad debe ser mayor a cero.");
+  const handleStockSucursalChange = (sucursalId: string) => {
+    setStockSucursalId(sucursalId);
+    const branch = stockProduct?.stockSucursales?.find((item) => item.sucursalId === sucursalId);
+    const fallbackLocation = stockProduct?.sucursalId === sucursalId ? stockProduct.ubicacion || "" : "";
+    setStockUbicacion(branch?.ubicacion || fallbackLocation);
+  };
 
+  const saveProductStock = async () => {
+    if (!stockProduct) return;
     setSaveError(null);
     setSavingProduct(true);
     try {
+      const ubicacion = stockUbicacion.trim() || null;
       const updated = await addProductStock(stockProduct.id, {
         sucursalId: stockSucursalId,
         cantidad: stockCantidad,
-        notas: `Ingreso manual desde Productos. Estante: ${stockProduct.ubicacion || "Sin ubicacion"}`,
+        ubicacion,
+        notas: stockCantidad > 0
+          ? `Ingreso manual desde Productos. Estante: ${ubicacion || "Sin ubicacion"}`
+          : `Sucursal preparada con stock cero. Estante: ${ubicacion || "Sin ubicacion"}`,
       });
       setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)));
       setStockProduct(null);
-      setSaveError("Stock agregado correctamente sin duplicar el producto.");
+      setStockUbicacion("");
+      setConfirmZeroStock(false);
+      setSaveError(stockCantidad > 0 ? "Stock agregado correctamente sin duplicar el producto." : "Sucursal agregada con stock 0 correctamente.");
     } catch (err: unknown) {
       setSaveError(getErrorMessage(err));
     } finally {
       setSavingProduct(false);
     }
+  };
+
+  const handleAddStock = async () => {
+    if (!stockProduct) return;
+    if (!stockSucursalId) return setSaveError("Selecciona una sucursal.");
+    if (!Number.isFinite(stockCantidad) || stockCantidad < 0) return setSaveError("La cantidad no puede ser negativa.");
+    if (stockCantidad === 0) {
+      setConfirmZeroStock(true);
+      return;
+    }
+    await saveProductStock();
   };
 
   const handleSaveProduct = (savedProduct: ProductFormData) => {
@@ -365,10 +393,15 @@ export default function Productos() {
           sucursales={sucursales}
           sucursalId={stockSucursalId}
           cantidad={stockCantidad}
+          ubicacion={stockUbicacion}
           saving={savingProduct}
-          onSucursalChange={setStockSucursalId}
+          onSucursalChange={handleStockSucursalChange}
           onCantidadChange={setStockCantidad}
-          onClose={() => setStockProduct(null)}
+          onUbicacionChange={setStockUbicacion}
+          onClose={() => {
+            setStockProduct(null);
+            setConfirmZeroStock(false);
+          }}
           onConfirm={handleAddStock}
         />
       )}
@@ -411,6 +444,17 @@ export default function Productos() {
           saving={savingProduct}
           onCancel={() => setPendingDeleteAction(null)}
           onConfirm={confirmDeleteProduct}
+        />
+      )}
+
+      {confirmZeroStock && stockProduct && (
+        <ConfirmProductActionModal
+          title="Crear sucursal con stock 0"
+          message={`Deseas preparar "${stockProduct.codigo} - ${stockProduct.descripcion}" en esta sucursal con stock 0 para poder transferir despues?`}
+          confirmLabel="Si, crear con 0"
+          saving={savingProduct}
+          onCancel={() => setConfirmZeroStock(false)}
+          onConfirm={saveProductStock}
         />
       )}
     </div>
@@ -467,9 +511,11 @@ function AddStockModal({
   sucursales,
   sucursalId,
   cantidad,
+  ubicacion,
   saving,
   onSucursalChange,
   onCantidadChange,
+  onUbicacionChange,
   onClose,
   onConfirm,
 }: {
@@ -477,15 +523,22 @@ function AddStockModal({
   sucursales: Sucursal[];
   sucursalId: string;
   cantidad: number;
+  ubicacion: string;
   saving: boolean;
   onSucursalChange: (value: string) => void;
   onCantidadChange: (value: number) => void;
+  onUbicacionChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const branchStock = product.stockSucursales?.find((item) => item.sucursalId === sucursalId);
   const currentStock = branchStock?.stock || 0;
   const nextStock = currentStock + (Number.isFinite(cantidad) ? cantidad : 0);
+  const defaultUbicacion = branchStock?.ubicacion || (product.sucursalId === sucursalId ? product.ubicacion || "" : "");
+
+  useEffect(() => {
+    if (!ubicacion && defaultUbicacion) onUbicacionChange(defaultUbicacion);
+  }, [defaultUbicacion, onUbicacionChange, ubicacion]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -497,11 +550,6 @@ function AddStockModal({
         </div>
 
         <div className="space-y-4 p-5">
-          <div className="rounded-lg border border-gray-700 bg-grafito-900/40 p-3">
-            <p className="text-xs uppercase text-gray-500">Estante conservado</p>
-            <p className="mt-1 font-semibold text-white">{product.ubicacion || "Sin ubicacion registrada"}</p>
-          </div>
-
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-300">Sucursal</span>
             <select className="premium-input" value={sucursalId} onChange={(event) => onSucursalChange(event.target.value)}>
@@ -512,11 +560,21 @@ function AddStockModal({
           </label>
 
           <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-300">Estante en esta sucursal</span>
+            <input
+              className="premium-input"
+              value={ubicacion}
+              onChange={(event) => onUbicacionChange(event.target.value)}
+              placeholder="Ej. A6, B2, pasillo 3"
+            />
+          </label>
+
+          <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-300">Cantidad a agregar</span>
             <input
               className="premium-input"
               type="number"
-              min="1"
+              min="0"
               step={product.unidadVenta === "METRO" ? "0.01" : "1"}
               value={cantidad}
               onChange={(event) => onCantidadChange(Number(event.target.value))}
@@ -575,6 +633,7 @@ function BranchActionModal({
       sucursalId: product.sucursalId,
       sucursal: product.sucursal,
       stock: product.stock,
+      ubicacion: product.ubicacion,
       estado: product.estado,
       activo: product.activo,
     }];
@@ -592,6 +651,9 @@ function BranchActionModal({
   }[action];
 
   const selectedBranch = branches.find((branch) => branch.sucursalId === sucursalId) || branches[0];
+  const selectedBranchLocation = selectedBranch
+    ? selectedBranch.ubicacion || (product.sucursalId === selectedBranch.sucursalId ? product.ubicacion : null) || "Sin ubicacion registrada"
+    : "Sin ubicacion registrada";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -618,7 +680,9 @@ function BranchActionModal({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="font-semibold text-white">{branch.sucursal?.nombre || "Sucursal"}</p>
-                    <p className="mt-1 text-sm text-gray-400">Stock: {branch.stock} - Estado: {branchStatus}</p>
+                    <p className="mt-1 text-sm text-gray-400">
+                      Stock: {branch.stock} - Estante: {branch.ubicacion || (product.sucursalId === branch.sucursalId ? product.ubicacion : null) || "Sin ubicacion"} - Estado: {branchStatus}
+                    </p>
                   </div>
                   <span className={`rounded-full border px-2 py-1 text-xs font-bold ${
                     branchStatus === "ACTIVO"
@@ -634,8 +698,8 @@ function BranchActionModal({
 
           {selectedBranch && (
             <div className="rounded-lg border border-gray-700 bg-grafito-900/40 p-3">
-              <p className="text-xs uppercase text-gray-500">Estante conservado</p>
-              <p className="mt-1 font-semibold text-white">{product.ubicacion || "Sin ubicacion registrada"}</p>
+              <p className="text-xs uppercase text-gray-500">Estante en sucursal</p>
+              <p className="mt-1 font-semibold text-white">{selectedBranchLocation}</p>
             </div>
           )}
 

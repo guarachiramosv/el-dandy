@@ -204,6 +204,9 @@ function ProductModalContent({
   const isCreateMode = mode === "CREATE";
   const selectedBranch = product?.stockSucursales?.find((item) => item.sucursalId === selectedSucursalId);
   const selectedBranchName = selectedBranch?.sucursal?.nombre || product?.sucursal?.nombre || "Sucursal seleccionada";
+  const selectedBranchLocation = selectedBranch
+    ? selectedBranch.ubicacion || (product?.sucursalId === selectedBranch.sucursalId ? product?.ubicacion : null) || "Sin ubicacion"
+    : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
 
   return (
@@ -398,7 +401,7 @@ function ProductModalContent({
                 <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
                   <p className="text-xs uppercase text-primary-light">Sucursal seleccionada</p>
                   <p className="mt-1 font-semibold text-white">
-                    {selectedBranch.sucursal?.nombre || "Sucursal"} - Stock {selectedBranch.stock} - {selectedBranch.estado || "ACTIVO"}
+                    {selectedBranch.sucursal?.nombre || "Sucursal"} - Stock {selectedBranch.stock} - Estante {selectedBranchLocation} - {selectedBranch.estado || "ACTIVO"}
                   </p>
                 </div>
               )}

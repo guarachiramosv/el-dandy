@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { ProductAuditService } from './productAudit.service';
+
+const productAuditService = new ProductAuditService();
 
 export type ReportPeriod = 'day' | 'month' | 'year' | 'all';
 
@@ -546,6 +549,62 @@ export class ReportService {
       hasta: range.end,
       totals,
       items,
+    };
+  }
+
+  async getProductAuditReport(params: {
+    period: ReportPeriod;
+    value?: string | null;
+    sucursalId?: string | null;
+    usuarioId?: string | null;
+    productoId?: string | null;
+  }) {
+    const range = parsePeriod(params.period, params.value);
+    const auditRows = await productAuditService.list({
+      from: range.start,
+      to: range.end,
+      sucursalId: params.sucursalId,
+      usuarioId: params.usuarioId,
+      productoId: params.productoId,
+    });
+
+    const totals = auditRows.reduce<Record<string, number>>((acc, row) => {
+      acc[row.accion] = (acc[row.accion] || 0) + 1;
+      return acc;
+    }, {});
+
+    return {
+      period: params.period,
+      label: params.period === 'all' ? 'Todo el historial de cambios' : range.label,
+      desde: range.start,
+      hasta: range.end,
+      totals: {
+        registros: auditRows.length,
+        acciones: totals,
+      },
+      items: auditRows.map((row) => ({
+        id: row.id,
+        accion: row.accion,
+        fecha: formatDateForReport(row.createdAt),
+        productoId: row.productoId,
+        codigo: row.producto?.codigo || row.codigo || '',
+        codigoRepuesto: row.producto?.codigoRepuesto || null,
+        descripcion: row.producto?.descripcion || row.descripcion || 'Producto',
+        marca: row.producto?.marca || null,
+        ubicacion: row.producto?.ubicacion || null,
+        sucursal: row.sucursal?.nombre || 'Sin sucursal',
+        sucursalId: row.sucursalId,
+        usuario: row.usuario?.nombre || 'Usuario no registrado',
+        usuarioEmail: row.usuario?.email || null,
+        usuarioId: row.usuarioId,
+        stockAnterior: row.stockAnterior,
+        stockNuevo: row.stockNuevo,
+        cantidad: row.cantidad,
+        estadoAnterior: row.estadoAnterior,
+        estadoNuevo: row.estadoNuevo,
+        detalle: row.detalle,
+        cambios: row.cambios,
+      })),
     };
   }
 }

@@ -58,7 +58,7 @@ export const updateProductBranchStatus = asyncHandler(async (req: Request, res: 
   const id = String(req.params.id);
   const sucursalId = String(req.params.sucursalId);
   const parsed = updateProductBranchStatusSchema.parse(req.body);
-  const product = await service.updateBranchStatus(id, sucursalId, parsed.estado);
+  const product = await service.updateBranchStatus(id, sucursalId, parsed.estado, req.user?.id || null);
   res.json({ success: true, data: product });
 });
 
@@ -71,12 +71,12 @@ export const deleteProduct = asyncHandler(async (req: Request, res: Response) =>
 
 export const restoreProduct = asyncHandler(async (req: Request, res: Response) => {
   const id = String(req.params.id);
-  const product = await service.restore(id);
+  const product = await service.restore(id, req.user?.id || null);
   res.json({ success: true, data: product });
 });
 
 export const discontinueProduct = asyncHandler(async (req: Request, res: Response) => {
   const id = String(req.params.id);
-  const product = await service.discontinue(id);
+  const product = await service.discontinue(id, req.user?.id || null);
   res.json({ success: true, data: product });
 });

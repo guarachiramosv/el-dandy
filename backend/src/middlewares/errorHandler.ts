@@ -38,9 +38,16 @@ export const errorHandler = (
     });
   }
 
+  if (err.clientVersion && status >= 500) {
+    return res.status(503).json({
+      success: false,
+      error: 'No se pudo conectar con la base de datos. Intenta nuevamente en unos segundos.',
+    });
+  }
+
   // Generic fallback
   res.status(status).json({
     success: false,
-    error: err.message || 'Internal Server Error',
+    error: status >= 500 ? 'Error interno del servidor' : err.message || 'Internal Server Error',
   });
 };

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRightLeft, Box, Download, Eye, History, ImageIcon, Printer, Search, ShoppingCart, X } from "lucide-react";
-import { Product, StockMovement } from "../types";
+import { Product, ProductBranchStock, StockMovement } from "../types";
 import { useProducts } from "../hooks/useProducts";
 import { fetchStockMovements, transferStock } from "../services/inventory";
 import { getCurrentUser } from "../services/auth";
-import { fetchProductInventoryReport, ProductInventoryReport, ReportPeriod } from "../services/reports";
+import { fetchProductAuditReport, fetchProductInventoryReport, ProductAuditReport, ProductInventoryReport, ReportPeriod } from "../services/reports";
 import ImageLightbox from "../components/ImageLightbox";
 import { productImageUrl } from "../utils/images";
 import { getErrorMessage } from "../utils/errors";
@@ -25,6 +25,18 @@ const valueForPeriod = (period: ReportPeriod, day: string, month: string, year: 
 
 const inventoryShelf = (ubicacion?: string | null) => ubicacion?.trim() || "Sin estante";
 const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
+
+const auditActionLabel: Record<string, string> = {
+  CREADO: "Creado",
+  EDITADO: "Editado",
+  STOCK_AGREGADO: "Stock agregado",
+  STOCK_AJUSTADO: "Stock ajustado",
+  ESTADO_CAMBIADO: "Estado cambiado",
+  ELIMINADO: "Eliminado",
+  RESTAURADO: "Restaurado",
+  DESCONTINUADO: "Descontinuado",
+  TRANSFERIDO: "Transferido",
+};
 
 const sanitizePdfText = (value: string) =>
   Array.from(value)
@@ -175,6 +187,73 @@ const downloadInventoryPdf = (report: ProductInventoryReport) => {
   URL.revokeObjectURL(url);
 };
 
+const csvCell = (value: unknown) => {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const stringifyAuditChanges = (changes: unknown) => {
+  if (!changes) return "";
+  if (typeof changes === "string") return changes;
+  try {
+    return JSON.stringify(changes);
+  } catch {
+    return String(changes);
+  }
+};
+
+const downloadProductAuditCsv = (report: ProductAuditReport) => {
+  const headers = [
+    "Fecha y hora",
+    "Accion",
+    "Codigo",
+    "Codigo repuesto",
+    "Producto",
+    "Marca",
+    "Sucursal",
+    "Estante",
+    "Usuario",
+    "Email usuario",
+    "Stock anterior",
+    "Stock nuevo",
+    "Cantidad",
+    "Estado anterior",
+    "Estado nuevo",
+    "Detalle",
+    "Cambios",
+  ];
+  const rows = report.items.map((item) => [
+    new Date(item.fecha).toLocaleString("es-BO"),
+    auditActionLabel[item.accion] || item.accion,
+    item.codigo,
+    item.codigoRepuesto || "",
+    item.descripcion,
+    item.marca || "",
+    item.sucursal,
+    item.ubicacion || "",
+    item.usuario,
+    item.usuarioEmail || "",
+    item.stockAnterior ?? "",
+    item.stockNuevo ?? "",
+    item.cantidad ?? "",
+    item.estadoAnterior || "",
+    item.estadoNuevo || "",
+    item.detalle || "",
+    stringifyAuditChanges(item.cambios),
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(";")).join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeLabel = report.label.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+  link.href = url;
+  link.download = `historial-inventario-${safeLabel || report.period}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export default function Inventario() {
   const navigate = useNavigate();
   const user = getCurrentUser();
@@ -188,6 +267,8 @@ export default function Inventario() {
   const [tab, setTab] = useState<"PRODUCTOS" | "KARDEX" | "TRANSFERIR">("PRODUCTOS");
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
+  const [originSearch, setOriginSearch] = useState("");
+  const [destinationSearch, setDestinationSearch] = useState("");
   const [cantidad, setCantidad] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; alt: string } | null>(null);
@@ -199,6 +280,7 @@ export default function Inventario() {
   const [inventoryReport, setInventoryReport] = useState<ProductInventoryReport | null>(null);
   const [printingReport, setPrintingReport] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [downloadingAuditReport, setDownloadingAuditReport] = useState(false);
 
   const loadMovements = useCallback(() => fetchStockMovements().then(setMovements).catch((err: unknown) => setMessage(getErrorMessage(err))), []);
 
@@ -228,6 +310,54 @@ export default function Inventario() {
     );
   }, [products, searchTerm]);
 
+  const selectedOrigin = useMemo(() => products.find((product) => product.id === origen) || null, [products, origen]);
+  const selectedDestination = useMemo(() => selectedOrigin?.stockSucursales?.find((branch) => branch.sucursalId === destino) || null, [destino, selectedOrigin]);
+  const transferSearchFields = useCallback((product: Product) => [
+    { value: product.codigo, weight: 2 },
+    { value: product.codigoRepuesto, weight: 1.9 },
+    { value: product.descripcion, weight: 1.5 },
+    { value: product.ubicacion, weight: 1.25 },
+    { value: product.marca, weight: 1 },
+    { value: product.sucursal?.nombre, weight: 0.8 },
+  ], []);
+  const branchTransferLabel = useCallback((branch: ProductBranchStock) =>
+    `${selectedOrigin?.codigo || ""} - ${selectedOrigin?.descripcion || ""} - ${branch.sucursal?.nombre || "Sucursal"} - Estante ${inventoryShelf(branch.ubicacion || (selectedOrigin?.sucursalId === branch.sucursalId ? selectedOrigin?.ubicacion : null))} - Stock ${branch.stock} ${selectedOrigin ? getUnitLabel(selectedOrigin) : "u"}`,
+  [selectedOrigin]);
+  const originOptions = useMemo(() => {
+    if (!originSearch.trim()) return products;
+    return filterAndSortBySearch(products, originSearch, transferSearchFields, (product) => product.descripcion);
+  }, [originSearch, products, transferSearchFields]);
+  const destinationOptions = useMemo(() => {
+    if (!selectedOrigin) return [];
+    return (selectedOrigin.stockSucursales || []).filter((branch) =>
+      branch.sucursalId !== selectedOrigin.sucursalId &&
+      branch.activo !== false &&
+      branch.estado !== "INACTIVO" &&
+      branch.estado !== "DESCONTINUADO"
+    );
+  }, [selectedOrigin]);
+  const filteredDestinationOptions = useMemo(() => {
+    if (!destinationSearch.trim()) return destinationOptions;
+    const term = destinationSearch.trim().toLowerCase();
+    return destinationOptions.filter((branch) =>
+      selectedOrigin?.codigo.toLowerCase().includes(term) ||
+      selectedOrigin?.descripcion.toLowerCase().includes(term) ||
+      selectedOrigin?.marca.toLowerCase().includes(term) ||
+      branch.sucursal?.nombre?.toLowerCase().includes(term) ||
+      branch.ubicacion?.toLowerCase().includes(term)
+    );
+  }, [destinationOptions, destinationSearch, selectedOrigin]);
+
+  useEffect(() => {
+    if (!selectedOrigin || !destino) return;
+    const stillValid = destinationOptions.some((branch) => branch.sucursalId === destino);
+    if (!stillValid) setDestino("");
+  }, [destinationOptions, destino, selectedOrigin]);
+
+  useEffect(() => {
+    setDestinationSearch("");
+  }, [origen]);
+
   const getCoverImage = (product: Product) => product.imagenes?.[0]?.url || product.imagen;
   const getProductImages = (product: Product) => {
     const urls = [
@@ -237,6 +367,8 @@ export default function Inventario() {
     return Array.from(new Set(urls)).map((url) => productImageUrl(url)).filter((url): url is string => Boolean(url));
   };
   const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
+  const productTransferLabel = (product: Product) =>
+    `${product.codigo} - ${product.descripcion} - ${product.sucursal?.nombre || "Sucursal"} - Estante ${inventoryShelf(product.ubicacion)} - Stock ${product.stock} ${getUnitLabel(product)}`;
 
   const sendToPointOfSale = (product: Product) => {
     if (!isSeller) return;
@@ -249,9 +381,30 @@ export default function Inventario() {
 
   const submitTransfer = async () => {
     if (!user) return setMessage("Sesion requerida");
+    if (!selectedOrigin) return setMessage("Selecciona el producto que sale de la sucursal origen.");
+    if (!selectedDestination) return setMessage("Selecciona la sucursal destino para el mismo codigo.");
+    if (selectedOrigin.sucursalId === selectedDestination.sucursalId) {
+      return setMessage("La sucursal origen y destino deben ser diferentes.");
+    }
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return setMessage("La cantidad debe ser mayor a cero.");
+    if (selectedOrigin.stock < cantidad) {
+      return setMessage(`Stock insuficiente en ${selectedOrigin.sucursal?.nombre || "origen"}. Disponible: ${selectedOrigin.stock}`);
+    }
     try {
-      await transferStock({ productoOrigenId: origen, productoDestinoId: destino, cantidad, usuarioId: user.id });
-      setMessage("Transferencia registrada con movimientos dobles.");
+      await transferStock({
+        productoOrigenId: selectedOrigin.id,
+        productoDestinoId: selectedOrigin.id,
+        sucursalOrigenId: selectedOrigin.sucursalId,
+        sucursalDestinoId: selectedDestination.sucursalId,
+        cantidad,
+        usuarioId: user.id,
+      });
+      setMessage(`Transferencia registrada: ${cantidad} ${getUnitLabel(selectedOrigin)} de ${selectedOrigin.sucursal?.nombre || "origen"} a ${selectedDestination.sucursal?.nombre || "destino"}.`);
+      setOrigen("");
+      setDestino("");
+      setOriginSearch("");
+      setDestinationSearch("");
+      setCantidad(1);
       loadMovements();
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
@@ -318,6 +471,23 @@ export default function Inventario() {
     }
   };
 
+  const handleDownloadAuditReport = async () => {
+    if (isSeller) {
+      setMessage("El vendedor solo puede consultar inventario.");
+      return;
+    }
+    setMessage(null);
+    setDownloadingAuditReport(true);
+    try {
+      const report = await fetchProductAuditReport({ period: "all" });
+      downloadProductAuditCsv(report);
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err, "No se pudo descargar el historial de cambios."));
+    } finally {
+      setDownloadingAuditReport(false);
+    }
+  };
+
   if (loading) return <div className="p-6 text-white">Cargando inventario...</div>;
   if (error) return <div className="p-6 text-red-400">{error}</div>;
 
@@ -372,7 +542,7 @@ export default function Inventario() {
               </div>
 
               {!isSeller && (
-                <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_repeat(3,minmax(150px,180px))]">
+                <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_repeat(4,minmax(150px,180px))]">
                   <select className="premium-input h-14 rounded-lg py-0 text-base" value={printPeriod} onChange={(event) => setPrintPeriod(event.target.value as ReportPeriod)}>
                     <option value="day">Imprimir por dia</option>
                     <option value="month">Imprimir por mes</option>
@@ -381,14 +551,17 @@ export default function Inventario() {
                   {printPeriod === "day" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="date" value={printDay} onChange={(event) => setPrintDay(event.target.value)} />}
                   {printPeriod === "month" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="month" value={printMonth} onChange={(event) => setPrintMonth(event.target.value)} />}
                   {printPeriod === "year" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="number" min="2020" max="2100" value={printYear} onChange={(event) => setPrintYear(event.target.value)} />}
-                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Printer size={18} /> {printingReport ? "Preparando..." : "Imprimir"}
                   </button>
-                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Download size={18} /> {downloadingReport ? "Descargando..." : "Descargar periodo"}
                   </button>
-                  <button onClick={handleDownloadAllInventory} disabled={printingReport || downloadingReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                  <button onClick={handleDownloadAllInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Download size={18} /> Descargar todo historico
+                  </button>
+                  <button onClick={handleDownloadAuditReport} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                    <Download size={18} /> {downloadingAuditReport ? "Descargando..." : "Historial cambios"}
                   </button>
                 </div>
               )}
@@ -519,27 +692,80 @@ export default function Inventario() {
       )}
 
       {!isSeller && tab === "TRANSFERIR" && (
-        <div className="glass-panel max-w-3xl space-y-4 p-5">
+        <div className="glass-panel max-w-4xl space-y-5 p-5">
           <h3 className="flex gap-2 text-xl font-bold text-white">
             <ArrowRightLeft className="text-primary" /> Transferencia entre sucursales
           </h3>
-          <select className="premium-input" value={origen} onChange={(event) => setOrigen(event.target.value)}>
-            <option value="">Producto origen</option>
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.codigo} · {product.descripcion} · {product.sucursal?.nombre} · Stock {product.stock} {getUnitLabel(product)}
-              </option>
-            ))}
-          </select>
-          <select className="premium-input" value={destino} onChange={(event) => setDestino(event.target.value)}>
-            <option value="">Producto destino</option>
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.codigo} · {product.descripcion} · {product.sucursal?.nombre}
-              </option>
-            ))}
-          </select>
-          <input type="number" min="1" className="premium-input" value={cantidad} onChange={(event) => setCantidad(Number(event.target.value))} />
+          <label className="block space-y-2">
+            <span className="text-sm font-bold uppercase text-gray-400">Sale de sucursal origen</span>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <input
+                className="premium-input pl-9"
+                placeholder="Buscar origen por codigo o nombre..."
+                value={originSearch}
+                onChange={(event) => setOriginSearch(event.target.value)}
+              />
+            </div>
+            <select className="premium-input" value={origen} onChange={(event) => setOrigen(event.target.value)}>
+              <option value="">Elegir producto que sale</option>
+              {originOptions.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {productTransferLabel(product)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-2">
+            <span className="text-sm font-bold uppercase text-gray-400">Entra a sucursal destino</span>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <input
+                className="premium-input pl-9 disabled:opacity-60"
+                placeholder={selectedOrigin ? "Buscar destino por codigo o nombre..." : "Primero elige el origen"}
+                value={destinationSearch}
+                onChange={(event) => setDestinationSearch(event.target.value)}
+                disabled={!selectedOrigin}
+              />
+            </div>
+            <select className="premium-input" value={destino} onChange={(event) => setDestino(event.target.value)} disabled={!selectedOrigin}>
+              <option value="">{selectedOrigin ? "Elegir destino del mismo codigo" : "Primero elige el origen"}</option>
+              {filteredDestinationOptions.map((branch) => (
+                <option key={branch.sucursalId} value={branch.sucursalId}>
+                  {branchTransferLabel(branch)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block max-w-xs space-y-2">
+            <span className="text-sm font-bold uppercase text-gray-400">Cantidad a mover</span>
+            <input type="number" min="1" className="premium-input" value={cantidad} onChange={(event) => setCantidad(Number(event.target.value))} />
+          </label>
+          {selectedOrigin && destinationOptions.length === 0 && (
+            <p className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm font-semibold text-yellow-100">
+              No hay otra sucursal activa preparada para el codigo {selectedOrigin.codigo}. Agrega el producto en la sucursal destino con stock 0 antes de transferir.
+            </p>
+          )}
+          {selectedOrigin && selectedDestination && (
+            <div className="grid gap-3 rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-gray-200 md:grid-cols-[1fr_auto_1fr]">
+              <div>
+                <p className="font-bold uppercase text-primary-light">Salida</p>
+                <p className="mt-1 text-white">{selectedOrigin.codigo} - {selectedOrigin.descripcion}</p>
+                <p>{selectedOrigin.sucursal?.nombre || "Sucursal"} - Estante {inventoryShelf(selectedOrigin.ubicacion)} - Stock actual {selectedOrigin.stock} {getUnitLabel(selectedOrigin)}</p>
+              </div>
+              <div className="flex items-center justify-center text-primary">
+                <ArrowRightLeft size={22} />
+              </div>
+              <div>
+                <p className="font-bold uppercase text-primary-light">Entrada</p>
+                <p className="mt-1 text-white">{selectedOrigin.codigo} - {selectedOrigin.descripcion}</p>
+                <p>{selectedDestination.sucursal?.nombre || "Sucursal"} - Estante {inventoryShelf(selectedDestination.ubicacion || (selectedOrigin.sucursalId === selectedDestination.sucursalId ? selectedOrigin.ubicacion : null))} - Stock actual {selectedDestination.stock} {getUnitLabel(selectedOrigin)}</p>
+              </div>
+              <p className="text-base font-black text-white md:col-span-3">
+                Se moveran {cantidad || 0} {getUnitLabel(selectedOrigin)} de {selectedOrigin.sucursal?.nombre || "origen"} a {selectedDestination.sucursal?.nombre || "destino"}.
+              </p>
+            </div>
+          )}
           <button onClick={submitTransfer} className="btn-primary">Transferir stock</button>
         </div>
       )}
