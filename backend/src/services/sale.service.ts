@@ -534,11 +534,11 @@ export class SaleService {
     });
   }
 
-  async deleteSale(id: string) {
+  async deleteSale(id: string, motivo: string = 'Anulación de venta') {
     return prisma.$transaction(async (tx) => {
       const venta = await tx.venta.findUnique({
         where: { id },
-        include: { detalles: true }
+        include: { detalles: true, remachadoTrabajos: true }
       });
       if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
 
@@ -597,7 +597,7 @@ export class SaleService {
                   usuarioId: venta.usuarioId,
                   referenciaId: venta.id,
                   referenciaTipo: 'ANULACION',
-                  notas: 'Venta anulada'
+                  notas: `Venta anulada - Motivo: ${motivo}`
                 }
               });
             }
@@ -605,8 +605,53 @@ export class SaleService {
         }
       }
 
-      await tx.remachadoMovimiento.deleteMany({
-        where: { trabajo: { ventaId: id } }
+      for (const trabajo of venta.remachadoTrabajos) {
+        const medida = await tx.remachadoMedida.findUnique({ where: { id: trabajo.medidaId } });
+        if (medida) {
+          const stockNuevo = medida.stockJuegos + trabajo.cantidadJuegos;
+          await tx.remachadoMedida.update({
+            where: { id: trabajo.medidaId },
+            data: { stockJuegos: stockNuevo }
+          });
+          await tx.remachadoMovimiento.create({
+            data: {
+              tipo: 'AJUSTE',
+              medidaId: trabajo.medidaId,
+              usuarioId: venta.usuarioId,
+              stockAnterior: medida.stockJuegos,
+              stockNuevo,
+              cantidad: trabajo.cantidadJuegos,
+              notas: `Venta anulada - Motivo: ${motivo}`
+            }
+          });
+        }
+        
+        if (trabajo.remacheId) {
+          const remache = await tx.remachadoRemache.findUnique({ where: { id: trabajo.remacheId } });
+          if (remache) {
+            const stockNuevo = remache.stock + trabajo.cantidadRemaches;
+            await tx.remachadoRemache.update({
+              where: { id: trabajo.remacheId },
+              data: { stock: stockNuevo }
+            });
+            await tx.remachadoMovimiento.create({
+              data: {
+                tipo: 'AJUSTE',
+                remacheId: trabajo.remacheId,
+                usuarioId: venta.usuarioId,
+                stockAnterior: remache.stock,
+                stockNuevo,
+                cantidad: trabajo.cantidadRemaches,
+                notas: `Venta anulada - Motivo: ${motivo}`
+              }
+            });
+          }
+        }
+      }
+
+      await tx.remachadoMovimiento.updateMany({
+        where: { trabajo: { ventaId: id } },
+        data: { trabajoId: null }
       });
       await tx.remachadoTrabajo.deleteMany({
         where: { ventaId: id }

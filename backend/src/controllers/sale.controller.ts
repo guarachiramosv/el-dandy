@@ -62,9 +62,11 @@ export const getPendingCashClosings = asyncHandler(async (req: Request, res: Res
 
 export const deleteSale = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
+  const { motivo } = req.body;
   if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
+  if (!motivo || !motivo.trim()) return res.status(400).json({ success: false, error: 'El motivo es requerido para anular' });
   
-  await service.deleteSale(String(id));
+  await service.deleteSale(String(id), String(motivo));
   res.json({ success: true, message: 'Venta anulada correctamente' });
 });
 

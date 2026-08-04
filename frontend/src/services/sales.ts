@@ -38,7 +38,9 @@ export const updateSalePaymentMethod = async (id: string, metodoPago: 'EFECTIVO'
   return response.data.data;
 };
 
-export const deleteSale = async (id: string): Promise<{ success: boolean }> => {
-  const response = await api.delete<{ success: boolean; message: string }>(`/sales/${id}`);
-  return response.data;
+export const deleteSale = async (id: string, motivo: string): Promise<void> => {
+  const response = await api.delete<{ success: boolean; message: string }>(`/sales/${id}`, { data: { motivo } });
+  if (!response.data.success) {
+    throw new Error(response.data.message);
+  }
 };

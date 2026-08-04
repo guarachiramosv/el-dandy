@@ -189,11 +189,10 @@ export default function HistorialVentas() {
     }
   };
 
-  const handleVoidSale = async (sale: Sale) => {
+  const handleVoidSale = async (sale: Sale, motivo: string) => {
     try {
-      await deleteSale(sale.id);
-      setSelectedSale(null);
-      setMessage("Venta anulada correctamente. Los productos han vuelto al inventario.");
+      await deleteSale(sale.id, motivo);
+      alert("Venta anulada correctamente. Los productos han sido devueltos al inventario.");
       await loadSummary();
     } catch (err: unknown) {
       alert(getErrorMessage(err));
@@ -501,7 +500,7 @@ export default function HistorialVentas() {
             setSelectedSale({ ...selectedSale, metodoPago: newMethod });
             loadSummary();
           }} 
-          onVoid={() => handleVoidSale(selectedSale)}
+          onVoid={(motivo) => handleVoidSale(selectedSale, motivo)}
           isClosed={Boolean(summary?.cerrado)}
         />
       )}
@@ -548,12 +547,13 @@ function SaleDetailModal({
   onPrint: () => void;
   onRegisterCreditPayment: (sale: Sale) => void;
   onPaymentUpdated: (method: "EFECTIVO" | "QR") => void;
-  onVoid: () => Promise<void>;
+  onVoid: (motivo: string) => Promise<void>;
   isClosed: boolean;
 }) {
   const [updating, setUpdating] = useState(false);
   const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
   const [confirmVoid, setConfirmVoid] = useState(false);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const creditBalance = sale.cuenta?.saldo || 0;
 
   const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
@@ -688,21 +688,39 @@ function SaleDetailModal({
 
       {confirmVoid && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmVoid(false)} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setConfirmVoid(false); setMotivoAnulacion(""); }} />
           <div className="relative w-full max-w-sm rounded-2xl border border-red-900/50 bg-grafito-800 shadow-premium p-6 text-center">
             <h3 className="text-xl font-bold text-red-400 mb-2">Anular venta</h3>
-            <p className="text-gray-300 mb-6">
-              ¿Seguro que deseas anular esta venta? Los productos volverán al inventario y esta acción no se puede deshacer.
+            <p className="text-gray-300 mb-4 text-sm">
+              ¿Seguro que deseas anular esta venta? Los productos y balatas volverán al inventario y esta acción no se puede deshacer.
             </p>
+            
+            <div className="text-left mb-6">
+              <label className="block text-xs font-semibold text-gray-400 mb-1">Motivo de anulación <span className="text-red-500">*</span></label>
+              <textarea
+                value={motivoAnulacion}
+                onChange={(e) => setMotivoAnulacion(e.target.value)}
+                className="w-full bg-grafito-900 border border-gray-700 rounded-lg p-2 text-white text-sm focus:outline-none focus:border-red-500"
+                placeholder="Escribe el motivo..."
+                rows={2}
+                disabled={updating}
+              />
+            </div>
+
             <div className="flex justify-center gap-3">
-              <button onClick={() => setConfirmVoid(false)} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
+              <button onClick={() => { setConfirmVoid(false); setMotivoAnulacion(""); }} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
               <button onClick={() => {
+                if (!motivoAnulacion.trim()) {
+                  alert("Por favor ingresa un motivo para anular la venta");
+                  return;
+                }
                 setUpdating(true);
-                onVoid().finally(() => {
+                onVoid(motivoAnulacion).finally(() => {
                   setUpdating(false);
                   setConfirmVoid(false);
+                  setMotivoAnulacion("");
                 });
-              }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 w-full" disabled={updating}>
+              }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50 w-full" disabled={updating || !motivoAnulacion.trim()}>
                 {updating ? "Anulando..." : "Sí, anular"}
               </button>
             </div>
