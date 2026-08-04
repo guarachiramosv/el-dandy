@@ -37,3 +37,8 @@ export const updateSalePaymentMethod = async (id: string, metodoPago: 'EFECTIVO'
   const response = await api.patch<{ success: boolean; data: Sale }>(`/sales/${id}/payment-method`, { metodoPago });
   return response.data.data;
 };
+
+export const deleteSale = async (id: string): Promise<{ success: boolean }> => {
+  const response = await api.delete<{ success: boolean; message: string }>(`/sales/${id}`);
+  return response.data;
+};

@@ -60,6 +60,14 @@ export const getPendingCashClosings = asyncHandler(async (req: Request, res: Res
   res.json({ success: true, data });
 });
 
+export const deleteSale = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
+  
+  await service.deleteSale(String(id));
+  res.json({ success: true, message: 'Venta anulada correctamente' });
+});
+
 export const closeCashRegister = asyncHandler(async (req: Request, res: Response) => {
   const parsed = closeCashRegisterSchema.parse(req.body);
   const usuarioId = req.user?.id ?? String(req.body.usuarioId || '');

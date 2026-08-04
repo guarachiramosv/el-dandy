@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { closeCashRegister, createCashExpense, createSale, getAllSales, getDailySalesSummary, getPendingCashClosings, updatePaymentMethod } from '../controllers/sale.controller';
+import { closeCashRegister, createCashExpense, createSale, deleteSale, getAllSales, getDailySalesSummary, getPendingCashClosings, updatePaymentMethod } from '../controllers/sale.controller';
 
 const router = Router();
 
@@ -9,6 +9,7 @@ router.post('/expenses', createCashExpense);
 router.post('/close-cash', closeCashRegister);
 router.get('/', getAllSales);
 router.post('/', createSale);
+router.delete('/:id', deleteSale);
 router.patch('/:id/payment-method', updatePaymentMethod);
 
 export default router;

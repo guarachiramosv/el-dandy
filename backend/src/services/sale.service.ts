@@ -534,6 +534,91 @@ export class SaleService {
     });
   }
 
+  async deleteSale(id: string) {
+    return prisma.$transaction(async (tx) => {
+      const venta = await tx.venta.findUnique({
+        where: { id },
+        include: { detalles: true }
+      });
+      if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
+
+      const businessDay = getBusinessDay(venta.createdAt.toISOString());
+      const cierre = await tx.cierreCaja.findFirst({
+        where: {
+          fecha: businessDay.start,
+          ...sellerBusinessDayScope(venta.usuarioId, venta.sucursalId),
+        }
+      });
+      if (cierre) {
+        throw Object.assign(new Error('No se puede anular la venta porque la caja de ese dia ya fue cerrada.'), { status: 409 });
+      }
+
+      for (const detalle of venta.detalles) {
+        if (detalle.tipoLinea === 'PRODUCTO' && detalle.productoId) {
+          const producto = await tx.producto.findUnique({
+            where: { id: detalle.productoId },
+            include: { stockSucursales: true }
+          });
+          
+          if (producto) {
+            const movimiento = await tx.movimientoStock.findFirst({
+              where: {
+                referenciaId: venta.id,
+                referenciaTipo: 'VENTA',
+                productoId: detalle.productoId
+              }
+            });
+
+            const sucursalIdTarget = movimiento ? movimiento.sucursalId : venta.sucursalId;
+            const targetStock = producto.stockSucursales.find(s => s.sucursalId === sucursalIdTarget);
+            
+            if (targetStock) {
+              const stockAnterior = targetStock.stock;
+              const stockNuevo = stockAnterior + detalle.cantidad;
+
+              await tx.productoStockSucursal.update({
+                where: { productoId_sucursalId: { productoId: detalle.productoId, sucursalId: sucursalIdTarget } },
+                data: { stock: stockNuevo }
+              });
+
+              await tx.producto.update({
+                where: { id: detalle.productoId },
+                data: { stock: { increment: detalle.cantidad } }
+              });
+
+              await tx.movimientoStock.create({
+                data: {
+                  tipoMovimiento: 'AJUSTE',
+                  productoId: detalle.productoId,
+                  sucursalId: sucursalIdTarget,
+                  stockAnterior,
+                  stockNuevo,
+                  cantidad: detalle.cantidad,
+                  usuarioId: venta.usuarioId,
+                  referenciaId: venta.id,
+                  referenciaTipo: 'ANULACION',
+                  notas: 'Venta anulada'
+                }
+              });
+            }
+          }
+        }
+      }
+
+      await tx.remachadoMovimiento.deleteMany({
+        where: { trabajo: { ventaId: id } }
+      });
+      await tx.remachadoTrabajo.deleteMany({
+        where: { ventaId: id }
+      });
+      await tx.venta.delete({
+        where: { id }
+      });
+
+      return { success: true };
+    });
+  }
+
   async closeCashRegister(data: CloseCashRegisterInput) {
     const summary = await this.getDailySummary(data);
     if (summary.cierre) {

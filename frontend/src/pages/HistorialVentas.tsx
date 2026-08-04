@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } from "lucide-react";
 import { CashClosing, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
-import { closeCashRegister, createCashExpense, fetchDailySalesSummary, updateSalePaymentMethod } from "../services/sales";
+import { closeCashRegister, createCashExpense, fetchDailySalesSummary, updateSalePaymentMethod, deleteSale } from "../services/sales";
 import { addCreditPayment } from "../services/customers";
 import { getErrorMessage } from "../utils/errors";
 import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
@@ -186,6 +186,17 @@ export default function HistorialVentas() {
       setMessage(getErrorMessage(err));
     } finally {
       setSavingPayment(false);
+    }
+  };
+
+  const handleVoidSale = async (sale: Sale) => {
+    try {
+      await deleteSale(sale.id);
+      setSelectedSale(null);
+      setMessage("Venta anulada correctamente. Los productos han vuelto al inventario.");
+      await loadSummary();
+    } catch (err: unknown) {
+      alert(getErrorMessage(err));
     }
   };
 
@@ -490,6 +501,8 @@ export default function HistorialVentas() {
             setSelectedSale({ ...selectedSale, metodoPago: newMethod });
             loadSummary();
           }} 
+          onVoid={() => handleVoidSale(selectedSale)}
+          isClosed={Boolean(summary?.cerrado)}
         />
       )}
       {paymentSale && (
@@ -527,15 +540,20 @@ function SaleDetailModal({
   onPrint,
   onRegisterCreditPayment,
   onPaymentUpdated,
+  onVoid,
+  isClosed,
 }: {
   sale: Sale;
   onClose: () => void;
   onPrint: () => void;
   onRegisterCreditPayment: (sale: Sale) => void;
   onPaymentUpdated: (method: "EFECTIVO" | "QR") => void;
+  onVoid: () => Promise<void>;
+  isClosed: boolean;
 }) {
   const [updating, setUpdating] = useState(false);
   const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
+  const [confirmVoid, setConfirmVoid] = useState(false);
   const creditBalance = sale.cuenta?.saldo || 0;
 
   const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
@@ -632,6 +650,15 @@ function SaleDetailModal({
               ) : null}
             </div>
             <div className="flex gap-3">
+              {!isClosed && (
+                <button 
+                  onClick={() => setConfirmVoid(true)} 
+                  disabled={updating} 
+                  className="rounded-lg px-4 py-2 font-semibold text-sm border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition disabled:opacity-50 flex items-center justify-center"
+                >
+                  Anular
+                </button>
+              )}
               <button onClick={onClose} className="btn-secondary">Cerrar</button>
               <button onClick={onPrint} className="btn-primary flex items-center gap-2">
                 <Printer size={18} /> Imprimir detalle
@@ -653,6 +680,30 @@ function SaleDetailModal({
               <button onClick={() => setConfirmMethod(null)} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
               <button onClick={() => handleUpdatePayment(confirmMethod)} className="btn-primary w-full" disabled={updating}>
                 {updating ? "Guardando..." : "Sí, cambiar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmVoid && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmVoid(false)} />
+          <div className="relative w-full max-w-sm rounded-2xl border border-red-900/50 bg-grafito-800 shadow-premium p-6 text-center">
+            <h3 className="text-xl font-bold text-red-400 mb-2">Anular venta</h3>
+            <p className="text-gray-300 mb-6">
+              ¿Seguro que deseas anular esta venta? Los productos volverán al inventario y esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button onClick={() => setConfirmVoid(false)} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
+              <button onClick={() => {
+                setUpdating(true);
+                onVoid().finally(() => {
+                  setUpdating(false);
+                  setConfirmVoid(false);
+                });
+              }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 w-full" disabled={updating}>
+                {updating ? "Anulando..." : "Sí, anular"}
               </button>
             </div>
           </div>
