@@ -83,7 +83,19 @@ export class UserService {
   }
 
   async verifyLogin(email: string, password: string) {
-    const user = await prisma.usuario.findFirst({ where: { email } });
+    const user = await prisma.usuario.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        nombre: true,
+        email: true,
+        password: true,
+        role: true,
+        activo: true,
+        sucursalId: true,
+        createdAt: true,
+      },
+    });
     if (!user || !user.activo) return null;
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return null;

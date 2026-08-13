@@ -314,7 +314,7 @@ export default function Remachado() {
             th { background: #f0f0f0; }
             .right { text-align: right; }
             .center { text-align: center; }
-            @media print { body { margin: 10mm; } }
+            @media print { @page { size: letter landscape; margin: 10mm; } body { margin: 0; } }
           </style>
         </head>
         <body>

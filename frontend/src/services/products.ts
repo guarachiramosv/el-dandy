@@ -14,10 +14,16 @@ export const fetchProducts = async (status: ProductStatusFilter = 'active'): Pro
 
 export const searchProductsForSale = async (search: string): Promise<Product[]> => {
   const response = await api.get<{ success: boolean; data: PaginatedProducts }>("/products", {
-    params: { page: 1, limit: 40, status: 'active', scope: 'all', search },
+    params: { page: 1, limit: 40, status: 'active', scope: 'all', view: 'sale', search },
   });
   if (!response.data.success) throw new Error("Failed to search products");
   return response.data.data.items;
+};
+
+export const fetchProductById = async (id: string): Promise<Product> => {
+  const response = await api.get<{ success: boolean; data: Product }>(`/products/${id}`);
+  if (!response.data.success) throw new Error("Failed to fetch product");
+  return response.data.data;
 };
 
 export const createProduct = async (product: Omit<Product, "id" | "createdAt" | "updatedAt">): Promise<Product> => {

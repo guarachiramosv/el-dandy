@@ -78,6 +78,11 @@ export const getCustomerHistory = asyncHandler(async (req: Request, res: Respons
 
 export const getCustomerCatalog = asyncHandler(async (req: Request, res: Response) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-  const products = await productService.getCustomerCatalog({ search });
-  res.json({ success: true, data: products });
+  const paginated = req.query.page !== undefined || req.query.limit !== undefined;
+  const result = await productService.getCustomerCatalog({
+    search,
+    page: Number(req.query.page),
+    limit: Number(req.query.limit),
+  });
+  res.json({ success: true, data: paginated ? result : result.items });
 });

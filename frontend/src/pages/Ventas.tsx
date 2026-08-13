@@ -12,11 +12,10 @@ import {
   X,
 } from "lucide-react";
 import { Customer, DailySalesSummary, PaymentMethod, Product, Sale } from "../types";
-import { useProducts } from "../hooks/useProducts";
 import { createSale, fetchDailySalesSummary } from "../services/sales";
 import { getCurrentUser } from "../services/auth";
 import { createCustomer, fetchCustomers, updateCustomer } from "../services/customers";
-import { searchProductsForSale } from "../services/products";
+import { fetchProductById, searchProductsForSale } from "../services/products";
 import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
 import { filterAndSortBySearch, getSearchTerms, normalizeSearchText } from "../utils/fuzzySearch";
 
@@ -56,10 +55,6 @@ export default function Ventas() {
   const location = useLocation();
   const navigate = useNavigate();
   const productToAddFromInventory = (location.state as { addProductId?: string } | null)?.addProductId;
-  const { data: products, loading, error, refetch: refetchProducts } = useProducts("active", {
-    scope: "all",
-    refreshIntervalMs: 10000,
-  });
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySalesSummary | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -157,7 +152,7 @@ export default function Ventas() {
   const filteredProducts = useMemo(() => {
     const terms = getSearchTerms(searchTerm);
     if (terms.length === 0) return [];
-    const sourceProducts = Array.from(new Map([...products, ...searchResults].map((product) => [product.id, product])).values());
+    const sourceProducts = Array.from(new Map(searchResults.map((product) => [product.id, product])).values());
     return filterAndSortBySearch(
       sourceProducts,
       searchTerm,
@@ -173,7 +168,7 @@ export default function Ventas() {
       ],
       (product) => product.descripcion,
     );
-  }, [products, searchResults, searchTerm]);
+  }, [searchResults, searchTerm]);
 
   const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
   const totalQuantity = cart.reduce((acc, item) => acc + item.cantidad, 0);
@@ -220,19 +215,27 @@ export default function Ventas() {
   }, [cart, getAvailableStock]);
 
   useEffect(() => {
-    if (!productToAddFromInventory || products.length === 0) return;
+    if (!productToAddFromInventory) return;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      const product = products.find((item) => item.id === productToAddFromInventory);
-      if (product) {
+      fetchProductById(productToAddFromInventory)
+        .then((product) => {
+          if (cancelled) return;
         const added = addToCart(product);
         if (added) setMessage("Producto agregado al carrito desde Inventario.");
-      } else {
-        setMessage("No se encontro el producto seleccionado desde Inventario.");
-      }
-      navigate(".", { replace: true, state: null });
+        })
+        .catch(() => {
+          if (!cancelled) setMessage("No se encontro el producto seleccionado desde Inventario.");
+        })
+        .finally(() => {
+          if (!cancelled) navigate(".", { replace: true, state: null });
+        });
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, [addToCart, navigate, productToAddFromInventory, products]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [addToCart, navigate, productToAddFromInventory]);
 
   const changeQuantity = (productId: string, delta: number) => {
     setCart((prev) =>
@@ -332,7 +335,7 @@ export default function Ventas() {
       setInvoiceCustomerPhone("");
       setLastSale(sale);
       setMessage("Venta registrada correctamente. Ya paso a historial.");
-      await Promise.all([refetchProducts(), loadDailySummary()]);
+      await loadDailySummary();
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
     } finally {
@@ -346,9 +349,6 @@ export default function Ventas() {
     printWindow.document.write(buildThermalReceiptHtml(sale, user?.nombre || ""));
     printWindow.document.close();
   };
-
-  if (loading) return <div className="p-6 text-white">Cargando productos...</div>;
-  if (error) return <div className="p-6 text-red-400">Error al cargar productos: {error}</div>;
 
   return (
     <div className="flex flex-col xl:flex-row h-full gap-6">

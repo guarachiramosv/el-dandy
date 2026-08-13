@@ -7,13 +7,14 @@ import { asyncHandler } from '../middlewares/asyncHandler';
 const service = new ProductService();
 
 export const getAllProducts = asyncHandler(async (req: Request, res: Response) => {
-  const { page, limit, search, status, scope } = req.query as any;
+  const { page, limit, search, status, scope, view } = req.query as any;
   const result = await service.getAll({
     page: Number(page),
     limit: Number(limit),
     search: search as string,
     status: status === 'inactive' || status === 'discontinued' || status === 'all' ? status : 'active',
     sucursalId: scope === 'branch' ? req.user?.sucursalId : undefined,
+    view: view === 'sale' ? 'sale' : 'full',
   });
   res.json({ success: true, data: result });
 });

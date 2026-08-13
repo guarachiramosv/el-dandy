@@ -5,7 +5,7 @@ import { Product, ProductBranchStock, StockMovement } from "../types";
 import { useProducts } from "../hooks/useProducts";
 import { fetchStockMovements, transferStock } from "../services/inventory";
 import { getCurrentUser } from "../services/auth";
-import { fetchProductAuditReport, fetchProductInventoryReport, ProductAuditReport, ProductInventoryReport, ReportPeriod } from "../services/reports";
+import { fetchProductInventoryReport, ProductInventoryReport, ReportPeriod } from "../services/reports";
 import ImageLightbox from "../components/ImageLightbox";
 import { productImageUrl } from "../utils/images";
 import { getErrorMessage } from "../utils/errors";
@@ -24,18 +24,64 @@ const valueForPeriod = (period: ReportPeriod, day: string, month: string, year: 
 };
 
 const inventoryShelf = (ubicacion?: string | null) => ubicacion?.trim() || "Sin estante";
-const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
+const salePriceValue = (item: { precioVenta?: number | null; precio?: number | null }) => {
+  const value = item.precioVenta ?? item.precio ?? 0;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+const salePriceLabel = (item: { precioVenta?: number | null; precio?: number | null }) =>
+  `Bs ${salePriceValue(item).toLocaleString("es-BO")}`;
 
-const auditActionLabel: Record<string, string> = {
-  CREADO: "Creado",
-  EDITADO: "Editado",
-  STOCK_AGREGADO: "Stock agregado",
-  STOCK_AJUSTADO: "Stock ajustado",
-  ESTADO_CAMBIADO: "Estado cambiado",
-  ELIMINADO: "Eliminado",
-  RESTAURADO: "Restaurado",
-  DESCONTINUADO: "Descontinuado",
-  TRANSFERIDO: "Transferido",
+const currentInventoryReportFromProducts = (products: Product[]): ProductInventoryReport => {
+  const now = new Date().toISOString();
+  const items = products.map((product) => ({
+    productoId: product.id,
+    codigo: product.codigo,
+    codigoRepuesto: product.codigoRepuesto,
+    descripcion: product.descripcion,
+    marca: product.marca,
+    condicion: product.condicion,
+    categoria: product.categoria?.nombre || "Sin categoria",
+    sucursal: product.sucursal?.nombre || "Sin sucursal",
+    sucursalId: product.sucursalId,
+    ubicacion: product.ubicacion,
+    precioVenta: salePriceValue(product),
+    fechaAgregado: product.createdAt,
+    agregadoEnPeriodo: false,
+    stockAlAgregar: null,
+    stockInicial: product.stock,
+    ingresados: 0,
+    vendidos: 0,
+    editados: 0,
+    otrosMovimientos: 0,
+    stockActual: product.stock,
+    stockMinimo: product.stockMinimo || 0,
+    stockSucursales: product.stockSucursales?.map((stock) => ({
+      sucursalId: stock.sucursalId,
+      sucursal: stock.sucursal?.nombre || "Sucursal",
+      stock: stock.stock,
+      fechaAgregado: stock.createdAt || product.createdAt,
+    })) || [],
+    movimientos: [],
+  }));
+  const stockActual = items.reduce((sum, item) => sum + item.stockActual, 0);
+
+  return {
+    period: "all",
+    label: "Inventario actual",
+    desde: now,
+    hasta: now,
+    totals: {
+      productos: items.length,
+      stockInicial: stockActual,
+      ingresados: 0,
+      vendidos: 0,
+      editados: 0,
+      otrosMovimientos: 0,
+      stockActual,
+    },
+    items,
+  };
 };
 
 const sanitizePdfText = (value: string) =>
@@ -67,35 +113,53 @@ const pdfFillRect = (x: number, y: number, width: number, height: number, color:
 const pdfLine = (x1: number, y1: number, x2: number, y2: number) =>
   `q 0.86 0.88 0.91 RG 0.5 w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q\n`;
 
-const inventoryPdfBytes = (report: ProductInventoryReport) => {
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
+const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "current" = "period") => {
+  const isCurrentInventory = variant === "current";
+  const pageWidth = isCurrentInventory ? 612 : 792;
+  const pageHeight = isCurrentInventory ? 792 : 612;
   const margin = 28;
-  const tableTop = 424;
-  const rowHeight = 24;
+  const tableTop = isCurrentInventory ? 682 : 438;
+  const rowHeight = isCurrentInventory ? 22 : 24;
   const bottom = 34;
   const rowsPerPage = Math.floor((tableTop - bottom) / rowHeight);
-  const columns = [
-    { label: "Codigo", x: 34, width: 46, chars: 9, align: "left" },
-    { label: "Producto", x: 88, width: 232, chars: 50, align: "left" },
-    { label: "Condicion", x: 330, width: 58, chars: 10, align: "left" },
-    { label: "Estante", x: 398, width: 104, chars: 20, align: "left" },
-    { label: "Stock inicio", x: 520, width: 70, chars: 10, align: "right" },
-    { label: "Agregado", x: 604, width: 70, chars: 10, align: "right" },
-    { label: "Vendido", x: 682, width: 60, chars: 10, align: "right" },
-    { label: "Stock actual", x: 754, width: 58, chars: 10, align: "right" },
-  ];
+  const columns = isCurrentInventory
+    ? [
+        { label: "Cod", x: 36, width: 42, chars: 8, align: "left" },
+        { label: "Nombre", x: 86, width: 238, chars: 48, align: "left" },
+        { label: "Cod producto", x: 332, width: 82, chars: 16, align: "left" },
+        { label: "Estante", x: 422, width: 54, chars: 10, align: "left" },
+        { label: "Precio", x: 484, width: 48, chars: 10, align: "right" },
+        { label: "Cantidad", x: 542, width: 38, chars: 8, align: "right" },
+      ]
+    : [
+        { label: "Codigo", x: 34, width: 46, chars: 9, align: "left" },
+        { label: "Producto", x: 88, width: 210, chars: 45, align: "left" },
+        { label: "Sucursal", x: 306, width: 78, chars: 16, align: "left" },
+        { label: "Estante", x: 392, width: 74, chars: 14, align: "left" },
+        { label: "Precio venta", x: 474, width: 68, chars: 12, align: "right" },
+        { label: "Stock inicio", x: 550, width: 64, chars: 10, align: "right" },
+        { label: "Vendido", x: 624, width: 52, chars: 9, align: "right" },
+        { label: "Stock actual", x: 684, width: 72, chars: 10, align: "right" },
+      ];
   const pages: string[] = [];
 
   for (let start = 0; start < report.items.length || start === 0; start += rowsPerPage) {
     const pageNumber = pages.length + 1;
     const pageItems = report.items.slice(start, start + rowsPerPage);
     let content = "";
-    content += pdfText("Reporte de inventario de productos", margin, 558, 16, true);
-    content += pdfText(`Periodo: ${report.label}`, margin, 538, 9);
-    content += pdfText("Sucursal: Todas", margin, 524, 9);
-    content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 510, 9);
-    content += pdfText(`Pagina ${pageNumber}`, 760, 558, 9, true);
+    if (isCurrentInventory) {
+      content += pdfText("Inventario actual para tienda", margin, 754, 16, true);
+      content += pdfText("Cod, nombre, cod producto, estante, precio y cantidad disponible", margin, 734, 9);
+      content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 720, 9);
+      content += pdfText(`Productos: ${report.totals.productos}   Stock total: ${report.totals.stockActual}`, margin, 706, 9, true);
+      content += pdfText(`Pagina ${pageNumber}`, 526, 754, 9, true);
+    } else {
+      content += pdfText("Reporte administrativo de inventario", margin, 574, 16, true);
+      content += pdfText(`Periodo: ${report.label}`, margin, 554, 9);
+      content += pdfText("Sucursal: Todas", margin, 540, 9);
+      content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 526, 9);
+      content += pdfText(`Pagina ${pageNumber}`, 710, 574, 9, true);
+    }
 
     const statWidth = 146;
     const stats = [
@@ -105,12 +169,14 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
       ["Vendido", report.totals.vendidos],
       ["Stock actual", report.totals.stockActual],
     ];
-    stats.forEach(([label, value], index) => {
-      const x = margin + index * (statWidth + 8);
-      content += pdfFillRect(x, 462, statWidth, 34, "0.96 0.97 0.98");
-      content += pdfText(label, x + 7, 482, 7, true);
-      content += pdfText(value, x + 7, 468, 11, true);
-    });
+    if (!isCurrentInventory) {
+      stats.forEach(([label, value], index) => {
+        const x = margin + index * (statWidth + 6);
+        content += pdfFillRect(x, 476, statWidth, 34, "0.96 0.97 0.98");
+        content += pdfText(label, x + 7, 496, 7, true);
+        content += pdfText(value, x + 7, 482, 11, true);
+      });
+    }
 
     content += pdfFillRect(margin, tableTop, pageWidth - margin * 2, 18, "0.94 0.95 0.97");
     columns.forEach((column) => {
@@ -119,16 +185,25 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
 
     pageItems.forEach((item, index) => {
       const y = tableTop - 19 - index * rowHeight;
-      const rowValues = [
-        item.codigo,
-        item.descripcion,
-        productConditionLabel(item.condicion),
-        inventoryShelf(item.ubicacion),
-        item.stockInicial,
-        item.ingresados,
-        item.vendidos,
-        item.stockActual,
-      ];
+      const rowValues = isCurrentInventory
+        ? [
+            item.codigo,
+            item.descripcion,
+            item.codigoRepuesto || "",
+            inventoryShelf(item.ubicacion),
+            salePriceLabel(item),
+            item.stockActual,
+          ]
+        : [
+            item.codigo,
+            item.descripcion,
+            item.sucursal,
+            inventoryShelf(item.ubicacion),
+            salePriceLabel(item),
+            item.stockInicial,
+            item.vendidos,
+            item.stockActual,
+          ];
       if (index % 2 === 1) content += pdfFillRect(margin, y - 4, pageWidth - margin * 2, rowHeight, "0.985 0.985 0.985");
       content += pdfLine(margin, y - 5, pageWidth - margin, y - 5);
       rowValues.forEach((value, valueIndex) => {
@@ -174,80 +249,13 @@ const inventoryPdfBytes = (report: ProductInventoryReport) => {
   return new Uint8Array(Array.from(pdf, (char) => char.charCodeAt(0) & 0xff));
 };
 
-const downloadInventoryPdf = (report: ProductInventoryReport) => {
-  const blob = new Blob([inventoryPdfBytes(report)], { type: "application/pdf" });
+const downloadInventoryPdf = (report: ProductInventoryReport, filePrefix = "inventario", variant: "period" | "current" = "period") => {
+  const blob = new Blob([inventoryPdfBytes(report, variant)], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const safeLabel = report.label.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
   link.href = url;
-  link.download = `inventario-${safeLabel || report.period}.pdf`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-};
-
-const csvCell = (value: unknown) => {
-  const text = value === null || value === undefined ? "" : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
-};
-
-const stringifyAuditChanges = (changes: unknown) => {
-  if (!changes) return "";
-  if (typeof changes === "string") return changes;
-  try {
-    return JSON.stringify(changes);
-  } catch {
-    return String(changes);
-  }
-};
-
-const downloadProductAuditCsv = (report: ProductAuditReport) => {
-  const headers = [
-    "Fecha y hora",
-    "Accion",
-    "Codigo",
-    "Codigo repuesto",
-    "Producto",
-    "Marca",
-    "Sucursal",
-    "Estante",
-    "Usuario",
-    "Email usuario",
-    "Stock anterior",
-    "Stock nuevo",
-    "Cantidad",
-    "Estado anterior",
-    "Estado nuevo",
-    "Detalle",
-    "Cambios",
-  ];
-  const rows = report.items.map((item) => [
-    new Date(item.fecha).toLocaleString("es-BO"),
-    auditActionLabel[item.accion] || item.accion,
-    item.codigo,
-    item.codigoRepuesto || "",
-    item.descripcion,
-    item.marca || "",
-    item.sucursal,
-    item.ubicacion || "",
-    item.usuario,
-    item.usuarioEmail || "",
-    item.stockAnterior ?? "",
-    item.stockNuevo ?? "",
-    item.cantidad ?? "",
-    item.estadoAnterior || "",
-    item.estadoNuevo || "",
-    item.detalle || "",
-    stringifyAuditChanges(item.cambios),
-  ]);
-  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(";")).join("\n");
-  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const safeLabel = report.label.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
-  link.href = url;
-  link.download = `historial-inventario-${safeLabel || report.period}.csv`;
+  link.download = `${filePrefix}-${safeLabel || report.period}.pdf`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -280,7 +288,7 @@ export default function Inventario() {
   const [inventoryReport, setInventoryReport] = useState<ProductInventoryReport | null>(null);
   const [printingReport, setPrintingReport] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
-  const [downloadingAuditReport, setDownloadingAuditReport] = useState(false);
+  const [downloadingCompleteInventory, setDownloadingCompleteInventory] = useState(false);
 
   const loadMovements = useCallback(() => fetchStockMovements().then(setMovements).catch((err: unknown) => setMessage(getErrorMessage(err))), []);
 
@@ -471,20 +479,21 @@ export default function Inventario() {
     }
   };
 
-  const handleDownloadAuditReport = async () => {
+  const handleDownloadCurrentInventory = async () => {
     if (isSeller) {
       setMessage("El vendedor solo puede consultar inventario.");
       return;
     }
     setMessage(null);
-    setDownloadingAuditReport(true);
+    setDownloadingCompleteInventory(true);
     try {
-      const report = await fetchProductAuditReport({ period: "all" });
-      downloadProductAuditCsv(report);
+      const report = currentInventoryReportFromProducts(products);
+      setInventoryReport(report);
+      downloadInventoryPdf(report, `inventario-actual-${defaultDay}`, "current");
     } catch (err: unknown) {
-      setMessage(getErrorMessage(err, "No se pudo descargar el historial de cambios."));
+      setMessage(getErrorMessage(err, "No se pudo descargar el inventario actual."));
     } finally {
-      setDownloadingAuditReport(false);
+      setDownloadingCompleteInventory(false);
     }
   };
 
@@ -542,7 +551,7 @@ export default function Inventario() {
               </div>
 
               {!isSeller && (
-                <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_repeat(4,minmax(150px,180px))]">
+                <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_repeat(4,minmax(150px,190px))]">
                   <select className="premium-input h-14 rounded-lg py-0 text-base" value={printPeriod} onChange={(event) => setPrintPeriod(event.target.value as ReportPeriod)}>
                     <option value="day">Imprimir por dia</option>
                     <option value="month">Imprimir por mes</option>
@@ -551,17 +560,17 @@ export default function Inventario() {
                   {printPeriod === "day" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="date" value={printDay} onChange={(event) => setPrintDay(event.target.value)} />}
                   {printPeriod === "month" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="month" value={printMonth} onChange={(event) => setPrintMonth(event.target.value)} />}
                   {printPeriod === "year" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="number" min="2020" max="2100" value={printYear} onChange={(event) => setPrintYear(event.target.value)} />}
-                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                  <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport || downloadingCompleteInventory} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Printer size={18} /> {printingReport ? "Preparando..." : "Imprimir"}
                   </button>
-                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                  <button onClick={handleDownloadInventory} disabled={printingReport || downloadingReport || downloadingCompleteInventory} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Download size={18} /> {downloadingReport ? "Descargando..." : "Descargar periodo"}
                   </button>
-                  <button onClick={handleDownloadAllInventory} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
-                    <Download size={18} /> Descargar todo historico
+                  <button onClick={handleDownloadAllInventory} disabled={printingReport || downloadingReport || downloadingCompleteInventory} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                    <Download size={18} /> Descargar historico
                   </button>
-                  <button onClick={handleDownloadAuditReport} disabled={printingReport || downloadingReport || downloadingAuditReport} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
-                    <Download size={18} /> {downloadingAuditReport ? "Descargando..." : "Historial cambios"}
+                  <button onClick={handleDownloadCurrentInventory} disabled={printingReport || downloadingReport || downloadingCompleteInventory} className="btn-secondary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
+                    <Download size={18} /> {downloadingCompleteInventory ? "Descargando..." : "Inventario actual"}
                   </button>
                 </div>
               )}
@@ -922,7 +931,7 @@ function InventoryPrintStyles() {
   return (
     <style>{`
       @media print {
-        @page { margin: 12mm; size: A4 landscape; }
+        @page { margin: 10mm; size: letter landscape; }
         html, body, #root {
           width: 100% !important;
           height: auto !important;
@@ -997,6 +1006,22 @@ function InventoryPrintStyles() {
           border-collapse: collapse !important;
           table-layout: fixed !important;
         }
+        #product-inventory-print th:nth-child(1),
+        #product-inventory-print td:nth-child(1) { width: 9% !important; }
+        #product-inventory-print th:nth-child(2),
+        #product-inventory-print td:nth-child(2) { width: 29% !important; }
+        #product-inventory-print th:nth-child(3),
+        #product-inventory-print td:nth-child(3) { width: 12% !important; }
+        #product-inventory-print th:nth-child(4),
+        #product-inventory-print td:nth-child(4) { width: 10% !important; }
+        #product-inventory-print th:nth-child(5),
+        #product-inventory-print td:nth-child(5) { width: 11% !important; }
+        #product-inventory-print th:nth-child(6),
+        #product-inventory-print td:nth-child(6) { width: 10% !important; }
+        #product-inventory-print th:nth-child(7),
+        #product-inventory-print td:nth-child(7) { width: 8% !important; }
+        #product-inventory-print th:nth-child(8),
+        #product-inventory-print td:nth-child(8) { width: 11% !important; }
         #product-inventory-print thead, #product-inventory-print th {
           background: #f3f4f6 !important;
           color: #111827 !important;
@@ -1029,7 +1054,7 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
   return (
     <div id="product-inventory-print" className="hidden print:block p-6">
       <div className="mb-5 border-b border-gray-300 pb-4">
-        <h1 className="text-2xl font-black text-gray-950">Reporte de inventario de productos</h1>
+        <h1 className="text-2xl font-black text-gray-950">Reporte administrativo de inventario</h1>
         <p className="text-sm text-gray-700">Periodo: {report.label}</p>
         <p className="text-sm text-gray-700">Sucursal: Todas</p>
         <p className="text-sm text-gray-700">Generado: {new Date().toLocaleString("es-BO")}</p>
@@ -1048,10 +1073,10 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
           <tr>
             <th className="p-2">Codigo</th>
             <th className="p-2">Producto</th>
-            <th className="p-2">Condicion</th>
+            <th className="p-2">Sucursal</th>
             <th className="p-2">Estante</th>
+            <th className="p-2 text-right">Precio venta</th>
             <th className="p-2 text-right">Stock inicio</th>
-            <th className="p-2 text-right">Agregado</th>
             <th className="p-2 text-right">Vendido</th>
             <th className="p-2 text-right">Stock actual</th>
           </tr>
@@ -1064,10 +1089,10 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
                 <p className="font-semibold">{item.descripcion}</p>
                 <p className="text-xs text-gray-600">{item.marca} - {item.categoria}</p>
               </td>
-              <td className="p-2">{productConditionLabel(item.condicion)}</td>
+              <td className="p-2">{item.sucursal}</td>
               <td className="p-2">{inventoryShelf(item.ubicacion)}</td>
+              <td className="p-2 text-right">{salePriceLabel(item)}</td>
               <td className="p-2 text-right">{item.stockInicial}</td>
-              <td className="p-2 text-right">{item.ingresados}</td>
               <td className="p-2 text-right">{item.vendidos}</td>
               <td className="p-2 text-right font-bold">{item.stockActual}</td>
             </tr>

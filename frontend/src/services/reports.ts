@@ -82,6 +82,7 @@ export type ProductInventoryReport = {
   items: Array<{
     productoId: string;
     codigo: string;
+    codigoRepuesto?: string | null;
     descripcion: string;
     marca: string;
     condicion: string;
@@ -89,6 +90,7 @@ export type ProductInventoryReport = {
     sucursal: string;
     sucursalId: string;
     ubicacion?: string | null;
+    precioVenta: number;
     fechaAgregado: string;
     agregadoEnPeriodo: boolean;
     stockAlAgregar?: number | null;

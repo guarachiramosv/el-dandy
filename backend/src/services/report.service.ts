@@ -489,6 +489,7 @@ export class ReportService {
       return {
         productoId: product.id,
         codigo: product.codigo,
+        codigoRepuesto: product.codigoRepuesto,
         descripcion: product.descripcion,
         marca: product.marca,
         condicion: product.condicion,
@@ -496,6 +497,7 @@ export class ReportService {
         sucursal: product.sucursal?.nombre || 'Sin sucursal',
         sucursalId: product.sucursalId,
         ubicacion: product.ubicacion,
+        precioVenta: product.precioVenta,
         fechaAgregado: formatDateForReport(product.createdAt),
         agregadoEnPeriodo: createdInPeriod,
         stockAlAgregar: createdInPeriod

@@ -112,8 +112,8 @@ const pdfFillRect = (x: number, y: number, width: number, height: number, color:
   `q ${color} rg ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re f Q\n`;
 
 const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
+  const pageWidth = 792;
+  const pageHeight = 612;
   const margin = 30;
   const bottom = 34;
   const rowHeight = 18;
@@ -168,12 +168,14 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
 
   const drawHeader = (pageNumber: number) => {
     let content = "";
-    content += pdfText("Reporte diario de ventas", margin, 560, 16, true);
-    content += pdfText(`Periodo: ${report.label}`, margin, 542, 9);
-    content += pdfText(`Sucursal: ${sucursal}`, margin, 528, 9);
-    content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 514, 9);
-    content += pdfText(`Pagina ${pageNumber}`, 770, 560, 9, true);
+    content += pdfText("Reporte diario de ventas", margin, 576, 16, true);
+    content += pdfText(`Periodo: ${report.label}`, margin, 558, 9);
+    content += pdfText(`Sucursal: ${sucursal}`, margin, 544, 9);
+    content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 530, 9);
+    content += pdfText(`Pagina ${pageNumber}`, 710, 576, 9, true);
 
+    const statGap = 6;
+    const statWidth = (pageWidth - margin * 2 - statGap * 6) / 7;
     const stats = [
       ["Ventas", report.totals.cantidadVentas],
       ["Efectivo", money(report.totals.totalEfectivo || 0)],
@@ -184,24 +186,24 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       ["Queda QR", money(remainingQrAfterExpenses(report))],
     ];
     stats.forEach(([label, value], index) => {
-      const x = margin + index * 128;
-      content += pdfFillRect(x, 470, 120, 34, "0.96 0.97 0.98");
-      content += pdfText(label, x + 7, 489, 7, true);
-      content += pdfText(value, x + 7, 476, 9, true);
+      const x = margin + index * (statWidth + statGap);
+      content += pdfFillRect(x, 486, statWidth, 34, "0.96 0.97 0.98");
+      content += pdfText(label, x + 7, 505, 7, true);
+      content += pdfText(value, x + 7, 492, 8, true);
     });
-    content += pdfLine(margin, 458, pageWidth - margin, 458);
+    content += pdfLine(margin, 474, pageWidth - margin, 474);
     return content;
   };
 
   let page = drawHeader(1);
-  let y = 438;
+  let y = 454;
   let pageNumber = 1;
 
   const newPage = () => {
     pages.push(page);
     pageNumber += 1;
     page = drawHeader(pageNumber);
-    y = 438;
+    y = 454;
   };
 
   rows.forEach((row) => {
@@ -219,18 +221,18 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       y -= 24;
       if (row.cells[0].startsWith("Detalle de ventas")) {
         page += pdfText("Fecha", 36, y + 4, 7, true);
-        page += pdfText("Vendedor", 155, y + 4, 7, true);
-        page += pdfText("Pago", 255, y + 4, 7, true);
-        page += pdfText("Codigo", 320, y + 4, 7, true);
-        page += pdfText("Cant.", 375, y + 4, 7, true);
-        page += pdfText("Producto", 430, y + 4, 7, true);
-        page += pdfText("Total", 720, y + 4, 7, true);
+        page += pdfText("Vendedor", 145, y + 4, 7, true);
+        page += pdfText("Pago", 235, y + 4, 7, true);
+        page += pdfText("Codigo", 295, y + 4, 7, true);
+        page += pdfText("Cant.", 345, y + 4, 7, true);
+        page += pdfText("Producto", 390, y + 4, 7, true);
+        page += pdfText("Total", 710, y + 4, 7, true);
       } else {
         page += pdfText("Fecha", 36, y + 4, 7, true);
-        page += pdfText("Vendedor", 160, y + 4, 7, true);
-        page += pdfText("Detalle del gasto", 285, y + 4, 7, true);
-        page += pdfText("Pago", 610, y + 4, 7, true);
-        page += pdfText("Monto", 700, y + 4, 7, true);
+        page += pdfText("Vendedor", 155, y + 4, 7, true);
+        page += pdfText("Detalle del gasto", 280, y + 4, 7, true);
+        page += pdfText("Pago", 600, y + 4, 7, true);
+        page += pdfText("Monto", 690, y + 4, 7, true);
       }
       y -= rowHeight;
       return;
@@ -249,18 +251,18 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       });
     } else if (row.kind === "saleDetail") {
       page += pdfText(fitPdfText(row.cells[0], 21), 36, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[1], 18), 155, y + 3, 7);
-      page += pdfText(row.cells[2], 255, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[3], 9), 320, y + 3, 7);
-      page += pdfText(row.cells[4], 375, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[5], 45), 430, y + 3, 7);
-      page += pdfText(row.cells[6], 720, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 16), 145, y + 3, 7);
+      page += pdfText(row.cells[2], 235, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[3], 9), 295, y + 3, 7);
+      page += pdfText(row.cells[4], 345, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[5], 50), 390, y + 3, 7);
+      page += pdfText(row.cells[6], 710, y + 3, 7);
     } else if (row.kind === "expense") {
       page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[1], 18), 160, y + 3, 7);
-      page += pdfText(fitPdfText(row.cells[2], 44), 285, y + 3, 7);
-      page += pdfText(row.cells[3], 610, y + 3, 7);
-      page += pdfText(row.cells[4], 700, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[1], 18), 155, y + 3, 7);
+      page += pdfText(fitPdfText(row.cells[2], 44), 280, y + 3, 7);
+      page += pdfText(row.cells[3], 600, y + 3, 7);
+      page += pdfText(row.cells[4], 690, y + 3, 7);
     }
     y -= row.kind === "note" ? Math.max(28, 20 + noteLines.length * 10) : rowHeight;
   });
@@ -355,7 +357,7 @@ export default function Reportes() {
     <section className="flex h-full flex-col gap-5 p-6 text-gray-100">
       <style>{`
         @media print {
-          @page { margin: 10mm; size: A4 landscape; }
+          @page { margin: 10mm; size: letter landscape; }
           html, body, #root {
             width: 100% !important;
             height: auto !important;

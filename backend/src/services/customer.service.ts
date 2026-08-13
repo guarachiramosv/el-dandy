@@ -134,7 +134,23 @@ export class CustomerService {
   }
 
   async verifyLogin(email: string, password: string) {
-    const cliente = await prisma.cliente.findUnique({ where: { email } });
+    const cliente = await prisma.cliente.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        nombre: true,
+        telefono: true,
+        email: true,
+        password: true,
+        empresa: true,
+        ciudad: true,
+        nit: true,
+        direccion: true,
+        notas: true,
+        activo: true,
+        createdAt: true,
+      },
+    });
     if (!cliente || !cliente.activo || !cliente.password) return null;
     const valid = await bcrypt.compare(password, cliente.password);
     return valid ? this.toSummary(cliente) : null;
