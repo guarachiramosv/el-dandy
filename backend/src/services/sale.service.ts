@@ -534,6 +534,38 @@ export class SaleService {
     });
   }
 
+  async deleteCashExpense(
+    id: string,
+    scope?: { usuarioId?: string | null; sucursalId?: string | null; role?: string | null },
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const gasto = await tx.gastoCaja.findUnique({ where: { id } });
+      if (!gasto) throw Object.assign(new Error('Gasto no encontrado'), { status: 404 });
+
+      if (
+        scope?.role === 'SELLER' &&
+        (gasto.usuarioId !== scope.usuarioId || gasto.sucursalId !== scope.sucursalId)
+      ) {
+        throw Object.assign(new Error('No puedes anular gastos de otro vendedor.'), { status: 403 });
+      }
+
+      const businessDay = getBusinessDay(gasto.createdAt.toISOString());
+      const cierre = await tx.cierreCaja.findFirst({
+        where: {
+          fecha: businessDay.start,
+          ...sellerBusinessDayScope(gasto.usuarioId, gasto.sucursalId),
+        },
+      });
+
+      if (cierre) {
+        throw Object.assign(new Error('No se puede anular el gasto porque la caja de ese dia ya fue cerrada.'), { status: 409 });
+      }
+
+      await tx.gastoCaja.delete({ where: { id } });
+      return { success: true };
+    });
+  }
+
   async deleteSale(id: string, motivo: string = 'Anulación de venta') {
     return prisma.$transaction(async (tx) => {
       const venta = await tx.venta.findUnique({

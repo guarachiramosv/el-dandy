@@ -33,6 +33,13 @@ export const createCashExpense = async (input: {
   return response.data.data;
 };
 
+export const deleteCashExpense = async (id: string): Promise<void> => {
+  const response = await api.delete<{ success: boolean; message: string }>(`/sales/expenses/${id}`);
+  if (!response.data.success) {
+    throw new Error(response.data.message);
+  }
+};
+
 export const updateSalePaymentMethod = async (id: string, metodoPago: 'EFECTIVO' | 'QR'): Promise<Sale> => {
   const response = await api.patch<{ success: boolean; data: Sale }>(`/sales/${id}/payment-method`, { metodoPago });
   return response.data.data;

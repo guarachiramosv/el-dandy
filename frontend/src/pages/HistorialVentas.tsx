@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, X } from "lucide-react";
-import { CashClosing, DailySalesSummary, Sale } from "../types";
+import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, Trash2, X } from "lucide-react";
+import { CashClosing, CashExpense, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
-import { closeCashRegister, createCashExpense, fetchDailySalesSummary, updateSalePaymentMethod, deleteSale } from "../services/sales";
+import { closeCashRegister, createCashExpense, deleteCashExpense, fetchDailySalesSummary, updateSalePaymentMethod, deleteSale } from "../services/sales";
 import { addCreditPayment } from "../services/customers";
 import { getErrorMessage } from "../utils/errors";
 import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
@@ -55,6 +55,7 @@ export default function HistorialVentas() {
   const [loading, setLoading] = useState(true);
   const [closingCash, setClosingCash] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
+  const [voidingExpenseId, setVoidingExpenseId] = useState<string | null>(null);
   const [savingPayment, setSavingPayment] = useState(false);
 
   const loadSummary = useCallback(async () => {
@@ -122,6 +123,25 @@ export default function HistorialVentas() {
       setMessage(getErrorMessage(err));
     } finally {
       setSavingExpense(false);
+    }
+  };
+
+  const handleVoidExpense = async (expense: CashExpense) => {
+    setMessage(null);
+    if (summary?.cerrado) return setMessage("La caja de este dia ya fue cerrada.");
+
+    const confirmed = window.confirm(`Seguro que deseas anular el gasto "${expense.motivo}" por ${money(expense.monto)}?`);
+    if (!confirmed) return;
+
+    setVoidingExpenseId(expense.id);
+    try {
+      await deleteCashExpense(expense.id);
+      setMessage("Gasto anulado correctamente.");
+      await loadSummary();
+    } catch (err: unknown) {
+      setMessage(getErrorMessage(err));
+    } finally {
+      setVoidingExpenseId(null);
     }
   };
 
@@ -369,6 +389,7 @@ export default function HistorialVentas() {
                       <th className="p-3">Motivo</th>
                       <th className="p-3">Origen</th>
                       <th className="p-3 text-right">Monto</th>
+                      <th className="p-3 text-right">Accion</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
@@ -381,11 +402,24 @@ export default function HistorialVentas() {
                         </td>
                         <td className="p-3 text-gray-300">{expense.metodoPago}</td>
                         <td className="p-3 text-right font-bold text-amber-200">{money(expense.monto)}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void handleVoidExpense(expense)}
+                            disabled={summary?.cerrado || voidingExpenseId === expense.id}
+                            className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={summary?.cerrado ? "La caja ya esta cerrada" : "Anular gasto"}
+                            aria-label={`Anular gasto ${expense.motivo}`}
+                          >
+                            <Trash2 size={14} />
+                            {voidingExpenseId === expense.id ? "Anulando..." : "Anular"}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {(summary?.gastos?.items || []).length === 0 && (
                       <tr>
-                        <td colSpan={4} className="p-4 text-center text-gray-500">Sin gastos registrados.</td>
+                        <td colSpan={5} className="p-4 text-center text-gray-500">Sin gastos registrados.</td>
                       </tr>
                     )}
                   </tbody>

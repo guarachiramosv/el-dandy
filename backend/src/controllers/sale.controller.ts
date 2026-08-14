@@ -105,3 +105,15 @@ export const createCashExpense = asyncHandler(async (req: Request, res: Response
   });
   res.status(201).json({ success: true, data });
 });
+
+export const deleteCashExpense = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
+
+  await service.deleteCashExpense(String(id), {
+    usuarioId: req.user?.id,
+    sucursalId: req.user?.sucursalId,
+    role: req.user?.role,
+  });
+  res.json({ success: true, message: 'Gasto anulado correctamente' });
+});
