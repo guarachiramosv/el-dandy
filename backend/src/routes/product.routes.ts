@@ -12,18 +12,19 @@ import {
   restoreProduct,
   discontinueProduct,
 } from '../controllers/product.controller';
+import { requireAdmin } from '../middlewares/auth';
 
 const router = Router();
 
 router.get('/', getAllProducts);
 router.get('/deletion-history', getProductDeletionHistory);
 router.get('/:id', getProductById);
-router.post('/', createProduct);
-router.put('/:id', updateProduct);
-router.patch('/:id/stock', addProductStock);
-router.patch('/:id/branches/:sucursalId/status', updateProductBranchStatus);
-router.patch('/:id/restore', restoreProduct);
-router.patch('/:id/discontinue', discontinueProduct);
-router.delete('/:id', deleteProduct);
+router.post('/', requireAdmin, createProduct);
+router.put('/:id', requireAdmin, updateProduct);
+router.patch('/:id/stock', requireAdmin, addProductStock);
+router.patch('/:id/branches/:sucursalId/status', requireAdmin, updateProductBranchStatus);
+router.patch('/:id/restore', requireAdmin, restoreProduct);
+router.patch('/:id/discontinue', requireAdmin, discontinueProduct);
+router.delete('/:id', requireAdmin, deleteProduct);
 
 export default router;

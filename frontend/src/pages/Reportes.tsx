@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Download, Printer } from "lucide-react";
 import { fetchSucursales } from "../services/catalog";
 import { fetchSalesHistoryReport, ReportPeriod, SalesHistoryReport } from "../services/reports";
@@ -30,20 +30,30 @@ const remainingQrAfterExpenses = (report: SalesHistoryReport) =>
   Math.max((report.totals.totalQr || 0) + (report.totals.cobroCreditoQr || 0) - (report.totals.gastoQr || 0), 0);
 
 const saleDetailRowsFrom = (report: SalesHistoryReport) =>
-  report.ventas.flatMap((sale) =>
-    (sale.detalles || []).map((detail) => ({
-      id: `${sale.id}-${detail.id}`,
-      fecha: sale.createdAt,
-      vendedor: sale.usuario?.nombre || "Usuario",
-      sucursal: branchNameFrom(sale),
-      pago: salePaymentLabel(sale.tipoVenta, sale.metodoPago),
-      producto: detail.producto?.descripcion || detail.descripcion || "Detalle",
-      codigo: detail.producto?.codigo || detail.tipoLinea || "",
-      cantidad: detail.cantidad,
-      precioUnitario: detail.precioUnitario,
-      total: detail.subtotal,
-    })),
-  );
+  report.ventas.flatMap((sale) => {
+    const details = sale.detalles || [];
+    const grossTotal = details.reduce((sum, detail) => sum + detail.precioUnitario * detail.cantidad, 0);
+    const totalDiscount = Math.max(grossTotal - sale.total, 0);
+    return details.map((detail, index) => {
+      const netFactor = sale.subtotal > 0 ? sale.total / sale.subtotal : 0;
+      return {
+        id: `${sale.id}-${detail.id}`,
+        fecha: sale.createdAt,
+        vendedor: sale.usuario?.nombre || "Usuario",
+        sucursal: branchNameFrom(sale),
+        pago: salePaymentLabel(sale.tipoVenta, sale.metodoPago),
+        producto: detail.producto?.descripcion || detail.descripcion || "Detalle",
+        codigo: detail.producto?.codigo || detail.tipoLinea || "",
+        cantidad: detail.cantidad,
+        precioUnitario: detail.precioUnitario,
+        total: detail.subtotal * netFactor,
+        isLast: index === details.length - 1,
+        saleSubtotal: grossTotal,
+        saleDiscount: totalDiscount,
+        saleTotal: sale.total,
+      };
+    });
+  });
 
 const closingNotesFrom = (report: SalesHistoryReport) =>
   (report.cierres || []).map((cierre) => ({
@@ -120,7 +130,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
   const pages: string[] = [];
   const closingNotes = closingNotesFrom(report);
   const saleDetailRows = saleDetailRowsFrom(report);
-  const rows: Array<{ kind: "section" | "summary" | "saleDetail" | "expense" | "note"; cells: string[] }> = [
+  const rows: Array<{ kind: "section" | "summary" | "saleDetail" | "saleSummary" | "expense" | "note"; cells: string[] }> = [
     { kind: "section", cells: ["Resumen de caja"] },
     { kind: "summary", cells: ["Ventas en efectivo", money(report.totals.totalEfectivo || 0)] },
     { kind: "summary", cells: ["Ventas por QR", money(report.totals.totalQr || 0)] },
@@ -141,18 +151,26 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
           cells: ["Vendedor", sucursal, "Sin cierre de caja registrado para este dia."],
         }]),
     { kind: "section", cells: ["Detalle de ventas del vendedor"] },
-    ...saleDetailRows.map((item) => ({
-      kind: "saleDetail" as const,
-      cells: [
-        new Date(item.fecha).toLocaleString("es-BO"),
-        item.vendedor,
-        item.pago,
-        item.codigo,
-        String(item.cantidad),
-        item.producto,
-        money(item.total),
-      ],
-    })),
+    ...saleDetailRows.flatMap((item) => [
+      {
+        kind: "saleDetail" as const,
+        cells: [
+          new Date(item.fecha).toLocaleString("es-BO"),
+          item.vendedor,
+          item.pago,
+          item.codigo,
+          String(item.cantidad),
+          item.producto,
+          money(item.total),
+        ],
+      },
+      ...(item.isLast ? [{
+        kind: "saleSummary" as const,
+        cells: [
+          `Subtotal: ${money(item.saleSubtotal)}   Descuento: ${money(item.saleDiscount)}   Total cobrado: ${money(item.saleTotal)}`,
+        ],
+      }] : []),
+    ]),
     { kind: "section", cells: ["Detalle de gastos"] },
     ...(report.gastos || []).map((expense) => ({
       kind: "expense" as const,
@@ -257,6 +275,9 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
       page += pdfText(row.cells[4], 345, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[5], 50), 390, y + 3, 7);
       page += pdfText(row.cells[6], 710, y + 3, 7);
+    } else if (row.kind === "saleSummary") {
+      page += pdfFillRect(margin, y - 3, pageWidth - margin * 2, 17, "0.96 0.97 0.98");
+      page += pdfText(row.cells[0], 42, y + 3, 8, true);
     } else if (row.kind === "expense") {
       page += pdfText(fitPdfText(row.cells[0], 22), 36, y + 3, 7);
       page += pdfText(fitPdfText(row.cells[1], 18), 155, y + 3, 7);
@@ -357,10 +378,11 @@ export default function Reportes() {
     <section className="flex h-full flex-col gap-5 p-6 text-gray-100">
       <style>{`
         @media print {
-          @page { margin: 10mm; size: letter landscape; }
+          @page { margin: 12.7mm; size: letter landscape; }
           html, body, #root {
             width: 100% !important;
             height: auto !important;
+            margin: 0 !important;
             overflow: visible !important;
             background: #ffffff !important;
             color: #111827 !important;
@@ -373,6 +395,7 @@ export default function Reportes() {
             top: 0 !important;
             display: block !important;
             width: 100% !important;
+            box-sizing: border-box !important;
             height: auto !important;
             max-height: none !important;
             overflow: visible !important;
@@ -445,6 +468,7 @@ export default function Reportes() {
           }
           #sales-print table {
             width: 100% !important;
+            max-width: 100% !important;
             border-collapse: collapse !important;
             table-layout: fixed !important;
             margin-bottom: 10px !important;
@@ -465,19 +489,20 @@ export default function Reportes() {
             word-break: normal !important;
             overflow-wrap: anywhere !important;
           }
-          #sales-print .col-code { width: 12% !important; }
+          #sales-print .col-code { width: 9% !important; }
           #sales-print .col-product { width: 34% !important; }
-          #sales-print .col-branch { width: 20% !important; }
-          #sales-print .col-qty { width: 14% !important; }
-          #sales-print .col-total { width: 20% !important; }
-          #sales-print .col-date { width: 22% !important; }
-          #sales-print .col-seller { width: 18% !important; }
+          #sales-print .col-branch { width: 18% !important; }
+          #sales-print .col-qty { width: 8% !important; }
+          #sales-print .col-total { width: 12% !important; }
+          #sales-print .col-date { width: 16% !important; }
+          #sales-print .col-seller { width: 12% !important; }
           #sales-print .col-client { width: 18% !important; }
-          #sales-print .col-payment { width: 20% !important; }
+          #sales-print .col-payment { width: 9% !important; }
           #sales-print .col-items { width: 10% !important; }
           #sales-print .col-sale-total { width: 12% !important; }
           .no-print { display: none !important; }
-          tr { page-break-inside: avoid; }
+          #sales-print h3 { break-after: avoid-page; page-break-after: avoid; }
+          #sales-print tr { break-inside: avoid-page; page-break-inside: avoid; }
         }
       `}</style>
 
@@ -611,18 +636,27 @@ export default function Reportes() {
                 </thead>
                 <tbody className="divide-y divide-gray-800 print:divide-gray-200">
                   {saleDetailRows.map((item) => (
-                    <tr key={item.id}>
-                      <td className="p-3">{new Date(item.fecha).toLocaleString("es-BO")}</td>
-                      <td className="p-3">{item.vendedor}</td>
-                      <td className="p-3 font-bold">{item.pago}</td>
-                      <td className="p-3 font-mono">{item.codigo}</td>
-                      <td className="p-3">
-                        <p className="font-semibold">{item.producto}</p>
-                        <p className="print-muted text-xs text-gray-500 print:text-gray-600">{money(item.precioUnitario)} unit.</p>
-                      </td>
-                      <td className="p-3 text-right">{item.cantidad}</td>
-                      <td className="p-3 text-right">{money(item.total)}</td>
-                    </tr>
+                    <Fragment key={item.id}>
+                      <tr>
+                        <td className="p-3">{new Date(item.fecha).toLocaleString("es-BO")}</td>
+                        <td className="p-3">{item.vendedor}</td>
+                        <td className="p-3 font-bold">{item.pago}</td>
+                        <td className="p-3 font-mono">{item.codigo}</td>
+                        <td className="p-3">
+                          <p className="font-semibold">{item.producto}</p>
+                          <p className="print-muted text-xs text-gray-500 print:text-gray-600">{money(item.precioUnitario)} unit.</p>
+                        </td>
+                        <td className="p-3 text-right">{item.cantidad}</td>
+                        <td className="p-3 text-right">{money(item.total)}</td>
+                      </tr>
+                      {item.isLast && (
+                        <tr className="bg-gray-900/70 font-semibold print:bg-gray-100">
+                          <td colSpan={7} className="p-3 text-right">
+                            Subtotal: {money(item.saleSubtotal)} · Descuento: {money(item.saleDiscount)} · Total cobrado: {money(item.saleTotal)}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                   {saleDetailRows.length === 0 && (
                     <tr>

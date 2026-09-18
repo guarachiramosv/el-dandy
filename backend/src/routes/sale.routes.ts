@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { closeCashRegister, createCashExpense, createSale, deleteCashExpense, deleteSale, getAllSales, getDailySalesSummary, getPendingCashClosings, updatePaymentMethod } from '../controllers/sale.controller';
+import { requireAdmin } from '../middlewares/auth';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ router.delete('/expenses/:id', deleteCashExpense);
 router.post('/close-cash', closeCashRegister);
 router.get('/', getAllSales);
 router.post('/', createSale);
-router.delete('/:id', deleteSale);
-router.patch('/:id/payment-method', updatePaymentMethod);
+router.delete('/:id', requireAdmin, deleteSale);
+router.patch('/:id/payment-method', requireAdmin, updatePaymentMethod);
 
 export default router;
