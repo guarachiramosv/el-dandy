@@ -573,9 +573,8 @@ function AddStockModal({
             <span className="mb-1 block text-sm font-medium text-gray-300">Cantidad a agregar</span>
             <input
               className="premium-input"
-              type="number"
-              min="0"
-              step={product.unidadVenta === "METRO" ? "0.01" : "1"}
+              type="text"
+              inputMode="decimal"
               value={cantidad}
               onChange={(event) => onCantidadChange(Number(event.target.value))}
             />

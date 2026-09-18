@@ -530,7 +530,7 @@ export default function Reportes() {
 
         {period === "day" && <input className="premium-input" type="date" value={day} onChange={(event) => setDay(event.target.value)} />}
         {period === "month" && <input className="premium-input" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />}
-        {period === "year" && <input className="premium-input" type="number" min="2020" max="2100" value={year} onChange={(event) => setYear(event.target.value)} />}
+        {period === "year" && <input className="premium-input" type="text" inputMode="numeric" maxLength={4} value={year} onChange={(event) => setYear(event.target.value)} />}
 
         <select className="premium-input" value={sucursalId} onChange={(event) => setSucursalId(event.target.value)}>
           <option value="">Todas las sucursales</option>

@@ -462,8 +462,8 @@ export default function HistorialVentas() {
             <label className="block text-sm text-gray-300">
               <span className="mb-1 block">Dinero contado en caja</span>
               <input
-                type="number"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 value={declaredCash}
                 onChange={(event) => setDeclaredCash(Number(event.target.value))}
                 disabled={summary?.cerrado}

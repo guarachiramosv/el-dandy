@@ -559,7 +559,7 @@ export default function Inventario() {
                   </select>
                   {printPeriod === "day" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="date" value={printDay} onChange={(event) => setPrintDay(event.target.value)} />}
                   {printPeriod === "month" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="month" value={printMonth} onChange={(event) => setPrintMonth(event.target.value)} />}
-                  {printPeriod === "year" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="number" min="2020" max="2100" value={printYear} onChange={(event) => setPrintYear(event.target.value)} />}
+                  {printPeriod === "year" && <input className="premium-input h-14 rounded-lg py-0 text-base" type="text" inputMode="numeric" maxLength={4} value={printYear} onChange={(event) => setPrintYear(event.target.value)} />}
                   <button onClick={handlePrintInventory} disabled={printingReport || downloadingReport || downloadingCompleteInventory} className="btn-primary flex h-14 items-center justify-center gap-2 rounded-lg px-4 py-0 text-base whitespace-nowrap disabled:opacity-60">
                     <Printer size={18} /> {printingReport ? "Preparando..." : "Imprimir"}
                   </button>
@@ -748,7 +748,7 @@ export default function Inventario() {
           </label>
           <label className="block max-w-xs space-y-2">
             <span className="text-sm font-bold uppercase text-gray-400">Cantidad a mover</span>
-            <input type="number" min="1" className="premium-input" value={cantidad} onChange={(event) => setCantidad(Number(event.target.value))} />
+            <input type="text" inputMode="decimal" className="premium-input" value={cantidad} onChange={(event) => setCantidad(Number(event.target.value))} />
           </label>
           {selectedOrigin && destinationOptions.length === 0 && (
             <p className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm font-semibold text-yellow-100">

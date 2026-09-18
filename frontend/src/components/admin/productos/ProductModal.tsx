@@ -411,19 +411,19 @@ function ProductModalContent({
                   <label className="text-sm font-medium text-gray-300">
                     {isCreateMode ? "Stock Inicial" : `Stock ${selectedBranchName}`} {formData.unidadVenta === "METRO" ? "(m)" : ""}
                   </label>
-                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stock" value={formData.stock} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                  <input required type="text" inputMode="decimal" name="stock" value={formData.stock} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Stock Minimo</label>
-                  <input required type="number" min="0" step={formData.unidadVenta === "METRO" ? "0.01" : "1"} name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                  <input required type="text" inputMode="decimal" name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Precio de Compra</label>
-                  <input required type="number" min="0" step="0.01" name="precioCompra" value={formData.precioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                  <input required type="text" inputMode="decimal" name="precioCompra" value={formData.precioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Precio de Venta</label>
-                  <input required type="number" min="0" step="0.01" name="precioVenta" value={formData.precioVenta} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                  <input required type="text" inputMode="decimal" name="precioVenta" value={formData.precioVenta} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
               </div>
 

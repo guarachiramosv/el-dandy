@@ -52,8 +52,8 @@ export default function Compras() {
       <div className="space-y-3">
         {items.map((item, idx) => <div key={idx} className="grid grid-cols-1 md:grid-cols-[1fr_120px_160px_44px] gap-3">
           <select className="premium-input" value={item.productoId} onChange={e => updateRow(idx, { productoId: e.target.value })}><option value="">Seleccionar producto</option>{products.map(p => <option key={p.id} value={p.id}>{p.codigo} · {p.descripcion} · {p.sucursal?.nombre}</option>)}</select>
-          <input type="number" min="1" className="premium-input" value={item.cantidad} onChange={e => updateRow(idx, { cantidad: Number(e.target.value) })}/>
-          <input type="number" min="0.01" step="0.01" className="premium-input" value={item.precioUnitario} onChange={e => updateRow(idx, { precioUnitario: Number(e.target.value) })}/>
+          <input type="text" inputMode="decimal" className="premium-input" value={item.cantidad} onChange={e => updateRow(idx, { cantidad: Number(e.target.value) })}/>
+          <input type="text" inputMode="decimal" className="premium-input" value={item.precioUnitario} onChange={e => updateRow(idx, { precioUnitario: Number(e.target.value) })}/>
           <button onClick={() => setItems(rows => rows.filter((_, i) => i !== idx))} className="btn-secondary"><Trash2 size={16}/></button>
         </div>)}
       </div>

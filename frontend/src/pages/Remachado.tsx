@@ -669,12 +669,12 @@ export default function Remachado() {
               <div className="space-y-3">
                 <Input label="Medida" value={medidaForm.medida} onChange={(value) => setMedidaForm((prev) => ({ ...prev, medida: value }))} />
                 <Input label="Descripcion" value={medidaForm.descripcion} onChange={(value) => setMedidaForm((prev) => ({ ...prev, descripcion: value }))} />
-                <Input label="Stock en juegos" type="number" step="0.5" value={medidaForm.stockJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockJuegos: Number(value) }))} />
-                <Input label="Stock minimo" type="number" step="0.5" value={medidaForm.stockMinimoJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockMinimoJuegos: Number(value) }))} />
-                <Input label="Precio juego" type="number" value={medidaForm.precioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioJuego: Number(value) }))} />
-                <Input label="Precio medio juego" type="number" value={medidaForm.precioMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioMedioJuego: Number(value) }))} />
-                <Input label="Remaches por juego" type="number" value={medidaForm.remachesPorJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorJuego: Number(value) }))} />
-                <Input label="Remaches por medio juego" type="number" value={medidaForm.remachesPorMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorMedioJuego: Number(value) }))} />
+                <Input label="Stock en juegos" inputMode="decimal" value={medidaForm.stockJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockJuegos: Number(value) }))} />
+                <Input label="Stock minimo" inputMode="decimal" value={medidaForm.stockMinimoJuegos} onChange={(value) => setMedidaForm((prev) => ({ ...prev, stockMinimoJuegos: Number(value) }))} />
+                <Input label="Precio juego" inputMode="decimal" value={medidaForm.precioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioJuego: Number(value) }))} />
+                <Input label="Precio medio juego" inputMode="decimal" value={medidaForm.precioMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, precioMedioJuego: Number(value) }))} />
+                <Input label="Remaches por juego" inputMode="numeric" value={medidaForm.remachesPorJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorJuego: Number(value) }))} />
+                <Input label="Remaches por medio juego" inputMode="numeric" value={medidaForm.remachesPorMedioJuego} onChange={(value) => setMedidaForm((prev) => ({ ...prev, remachesPorMedioJuego: Number(value) }))} />
                 <div className="flex gap-2">
                   <button onClick={submitMedida} disabled={saving} className="btn-primary flex flex-1 items-center justify-center gap-2 disabled:opacity-60">
                     <Save size={18} /> {editingMedidaId ? "Guardar cambios" : "Crear medida"}
@@ -751,8 +751,8 @@ export default function Remachado() {
                 <Input label="Codigo" value={remacheForm.codigo} onChange={(value) => setRemacheForm((prev) => ({ ...prev, codigo: value }))} />
                 <Input label="Nombre" value={remacheForm.nombre} onChange={(value) => setRemacheForm((prev) => ({ ...prev, nombre: value }))} />
                 <Input label="Medida" value={remacheForm.medida} onChange={(value) => setRemacheForm((prev) => ({ ...prev, medida: value }))} />
-                <Input label="Stock" type="number" value={remacheForm.stock} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stock: Number(value) }))} />
-                <Input label="Stock minimo" type="number" value={remacheForm.stockMinimo} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stockMinimo: Number(value) }))} />
+                <Input label="Stock" inputMode="numeric" value={remacheForm.stock} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stock: Number(value) }))} />
+                <Input label="Stock minimo" inputMode="numeric" value={remacheForm.stockMinimo} onChange={(value) => setRemacheForm((prev) => ({ ...prev, stockMinimo: Number(value) }))} />
                 <div className="flex gap-2">
                   <button onClick={submitRemache} disabled={saving} className="btn-primary flex flex-1 items-center justify-center gap-2 disabled:opacity-60">
                     <Save size={18} /> {editingRemacheId ? "Guardar cambios" : "Crear remache"}
@@ -1033,8 +1033,8 @@ export default function Remachado() {
                     <span className="font-medium text-red-300">Descuento</span>
                     <div className="w-32">
                       <input 
-                        type="number" 
-                        min="0" 
+                        type="text"
+                        inputMode="decimal"
                         value={descuento || ""} 
                         onChange={(e) => setDescuento(Number(e.target.value))} 
                         placeholder="0.00"
@@ -1069,17 +1069,19 @@ function Input({
   onChange,
   type = "text",
   step,
+  inputMode,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   type?: string;
   step?: string | number;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-sm text-gray-300">{label}</span>
-      <input className="premium-input" type={type} step={step} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input className="premium-input" type={type} step={step} inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

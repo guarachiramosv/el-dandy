@@ -611,7 +611,7 @@ export default function Ventas() {
             </div>
             <label className="block text-gray-400">
               <span className="mb-1 block">Descuento</span>
-              <input type="number" min="0" value={descuento} onChange={(e) => setDescuento(Number(e.target.value))} className="premium-input" />
+              <input type="text" inputMode="decimal" value={descuento} onChange={(e) => setDescuento(Number(e.target.value))} className="premium-input" />
             </label>
             <div className="pt-4 border-t border-gray-700 flex justify-between items-center">
               <span className="text-lg font-medium text-white">Total</span>
