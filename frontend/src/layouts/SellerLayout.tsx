@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
 import { AlertTriangle, ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History, Hammer } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
 import { fetchPendingCashClosings } from "../services/sales";
@@ -11,6 +10,13 @@ import ConfirmLogoutModal from "../components/ConfirmLogoutModal";
 
 const money = (value: number) =>
   `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `flex h-9 items-center border-l-2 px-3 text-sm transition-colors ${
+    isActive
+      ? "border-primary bg-primary/10 font-semibold text-orange-300"
+      : "border-transparent text-gray-400 hover:bg-white/[0.04] hover:text-gray-100"
+  }`;
 
 export default function SellerLayout() {
   const navigate = useNavigate();
@@ -46,64 +52,60 @@ export default function SellerLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-grafito-800 text-gray-200 overflow-hidden font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#0b0c0e] font-sans text-gray-200">
       {/* Sidebar Vendedor */}
-      <motion.aside 
-        initial={{ x: -250 }}
-        animate={{ x: 0 }}
-        className="w-64 bg-grafito-900 border-r border-gray-800 flex flex-col shadow-2xl relative z-20"
-      >
-        <div className="h-16 flex items-center px-6 border-b border-gray-800 bg-grafito-900">
-          <BrandLogo imageClassName="h-11 w-auto" />
+      <aside className="relative z-20 flex w-56 shrink-0 flex-col border-r border-gray-800 bg-[#0f1012]">
+        <div className="flex h-14 items-center border-b border-gray-800 px-4">
+          <BrandLogo imageClassName="h-9 w-auto" />
         </div>
 
-        <div className="px-6 py-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Punto de Venta</p>
+        <div className="px-4 pb-2 pt-4">
+          <p className="text-[11px] font-semibold uppercase text-gray-500">Punto de Venta</p>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-          <NavLink to="/seller/ventas" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <ShoppingCart size={20} className="mr-3" /> Punto de Venta
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
+          <NavLink to="/seller/ventas" className={navLinkClass}>
+            <ShoppingCart size={17} className="mr-3" /> Punto de Venta
           </NavLink>
-          <NavLink to="/seller/historial" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <History size={20} className="mr-3" /> Historial
+          <NavLink to="/seller/historial" className={navLinkClass}>
+            <History size={17} className="mr-3" /> Historial
           </NavLink>
-          <NavLink to="/seller/inventario" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Package size={20} className="mr-3" /> Inventario
+          <NavLink to="/seller/inventario" className={navLinkClass}>
+            <Package size={17} className="mr-3" /> Inventario
           </NavLink>
-          <NavLink to="/seller/remachado" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Hammer size={20} className="mr-3" /> Remachado
+          <NavLink to="/seller/remachado" className={navLinkClass}>
+            <Hammer size={17} className="mr-3" /> Remachado
           </NavLink>
-          <NavLink to="/seller/clientes" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Users size={20} className="mr-3" /> Clientes
+          <NavLink to="/seller/clientes" className={navLinkClass}>
+            <Users size={17} className="mr-3" /> Clientes
           </NavLink>
-          <NavLink to="/seller/cotizaciones" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <FileSignature size={20} className="mr-3" /> Cotizaciones
+          <NavLink to="/seller/cotizaciones" className={navLinkClass}>
+            <FileSignature size={17} className="mr-3" /> Cotizaciones
           </NavLink>
         </nav>
 
-        <div className="p-4 border-t border-gray-800">
-          <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-gray-400 hover:bg-grafito-800 hover:text-white rounded-lg transition-colors">
-            <LogOut size={20} className="mr-3 text-accent" /> Cerrar Sesión
+        <div className="border-t border-gray-800 p-2">
+          <button onClick={handleLogout} className="flex h-10 w-full items-center px-3 text-sm text-gray-400 transition-colors hover:bg-white/[0.04] hover:text-white">
+            <LogOut size={17} className="mr-3 text-gray-500" /> Cerrar Sesión
           </button>
         </div>
-      </motion.aside>
+      </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative z-10 overflow-hidden">
         {/* Topbar */}
-        <header className="h-16 bg-grafito-900/80 backdrop-blur-md border-b border-gray-800 flex items-center justify-between px-8 shadow-sm">
-          <h1 className="text-lg font-semibold text-white">Ventas y Facturación</h1>
-          <div className="flex items-center gap-6">
-            <button className="relative text-gray-400 hover:text-white transition-colors">
-              <Bell size={20} />
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-800 bg-[#111315] px-5">
+          <h1 className="text-sm font-semibold text-gray-100">Ventas y Facturación</h1>
+          <div className="flex items-center gap-4">
+            <button aria-label="Notificaciones" title="Notificaciones" className="flex h-8 w-8 items-center justify-center text-gray-400 transition-colors hover:text-white">
+              <Bell size={18} />
             </button>
-            <div className="relative border-l border-gray-700 pl-6">
+            <div className="relative border-l border-gray-800 pl-4">
               <div 
                 className="flex items-center gap-3 cursor-pointer group"
                 onClick={() => setShowDropdown(!showDropdown)}
               >
-                <div className="w-8 h-8 bg-grafito-700 border border-gray-600 rounded-full flex items-center justify-center font-bold text-white shadow-sm">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-700 bg-[#1b1d21] text-xs font-bold text-white">
                   {user?.nombre.substring(0, 2).toUpperCase() || "VE"}
                 </div>
                 <div className="hidden sm:block">
@@ -114,7 +116,7 @@ export default function SellerLayout() {
               </div>
               
               {showDropdown && (
-                <div className="absolute right-0 mt-2 w-48 rounded-lg border border-gray-700 bg-grafito-800 py-1 shadow-xl z-50">
+                <div className="absolute right-0 z-50 mt-2 w-48 rounded-md border border-gray-700 bg-[#181a1e] py-1 shadow-xl">
                   <button 
                     onClick={() => {
                       setShowDropdown(false);
@@ -137,9 +139,9 @@ export default function SellerLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-grafito-800 p-6">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#0b0c0e] p-4 lg:p-5">
           {pendingClosings.length > 0 && (
-            <div className="mb-5 rounded-xl border border-red-500/40 bg-red-500/10 p-4 shadow-lg">
+            <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 p-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex gap-3">
                   <AlertTriangle className="mt-0.5 shrink-0 text-red-300" size={24} />

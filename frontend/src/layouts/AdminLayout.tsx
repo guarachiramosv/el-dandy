@@ -1,11 +1,17 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
 import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
 import ConfirmLogoutModal from "../components/ConfirmLogoutModal";
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `flex h-9 items-center border-l-2 px-3 text-sm transition-colors ${
+    isActive
+      ? "border-primary bg-primary/10 font-semibold text-orange-300"
+      : "border-transparent text-gray-400 hover:bg-white/[0.04] hover:text-gray-100"
+  }`;
 
 export default function AdminLayout() {
   const navigate = useNavigate();
@@ -25,86 +31,82 @@ export default function AdminLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-grafito-800 text-gray-200 overflow-hidden font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#0b0c0e] font-sans text-gray-200">
       {/* Sidebar Admin */}
-      <motion.aside 
-        initial={{ x: -250 }}
-        animate={{ x: 0 }}
-        className="w-64 bg-grafito-900 border-r border-gray-800 flex flex-col shadow-2xl relative z-20"
-      >
-        <div className="h-16 flex items-center px-6 border-b border-gray-800 bg-grafito-900">
-          <BrandLogo imageClassName="h-11 w-auto" />
+      <aside className="relative z-20 flex w-56 shrink-0 flex-col border-r border-gray-800 bg-[#0f1012]">
+        <div className="flex h-14 items-center border-b border-gray-800 px-4">
+          <BrandLogo imageClassName="h-9 w-auto" />
         </div>
 
-        <div className="px-6 py-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Administración</p>
+        <div className="px-4 pb-2 pt-4">
+          <p className="text-[11px] font-semibold uppercase text-gray-500">Administración</p>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-          <NavLink to="/admin" end className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <LayoutDashboard size={20} className="mr-3" /> Dashboard
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
+          <NavLink to="/admin" end className={navLinkClass}>
+            <LayoutDashboard size={17} className="mr-3" /> Dashboard
           </NavLink>
-          <NavLink to="/admin/productos" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Truck size={20} className="mr-3" /> Productos
+          <NavLink to="/admin/productos" className={navLinkClass}>
+            <Truck size={17} className="mr-3" /> Productos
           </NavLink>
-          <NavLink to="/admin/categorias" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Tags size={20} className="mr-3" /> Categorias
+          <NavLink to="/admin/categorias" className={navLinkClass}>
+            <Tags size={17} className="mr-3" /> Categorias
           </NavLink>
-          <NavLink to="/admin/inventario" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Boxes size={20} className="mr-3" /> Inventario
+          <NavLink to="/admin/inventario" className={navLinkClass}>
+            <Boxes size={17} className="mr-3" /> Inventario
           </NavLink>
-          <NavLink to="/admin/remachado" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Hammer size={20} className="mr-3" /> Remachado
+          <NavLink to="/admin/remachado" className={navLinkClass}>
+            <Hammer size={17} className="mr-3" /> Remachado
           </NavLink>
-          <NavLink to="/admin/clientes" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Users size={20} className="mr-3" /> Clientes
+          <NavLink to="/admin/clientes" className={navLinkClass}>
+            <Users size={17} className="mr-3" /> Clientes
           </NavLink>
-          <NavLink to="/admin/proveedores" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Truck size={20} className="mr-3" /> Proveedores
+          <NavLink to="/admin/proveedores" className={navLinkClass}>
+            <Truck size={17} className="mr-3" /> Proveedores
           </NavLink>
-          <NavLink to="/admin/compras" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <PackagePlus size={20} className="mr-3" /> Compras
+          <NavLink to="/admin/compras" className={navLinkClass}>
+            <PackagePlus size={17} className="mr-3" /> Compras
           </NavLink>
-          <NavLink to="/admin/alertas" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <AlertTriangle size={20} className="mr-3" /> Alertas
+          <NavLink to="/admin/alertas" className={navLinkClass}>
+            <AlertTriangle size={17} className="mr-3" /> Alertas
           </NavLink>
-          <NavLink to="/admin/reportes" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <FileText size={20} className="mr-3" /> Reportes
+          <NavLink to="/admin/reportes" className={navLinkClass}>
+            <FileText size={17} className="mr-3" /> Reportes
           </NavLink>
-          <NavLink to="/admin/usuarios" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Users size={20} className="mr-3" /> Usuarios
+          <NavLink to="/admin/usuarios" className={navLinkClass}>
+            <Users size={17} className="mr-3" /> Usuarios
           </NavLink>
-          <NavLink to="/admin/ganancias" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <CircleDollarSign size={20} className="mr-3" /> Ganancias
+          <NavLink to="/admin/ganancias" className={navLinkClass}>
+            <CircleDollarSign size={17} className="mr-3" /> Ganancias
           </NavLink>
-          <NavLink to="/admin/configuracion" className={({isActive}) => `flex items-center px-4 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-primary font-medium' : 'text-gray-400 hover:bg-grafito-800 hover:text-white'}`}>
-            <Settings size={20} className="mr-3" /> Configuración
+          <NavLink to="/admin/configuracion" className={navLinkClass}>
+            <Settings size={17} className="mr-3" /> Configuración
           </NavLink>
         </nav>
 
-        <div className="p-4 border-t border-gray-800">
-          <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-gray-400 hover:bg-grafito-800 hover:text-white rounded-lg transition-colors">
-            <LogOut size={20} className="mr-3 text-accent" /> Cerrar Sesión
+        <div className="border-t border-gray-800 p-2">
+          <button onClick={handleLogout} className="flex h-10 w-full items-center px-3 text-sm text-gray-400 transition-colors hover:bg-white/[0.04] hover:text-white">
+            <LogOut size={17} className="mr-3 text-gray-500" /> Cerrar Sesión
           </button>
         </div>
-      </motion.aside>
+      </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative z-10 overflow-hidden">
         {/* Topbar */}
-        <header className="h-16 bg-grafito-900/80 backdrop-blur-md border-b border-gray-800 flex items-center justify-between px-8 shadow-sm">
-          <h1 className="text-lg font-semibold text-white">Panel de Administración</h1>
-          <div className="flex items-center gap-6">
-            <button className="relative text-gray-400 hover:text-white transition-colors">
-              <Bell size={20} />
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent rounded-full animate-pulse"></span>
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-800 bg-[#111315] px-5">
+          <h1 className="text-sm font-semibold text-gray-100">Panel de Administración</h1>
+          <div className="flex items-center gap-4">
+            <button aria-label="Notificaciones" title="Notificaciones" className="relative flex h-8 w-8 items-center justify-center text-gray-400 transition-colors hover:text-white">
+              <Bell size={18} />
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"></span>
             </button>
-            <div className="relative border-l border-gray-700 pl-6">
+            <div className="relative border-l border-gray-800 pl-4">
               <div 
                 className="flex items-center gap-3 cursor-pointer group"
                 onClick={() => setShowDropdown(!showDropdown)}
               >
-                <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center font-bold text-white shadow-lg">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-xs font-bold text-white">
                   {user?.nombre.substring(0, 2).toUpperCase() || "AD"}
                 </div>
                 <div className="hidden sm:block">
@@ -115,7 +117,7 @@ export default function AdminLayout() {
               </div>
 
               {showDropdown && (
-                <div className="absolute right-0 mt-2 w-48 rounded-lg border border-gray-700 bg-grafito-800 py-1 shadow-xl z-50">
+                <div className="absolute right-0 z-50 mt-2 w-48 rounded-md border border-gray-700 bg-[#181a1e] py-1 shadow-xl">
                   <button 
                     onClick={() => {
                       setShowDropdown(false);
@@ -138,7 +140,7 @@ export default function AdminLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-grafito-800 p-6">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#0b0c0e] p-4 lg:p-5">
           <Outlet />
         </main>
         
