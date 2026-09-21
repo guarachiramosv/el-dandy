@@ -6,8 +6,10 @@ export const fetchStockMovements = async (params?: { productoId?: string; sucurs
   return response.data.data;
 };
 
-export const fetchStockAlerts = async (): Promise<StockAlert[]> => {
-  const response = await api.get('/inventory/alerts');
+export type StockAlertFilter = 'todas' | 'stock_bajo' | 'agotado' | 'vendido_stock_bajo';
+
+export const fetchStockAlerts = async (tipo?: StockAlertFilter): Promise<StockAlert[]> => {
+  const response = await api.get('/inventory/alerts', { params: tipo ? { tipo } : undefined });
   return response.data.data;
 };
 

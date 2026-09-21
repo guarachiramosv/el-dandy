@@ -149,8 +149,8 @@ export default function Remachado() {
     stock: 0,
     stockMinimo: 20,
   });
-  const [stockMedida, setStockMedida] = useState({ medidaId: "", cantidadJuegos: 1, notas: "" });
-  const [stockRemache, setStockRemache] = useState({ remacheId: "", cantidad: 100, notas: "" });
+  const [stockMedida, setStockMedida] = useState({ medidaId: "", cantidadJuegos: "1", notas: "" });
+  const [stockRemache, setStockRemache] = useState({ remacheId: "", cantidad: "100", notas: "" });
 
   const load = async () => {
     setLoading(true);
@@ -519,11 +519,15 @@ export default function Remachado() {
 
   const submitStockMedida = async () => {
     if (!stockMedida.medidaId) return setMessage("Selecciona una medida.");
+    const cantidadJuegos = Number(stockMedida.cantidadJuegos.trim().replace(",", "."));
+    if (!stockMedida.cantidadJuegos.trim() || !Number.isFinite(cantidadJuegos) || cantidadJuegos === 0) {
+      return setMessage("Ingresa una cantidad valida distinta de cero.");
+    }
     setSaving(true);
     setMessage(null);
     try {
       await adjustRemachadoMedidaStock(stockMedida.medidaId, {
-        cantidadJuegos: stockMedida.cantidadJuegos,
+        cantidadJuegos,
         notas: stockMedida.notas || null,
       });
       setMessage("Stock de balata actualizado.");
@@ -537,11 +541,15 @@ export default function Remachado() {
 
   const submitStockRemache = async () => {
     if (!stockRemache.remacheId) return setMessage("Selecciona un remache.");
+    const cantidad = Number(stockRemache.cantidad.trim());
+    if (!stockRemache.cantidad.trim() || !Number.isInteger(cantidad) || cantidad === 0) {
+      return setMessage("Ingresa una cantidad entera valida distinta de cero.");
+    }
     setSaving(true);
     setMessage(null);
     try {
       await adjustRemachadoRemacheStock(stockRemache.remacheId, {
-        cantidad: stockRemache.cantidad,
+        cantidad,
         notas: stockRemache.notas || null,
       });
       setMessage("Stock de remaches actualizado.");
@@ -692,7 +700,7 @@ export default function Remachado() {
                 <Select label="Medida" value={stockMedida.medidaId} onChange={(value) => setStockMedida((prev) => ({ ...prev, medidaId: value }))}>
                   {medidas.map((item) => <option key={item.id} value={item.id}>{item.medida}</option>)}
                 </Select>
-                <Input label="Cantidad juegos (+ ingreso / - ajuste)" type="number" step="0.5" value={stockMedida.cantidadJuegos} onChange={(value) => setStockMedida((prev) => ({ ...prev, cantidadJuegos: Number(value) }))} />
+                <Input label="Cantidad juegos (+ ingreso / - ajuste)" type="text" value={stockMedida.cantidadJuegos} onChange={(value) => setStockMedida((prev) => ({ ...prev, cantidadJuegos: value }))} />
                 <Input label="Notas" value={stockMedida.notas} onChange={(value) => setStockMedida((prev) => ({ ...prev, notas: value }))} />
                 <button onClick={submitStockMedida} disabled={saving} className="btn-secondary mt-3 disabled:opacity-60">Actualizar stock</button>
               </div>
@@ -770,7 +778,7 @@ export default function Remachado() {
                 <Select label="Remache" value={stockRemache.remacheId} onChange={(value) => setStockRemache((prev) => ({ ...prev, remacheId: value }))}>
                   {remaches.map((item) => <option key={item.id} value={item.id}>{item.codigo} - {item.nombre}</option>)}
                 </Select>
-                <Input label="Cantidad (+ ingreso / - ajuste)" type="number" value={stockRemache.cantidad} onChange={(value) => setStockRemache((prev) => ({ ...prev, cantidad: Number(value) }))} />
+                <Input label="Cantidad (+ ingreso / - ajuste)" type="text" value={stockRemache.cantidad} onChange={(value) => setStockRemache((prev) => ({ ...prev, cantidad: value }))} />
                 <Input label="Notas" value={stockRemache.notas} onChange={(value) => setStockRemache((prev) => ({ ...prev, notas: value }))} />
                 <button onClick={submitStockRemache} disabled={saving} className="btn-secondary mt-3 disabled:opacity-60">Actualizar stock</button>
               </div>

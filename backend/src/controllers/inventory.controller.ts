@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
-import { InventoryService } from '../services/inventory.service';
+import { InventoryAlertType, InventoryService } from '../services/inventory.service';
 import { adjustStockSchema, transferStockSchema } from '../validators/stockValidator';
 
 const service = new InventoryService();
+const alertTypes: InventoryAlertType[] = ['todas', 'stock_bajo', 'agotado', 'vendido_stock_bajo'];
 
 export const getMovements = asyncHandler(async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
@@ -18,7 +19,10 @@ export const getMovements = asyncHandler(async (req: Request, res: Response) => 
 
 export const getStockAlerts = asyncHandler(async (req: Request, res: Response) => {
   const sucursalId = req.user?.role === 'SELLER' ? req.user.sucursalId : undefined;
-  res.json({ success: true, data: await service.alerts(sucursalId) });
+  const tipo = typeof req.query.tipo === 'string' && alertTypes.includes(req.query.tipo as InventoryAlertType)
+    ? (req.query.tipo as InventoryAlertType)
+    : undefined;
+  res.json({ success: true, data: await service.alerts({ sucursalId, tipo }) });
 });
 
 export const transferStock = asyncHandler(async (req: Request, res: Response) => {

@@ -5,6 +5,14 @@ import { ProductAuditService } from './productAudit.service';
 
 const stockService = new StockService();
 const productAuditService = new ProductAuditService();
+const SOLD_LOW_STOCK_DAYS = 30;
+
+export type InventoryAlertType = 'todas' | 'stock_bajo' | 'agotado' | 'vendido_stock_bajo';
+
+type InventoryAlertFilters = {
+  sucursalId?: string;
+  tipo?: InventoryAlertType;
+};
 
 export class InventoryService {
   private async syncProductTotalStock(tx: any, productoId: string) {
@@ -36,15 +44,107 @@ export class InventoryService {
     });
   }
 
-  async alerts(sucursalId?: string) {
-    return prisma.alertaStock.findMany({
+  async alerts(filters: InventoryAlertFilters = {}) {
+    const tipo = filters.tipo || 'todas';
+    const includeProduct = { sucursal: true, categoria: true };
+    const productWhere = {
+      estado: 'ACTIVO' as const,
+      activo: true,
+      sucursalId: filters.sucursalId,
+    };
+
+    const [lowStockProducts, soldProducts] = await Promise.all([
+      tipo === 'todas' || tipo === 'stock_bajo' || tipo === 'agotado'
+        ? prisma.producto.findMany({
+            where: productWhere,
+            include: includeProduct,
+            orderBy: [{ stock: 'asc' }, { descripcion: 'asc' }],
+          })
+        : Promise.resolve([]),
+      tipo === 'todas' || tipo === 'vendido_stock_bajo'
+        ? this.soldLowStockProducts(filters.sucursalId)
+        : Promise.resolve([]),
+    ]);
+
+    const now = new Date();
+    const lowStockAlerts = lowStockProducts
+      .filter((producto) => producto.stock <= producto.stockMinimo)
+      .filter((producto) => {
+        if (tipo === 'agotado') return producto.stock <= 0;
+        if (tipo === 'stock_bajo') return producto.stock > 0;
+        return true;
+      })
+      .map((producto) => {
+        const agotado = producto.stock <= 0;
+        return {
+          id: `${agotado ? 'agotado' : 'stock-bajo'}-${producto.id}`,
+          productoId: producto.id,
+          producto,
+          tipo: agotado ? 'AGOTADO' : 'STOCK_BAJO',
+          mensaje: agotado
+            ? 'Producto agotado. Reponer antes de seguir vendiendo.'
+            : `Stock bajo: quedan ${producto.stock} de minimo ${producto.stockMinimo}.`,
+          leida: false,
+          createdAt: now,
+        };
+      });
+
+    const soldLowStockAlerts = soldProducts.map(({ producto, vendidosUltimos30Dias }) => ({
+      id: `vendido-stock-bajo-${producto.id}`,
+      productoId: producto.id,
+      producto,
+      tipo: 'VENDIDO_STOCK_BAJO',
+      mensaje: `Vendido recientemente (${vendidosUltimos30Dias} uds en ${SOLD_LOW_STOCK_DAYS} dias) y con poco stock.`,
+      leida: false,
+      createdAt: now,
+      vendidosUltimos30Dias,
+    }));
+
+    return [...soldLowStockAlerts, ...lowStockAlerts];
+  }
+
+  private async soldLowStockProducts(sucursalId?: string) {
+    const since = new Date();
+    since.setDate(since.getDate() - SOLD_LOW_STOCK_DAYS);
+
+    const soldGroups = await prisma.detalleVenta.groupBy({
+      by: ['productoId'],
       where: {
-        leida: false,
-        producto: sucursalId ? { sucursalId } : undefined,
+        productoId: { not: null },
+        venta: {
+          createdAt: { gte: since },
+          sucursalId,
+        },
       },
-      include: { producto: { include: { sucursal: true, categoria: true } } },
-      orderBy: { createdAt: 'desc' },
+      _sum: { cantidad: true },
+      orderBy: { _sum: { cantidad: 'desc' } },
+      take: 100,
     });
+
+    const productIds = soldGroups.map((item) => item.productoId).filter((id): id is string => Boolean(id));
+    if (productIds.length === 0) return [];
+
+    const products = await prisma.producto.findMany({
+      where: {
+        id: { in: productIds },
+        estado: 'ACTIVO',
+        activo: true,
+        sucursalId,
+      },
+      include: { sucursal: true, categoria: true },
+    });
+
+    const productsById = new Map(products.map((producto) => [producto.id, producto]));
+    return soldGroups
+      .map((item) => {
+        const producto = item.productoId ? productsById.get(item.productoId) : undefined;
+        if (!producto || producto.stock > producto.stockMinimo) return null;
+        return {
+          producto,
+          vendidosUltimos30Dias: item._sum.cantidad ?? 0,
+        };
+      })
+      .filter((item): item is { producto: NonNullable<(typeof products)[number]>; vendidosUltimos30Dias: number } => Boolean(item));
   }
 
   async transfer(data: {

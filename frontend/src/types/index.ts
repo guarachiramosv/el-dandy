@@ -137,9 +137,10 @@ export interface StockAlert {
   id: string;
   productoId: string;
   producto?: Product;
-  tipo: string;
+  tipo: 'STOCK_BAJO' | 'AGOTADO' | 'VENDIDO_STOCK_BAJO' | string;
   mensaje: string;
   leida: boolean;
+  vendidosUltimos30Dias?: number;
   createdAt: string;
 }
 
