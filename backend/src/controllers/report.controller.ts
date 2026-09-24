@@ -28,6 +28,14 @@ export const getSalesHistoryReport = asyncHandler(async (req: Request, res: Resp
   res.json({ success: true, data });
 });
 
+export const getMonthlyProfitReport = asyncHandler(async (req: Request, res: Response) => {
+  const data = await service.getMonthlyProfitReport({
+    month: typeof req.query.month === 'string' ? req.query.month : null,
+    sucursalId: typeof req.query.sucursalId === 'string' ? req.query.sucursalId : null,
+  });
+  res.json({ success: true, data });
+});
+
 export const getProductInventoryReport = asyncHandler(async (req: Request, res: Response) => {
   const data = await service.getProductInventoryReport({
     period: getPeriod(req.query.period),

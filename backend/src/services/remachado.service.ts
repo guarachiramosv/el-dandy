@@ -502,6 +502,7 @@ export class RemachadoService {
           unidadVenta: pt.original.tipoTrabajo,
           cantidad: pt.config.cantidadJuegos,
           precioUnitario: pt.precioUnitario,
+          costoUnitario: null,
           subtotal: pt.precioUnitario,
           remachadoTrabajoId: tb.id,
         });
@@ -516,6 +517,7 @@ export class RemachadoService {
           unidadVenta: producto.unidadVenta,
           cantidad: accessory.cantidad,
           precioUnitario: accessory.precioUnitario,
+          costoUnitario: producto.precioCompra,
           subtotal: accessory.cantidad * accessory.precioUnitario,
         };
       });

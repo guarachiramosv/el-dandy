@@ -346,6 +346,7 @@ model DetalleVenta {
   unidadVenta    String?
   cantidad       Float
   precioUnitario Float
+  costoUnitario  Float?
   subtotal       Float
   ventaId        String
   venta          Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)

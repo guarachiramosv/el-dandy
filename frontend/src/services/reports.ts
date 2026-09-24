@@ -2,6 +2,56 @@ import api from './api';
 
 export type ReportPeriod = 'day' | 'month' | 'year' | 'all';
 
+export type MonthlyProfitReport = {
+  month: string;
+  desde: string;
+  hasta: string;
+  totals: {
+    cantidadVentas: number;
+    unidadesVendidas: number;
+    totalVentas: number;
+    totalEfectivo: number;
+    totalQr: number;
+    totalTransferencia: number;
+    totalTarjeta: number;
+    totalCredito: number;
+    cobrosCredito: number;
+    costoProductos: number;
+    gananciaBruta: number;
+    totalGastos: number;
+    gananciaNeta: number;
+    margenNeto: number;
+    ticketPromedio: number;
+    descuentos: number;
+  };
+  dias: Array<{
+    fecha: string;
+    ventas: number;
+    ingresos: number;
+    costos: number;
+    gastos: number;
+    ganancia: number;
+  }>;
+  productos: Array<{
+    id: string;
+    codigo: string;
+    descripcion: string;
+    cantidad: number;
+    ingresos: number;
+    costos: number;
+    ganancia: number;
+  }>;
+  sucursales: Array<{
+    id: string;
+    nombre: string;
+    ventas: number;
+    ingresos: number;
+    costos: number;
+    gastos: number;
+    ganancia: number;
+  }>;
+};
+
 type ReportUser = {
   id: string;
   nombre: string;
@@ -320,5 +370,13 @@ export const fetchSalesHistoryReport = async (params: {
   sucursalId?: string;
 }): Promise<SalesHistoryReport> => {
   const response = await api.get<{ success: boolean; data: SalesHistoryReport }>('/reports/sales-history', { params });
+  return response.data.data;
+};
+
+export const fetchMonthlyProfitReport = async (params: {
+  month: string;
+  sucursalId?: string;
+}): Promise<MonthlyProfitReport> => {
+  const response = await api.get<{ success: boolean; data: MonthlyProfitReport }>('/reports/monthly-profit', { params });
   return response.data.data;
 };

@@ -72,6 +72,10 @@ function parsePeriod(period: ReportPeriod, value?: string | null) {
   return { start, end, label };
 }
 
+function boliviaDateLabel(date: Date) {
+  return new Date(date.getTime() - BOLIVIA_UTC_OFFSET_HOURS * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function emptyClosingTotals() {
   return {
     cantidadCierres: 0,
@@ -133,6 +137,181 @@ const isInitialStockMovement = (movement: { tipoMovimiento: string; referenciaTi
   movement.tipoMovimiento === 'AJUSTE' && movement.referenciaTipo === 'ALTA_PRODUCTO';
 
 export class ReportService {
+  async getMonthlyProfitReport(params: { month?: string | null; sucursalId?: string | null }) {
+    const range = parsePeriod('month', params.month);
+    const saleWhere: Prisma.VentaWhereInput = {
+      createdAt: { gte: range.start, lt: range.end },
+      ...(params.sucursalId ? { sucursalId: params.sucursalId } : {}),
+    };
+    const expenseWhere: Prisma.GastoCajaWhereInput = {
+      createdAt: { gte: range.start, lt: range.end },
+      ...(params.sucursalId ? { sucursalId: params.sucursalId } : {}),
+    };
+    const paymentWhere: Prisma.PagoCreditoWhereInput = {
+      createdAt: { gte: range.start, lt: range.end },
+      ...(params.sucursalId ? { cuenta: { sucursalId: params.sucursalId } } : {}),
+    };
+
+    const [ventas, gastos, cobrosCredito] = await Promise.all([
+      prisma.venta.findMany({
+        where: saleWhere,
+        include: {
+          sucursal: true,
+          usuario: { select: { id: true, nombre: true } },
+          detalles: {
+            include: {
+              producto: { select: { id: true, codigo: true, descripcion: true, precioCompra: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.gastoCaja.findMany({
+        where: expenseWhere,
+        include: { sucursal: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.pagoCredito.findMany({
+        where: paymentWhere,
+        include: { cuenta: { include: { venta: { include: { sucursal: true } } } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const totals = {
+      cantidadVentas: ventas.length,
+      unidadesVendidas: 0,
+      totalVentas: 0,
+      totalEfectivo: 0,
+      totalQr: 0,
+      totalTransferencia: 0,
+      totalTarjeta: 0,
+      totalCredito: 0,
+      cobrosCredito: 0,
+      costoProductos: 0,
+      gananciaBruta: 0,
+      totalGastos: 0,
+      gananciaNeta: 0,
+      margenNeto: 0,
+      ticketPromedio: 0,
+      descuentos: 0,
+    };
+
+    const dailyMap = new Map<string, { fecha: string; ventas: number; ingresos: number; costos: number; gastos: number; ganancia: number }>();
+    const productMap = new Map<string, { id: string; codigo: string; descripcion: string; cantidad: number; ingresos: number; costos: number; ganancia: number }>();
+    const branchMap = new Map<string, { id: string; nombre: string; ventas: number; ingresos: number; costos: number; gastos: number; ganancia: number }>();
+
+    ventas.forEach((venta) => {
+      totals.totalVentas += venta.total;
+      totals.descuentos += venta.descuento;
+      if (venta.tipoVenta === 'CREDITO') totals.totalCredito += venta.total;
+      else if (venta.metodoPago === 'EFECTIVO') totals.totalEfectivo += venta.total;
+      else if (venta.metodoPago === 'QR') totals.totalQr += venta.total;
+      else if (venta.metodoPago === 'TRANSFERENCIA') totals.totalTransferencia += venta.total;
+      else if (venta.metodoPago === 'TARJETA') totals.totalTarjeta += venta.total;
+
+      const dayKey = boliviaDateLabel(venta.createdAt);
+      const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
+      day.ventas += 1;
+      day.ingresos += venta.total;
+
+      const branch = branchMap.get(venta.sucursalId) || {
+        id: venta.sucursalId,
+        nombre: venta.sucursal.nombre,
+        ventas: 0,
+        ingresos: 0,
+        costos: 0,
+        gastos: 0,
+        ganancia: 0,
+      };
+      branch.ventas += 1;
+      branch.ingresos += venta.total;
+
+      const saleFactor = venta.subtotal > 0 ? venta.total / venta.subtotal : 0;
+      venta.detalles.forEach((detalle) => {
+        const lineRevenue = detalle.subtotal * saleFactor;
+        const unitCost = detalle.costoUnitario ?? detalle.producto?.precioCompra ?? 0;
+        const lineCost = unitCost * detalle.cantidad;
+        totals.unidadesVendidas += detalle.cantidad;
+        totals.costoProductos += lineCost;
+        day.costos += lineCost;
+        branch.costos += lineCost;
+
+        const key = detalle.productoId || detalle.descripcion || detalle.id;
+        const product = productMap.get(key) || {
+          id: key,
+          codigo: detalle.producto?.codigo || (detalle.tipoLinea === 'REMACHADO' ? 'SERVICIO' : ''),
+          descripcion: detalle.producto?.descripcion || detalle.descripcion || 'Detalle de venta',
+          cantidad: 0,
+          ingresos: 0,
+          costos: 0,
+          ganancia: 0,
+        };
+        product.cantidad += detalle.cantidad;
+        product.ingresos += lineRevenue;
+        product.costos += lineCost;
+        product.ganancia = product.ingresos - product.costos;
+        productMap.set(key, product);
+      });
+
+      dailyMap.set(dayKey, day);
+      branchMap.set(venta.sucursalId, branch);
+    });
+
+    gastos.forEach((gasto) => {
+      totals.totalGastos += gasto.monto;
+      const dayKey = boliviaDateLabel(gasto.createdAt);
+      const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
+      day.gastos += gasto.monto;
+      dailyMap.set(dayKey, day);
+
+      const branch = branchMap.get(gasto.sucursalId) || {
+        id: gasto.sucursalId,
+        nombre: gasto.sucursal.nombre,
+        ventas: 0,
+        ingresos: 0,
+        costos: 0,
+        gastos: 0,
+        ganancia: 0,
+      };
+      branch.gastos += gasto.monto;
+      branchMap.set(gasto.sucursalId, branch);
+    });
+
+    cobrosCredito.forEach((pago) => {
+      totals.cobrosCredito += pago.monto;
+      if (pago.metodoPago === 'EFECTIVO') totals.totalEfectivo += pago.monto;
+      else if (pago.metodoPago === 'QR') totals.totalQr += pago.monto;
+      else if (pago.metodoPago === 'TRANSFERENCIA') totals.totalTransferencia += pago.monto;
+      else if (pago.metodoPago === 'TARJETA') totals.totalTarjeta += pago.monto;
+    });
+
+    totals.gananciaBruta = totals.totalVentas - totals.costoProductos;
+    totals.gananciaNeta = totals.gananciaBruta - totals.totalGastos;
+    totals.margenNeto = totals.totalVentas > 0 ? (totals.gananciaNeta / totals.totalVentas) * 100 : 0;
+    totals.ticketPromedio = totals.cantidadVentas > 0 ? totals.totalVentas / totals.cantidadVentas : 0;
+
+    const dias = Array.from(dailyMap.values())
+      .map((day) => ({ ...day, ganancia: day.ingresos - day.costos - day.gastos }))
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const sucursales = Array.from(branchMap.values())
+      .map((branch) => ({ ...branch, ganancia: branch.ingresos - branch.costos - branch.gastos }))
+      .sort((a, b) => b.ingresos - a.ingresos);
+    const productos = Array.from(productMap.values())
+      .sort((a, b) => b.ganancia - a.ganancia)
+      .slice(0, 10);
+
+    return {
+      month: range.label,
+      desde: range.start,
+      hasta: range.end,
+      totals,
+      dias,
+      productos,
+      sucursales,
+    };
+  }
+
   async getSalesHistoryReport(params: {
     period: ReportPeriod;
     value?: string | null;

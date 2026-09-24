@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
@@ -21,6 +21,8 @@ import AdminProductos from "./pages/admin/Productos";
 import AdminCategorias from "./pages/admin/Categorias";
 import Usuarios from "./pages/Usuarios";
 import { getCurrentUser } from "./services/auth";
+
+const Ganancias = lazy(() => import("./pages/Ganancias"));
 
 const ProtectedAdminRoute = ({ children }: { children: React.ReactNode }) => {
   const user = getCurrentUser();
@@ -57,7 +59,7 @@ export default function App() {
           <Route path="historial" element={<HistorialVentas />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="usuarios" element={<Usuarios />} />
-          <Route path="ganancias" element={<div className="p-6"><h1 className="text-2xl text-white">Ganancias</h1></div>} />
+          <Route path="ganancias" element={<Suspense fallback={<div className="p-6 text-gray-400">Cargando ganancias...</div>}><Ganancias /></Suspense>} />
           <Route path="configuracion" element={<div className="p-6"><h1 className="text-2xl text-white">Configuración</h1></div>} />
         </Route>
 

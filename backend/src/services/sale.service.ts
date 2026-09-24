@@ -293,6 +293,7 @@ export class SaleService {
           unidadVenta: producto.unidadVenta,
           cantidad: item.cantidad,
           precioUnitario: producto.precioVenta,
+          costoUnitario: producto.precioCompra,
           subtotal: Math.max(lineSubtotal, 0),
         };
       });
