@@ -38,6 +38,19 @@ type CreateCashExpenseInput = {
   notas?: string | null;
 };
 
+type InternalUserScope = {
+  id?: string | null;
+  sucursalId?: string | null;
+  role?: string | null;
+};
+
+type DailySummaryInput = {
+  usuarioId?: string | null;
+  sucursalId: string;
+  fecha?: string | null;
+  includeAllSellers?: boolean;
+};
+
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
 
 type ProductWithBranchStock = Prisma.ProductoGetPayload<{
@@ -87,6 +100,15 @@ function parseDueDate(dateValue?: string | null) {
 function sellerBusinessDayScope(usuarioId: string, sucursalId: string) {
   return {
     usuarioId,
+    OR: [
+      { sucursalId },
+      { usuario: { sucursalId } },
+    ],
+  };
+}
+
+function branchBusinessDayScope(sucursalId: string) {
+  return {
     OR: [
       { sucursalId },
       { usuario: { sucursalId } },
@@ -164,6 +186,20 @@ function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId:
   return { sucursalId: producto.sucursalId, availableStock: producto.stock };
 }
 
+const saleVoidRequestInclude = {
+  solicitante: { select: { id: true, nombre: true, email: true } },
+  administrador: { select: { id: true, nombre: true, email: true } },
+} satisfies Prisma.SolicitudAnulacionVentaInclude;
+
+const saleInclude = {
+  usuario: { select: { id: true, nombre: true, email: true } },
+  sucursal: true,
+  cliente: true,
+  cuenta: { include: { pagos: true } },
+  detalles: { include: { producto: true } },
+  solicitudAnulacion: { include: saleVoidRequestInclude },
+} satisfies Prisma.VentaInclude;
+
 export class SaleService {
   async updatePaymentMethod(id: string, metodoPago: PaymentMethod) {
     if (metodoPago !== 'EFECTIVO' && metodoPago !== 'QR') {
@@ -178,13 +214,7 @@ export class SaleService {
 
   async getAll() {
     return prisma.venta.findMany({
-      include: {
-        usuario: { select: { id: true, nombre: true, email: true } },
-        sucursal: true,
-        cliente: true,
-        cuenta: { include: { pagos: true } },
-        detalles: { include: { producto: true } },
-      },
+      include: saleInclude,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -330,44 +360,35 @@ export class SaleService {
 
     return prisma.venta.findUnique({
       where: { id: ventaId },
-      include: {
-        usuario: { select: { id: true, nombre: true, email: true } },
-        sucursal: true,
-        cliente: true,
-        cuenta: { include: { pagos: true } },
-        detalles: { include: { producto: true } },
-      },
+      include: saleInclude,
     });
   }
 
-  async getDailySummary(params: { usuarioId: string; sucursalId: string; fecha?: string | null }) {
+  async getDailySummary(params: DailySummaryInput) {
     const businessDay = getBusinessDay(params.fecha);
+    const scopedWhere = params.includeAllSellers
+      ? branchBusinessDayScope(params.sucursalId)
+      : sellerBusinessDayScope(String(params.usuarioId || ''), params.sucursalId);
     const where: Prisma.VentaWhereInput = {
-      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
+      ...scopedWhere,
       createdAt: { gte: businessDay.start, lt: businessDay.end },
     };
     const expenseWhere: Prisma.GastoCajaWhereInput = {
-      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
+      ...scopedWhere,
       createdAt: { gte: businessDay.start, lt: businessDay.end },
     };
     const closingWhere: Prisma.CierreCajaWhereInput = {
       fecha: businessDay.start,
-      ...sellerBusinessDayScope(params.usuarioId, params.sucursalId),
+      ...scopedWhere,
     };
 
     const [ventas, cierre, gastos, pagosCredito] = await Promise.all([
       prisma.venta.findMany({
         where,
-        include: {
-          usuario: { select: { id: true, nombre: true, email: true } },
-          sucursal: true,
-          cliente: true,
-          cuenta: { include: { pagos: true } },
-          detalles: { include: { producto: true } },
-        },
+        include: saleInclude,
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.cierreCaja.findFirst({ where: closingWhere }),
+      params.includeAllSellers ? Promise.resolve(null) : prisma.cierreCaja.findFirst({ where: closingWhere }),
       prisma.gastoCaja.findMany({
         where: expenseWhere,
         include: {
@@ -378,7 +399,7 @@ export class SaleService {
       }),
       prisma.pagoCredito.findMany({
         where: {
-          usuarioId: params.usuarioId,
+          ...(params.includeAllSellers ? {} : { usuarioId: String(params.usuarioId || '') }),
           createdAt: { gte: businessDay.start, lt: businessDay.end },
           cuenta: { sucursalId: params.sucursalId },
         },
@@ -566,134 +587,201 @@ export class SaleService {
     });
   }
 
-  async deleteSale(id: string, motivo: string = 'Anulación de venta') {
+  async requestSaleVoid(id: string, motivo: string, user: InternalUserScope) {
     return prisma.$transaction(async (tx) => {
       const venta = await tx.venta.findUnique({
         where: { id },
-        include: { detalles: true, remachadoTrabajos: true }
+        include: {
+          solicitudAnulacion: true,
+        },
       });
       if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
+      if (!user.id) throw Object.assign(new Error('Sesion requerida'), { status: 401 });
+
+      if (user.role === 'SELLER' && (venta.usuarioId !== user.id || venta.sucursalId !== user.sucursalId)) {
+        throw Object.assign(new Error('No puedes solicitar anulacion de una venta de otro vendedor.'), { status: 403 });
+      }
 
       const businessDay = getBusinessDay(venta.createdAt.toISOString());
       const cierre = await tx.cierreCaja.findFirst({
         where: {
           fecha: businessDay.start,
           ...sellerBusinessDayScope(venta.usuarioId, venta.sucursalId),
-        }
+        },
       });
       if (cierre) {
-        throw Object.assign(new Error('No se puede anular la venta porque la caja de ese dia ya fue cerrada.'), { status: 409 });
+        throw Object.assign(new Error('No se puede solicitar anulacion porque la caja de ese dia ya fue cerrada.'), { status: 409 });
       }
 
-      for (const detalle of venta.detalles) {
-        if (detalle.tipoLinea === 'PRODUCTO' && detalle.productoId) {
-          const producto = await tx.producto.findUnique({
-            where: { id: detalle.productoId },
-            include: { stockSucursales: true }
+      if (venta.solicitudAnulacion?.estado === 'PENDIENTE') {
+        throw Object.assign(new Error('Esta venta ya tiene una solicitud de anulacion pendiente.'), { status: 409 });
+      }
+
+      return tx.solicitudAnulacionVenta.create({
+        data: {
+          ventaId: id,
+          solicitanteId: user.id,
+          motivo,
+        },
+        include: saleVoidRequestInclude,
+      });
+    });
+  }
+
+  async approveSaleVoidRequest(requestId: string, adminId: string) {
+    return prisma.$transaction(async (tx) => {
+      const request = await tx.solicitudAnulacionVenta.findUnique({
+        where: { id: requestId },
+        include: { venta: true },
+      });
+      if (!request) throw Object.assign(new Error('Solicitud de anulacion no encontrada'), { status: 404 });
+      if (request.estado !== 'PENDIENTE') {
+        throw Object.assign(new Error('La solicitud ya fue procesada'), { status: 409 });
+      }
+
+      await tx.solicitudAnulacionVenta.update({
+        where: { id: requestId },
+        data: {
+          estado: 'APROBADA',
+          administradorId: adminId,
+          approvedAt: new Date(),
+        },
+      });
+
+      return this.deleteSaleWithTransaction(tx, request.ventaId, request.motivo);
+    });
+  }
+
+  async deleteSale(id: string, motivo: string = 'Anulación de venta') {
+    return prisma.$transaction((tx) => this.deleteSaleWithTransaction(tx, id, motivo));
+  }
+
+  private async deleteSaleWithTransaction(tx: Prisma.TransactionClient, id: string, motivo: string) {
+    const venta = await tx.venta.findUnique({
+      where: { id },
+      include: { detalles: true, remachadoTrabajos: true }
+    });
+    if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
+
+    const businessDay = getBusinessDay(venta.createdAt.toISOString());
+    const cierre = await tx.cierreCaja.findFirst({
+      where: {
+        fecha: businessDay.start,
+        ...sellerBusinessDayScope(venta.usuarioId, venta.sucursalId),
+      }
+    });
+    if (cierre) {
+      throw Object.assign(new Error('No se puede anular la venta porque la caja de ese dia ya fue cerrada.'), { status: 409 });
+    }
+
+    for (const detalle of venta.detalles) {
+      if (detalle.tipoLinea === 'PRODUCTO' && detalle.productoId) {
+        const producto = await tx.producto.findUnique({
+          where: { id: detalle.productoId },
+          include: { stockSucursales: true }
+        });
+
+        if (producto) {
+          const movimiento = await tx.movimientoStock.findFirst({
+            where: {
+              referenciaId: venta.id,
+              referenciaTipo: 'VENTA',
+              productoId: detalle.productoId
+            }
           });
+
+          const sucursalIdTarget = movimiento ? movimiento.sucursalId : venta.sucursalId;
+          const targetStock = producto.stockSucursales.find(s => s.sucursalId === sucursalIdTarget);
           
-          if (producto) {
-            const movimiento = await tx.movimientoStock.findFirst({
-              where: {
-                referenciaId: venta.id,
-                referenciaTipo: 'VENTA',
-                productoId: detalle.productoId
-              }
-            });
+          if (targetStock) {
+            const stockAnterior = targetStock.stock;
+            const stockNuevo = stockAnterior + detalle.cantidad;
 
-            const sucursalIdTarget = movimiento ? movimiento.sucursalId : venta.sucursalId;
-            const targetStock = producto.stockSucursales.find(s => s.sucursalId === sucursalIdTarget);
-            
-            if (targetStock) {
-              const stockAnterior = targetStock.stock;
-              const stockNuevo = stockAnterior + detalle.cantidad;
-
-              await tx.productoStockSucursal.update({
-                where: { productoId_sucursalId: { productoId: detalle.productoId, sucursalId: sucursalIdTarget } },
-                data: { stock: stockNuevo }
-              });
-
-              await tx.producto.update({
-                where: { id: detalle.productoId },
-                data: { stock: { increment: detalle.cantidad } }
-              });
-
-              await tx.movimientoStock.create({
-                data: {
-                  tipoMovimiento: 'AJUSTE',
-                  productoId: detalle.productoId,
-                  sucursalId: sucursalIdTarget,
-                  stockAnterior,
-                  stockNuevo,
-                  cantidad: detalle.cantidad,
-                  usuarioId: venta.usuarioId,
-                  referenciaId: venta.id,
-                  referenciaTipo: 'ANULACION',
-                  notas: `Venta anulada - Motivo: ${motivo}`
-                }
-              });
-            }
-          }
-        }
-      }
-
-      for (const trabajo of venta.remachadoTrabajos) {
-        const medida = await tx.remachadoMedida.findUnique({ where: { id: trabajo.medidaId } });
-        if (medida) {
-          const stockNuevo = medida.stockJuegos + trabajo.cantidadJuegos;
-          await tx.remachadoMedida.update({
-            where: { id: trabajo.medidaId },
-            data: { stockJuegos: stockNuevo }
-          });
-          await tx.remachadoMovimiento.create({
-            data: {
-              tipo: 'AJUSTE',
-              medidaId: trabajo.medidaId,
-              usuarioId: venta.usuarioId,
-              stockAnterior: medida.stockJuegos,
-              stockNuevo,
-              cantidad: trabajo.cantidadJuegos,
-              notas: `Venta anulada - Motivo: ${motivo}`
-            }
-          });
-        }
-        
-        if (trabajo.remacheId) {
-          const remache = await tx.remachadoRemache.findUnique({ where: { id: trabajo.remacheId } });
-          if (remache) {
-            const stockNuevo = remache.stock + trabajo.cantidadRemaches;
-            await tx.remachadoRemache.update({
-              where: { id: trabajo.remacheId },
+            await tx.productoStockSucursal.update({
+              where: { productoId_sucursalId: { productoId: detalle.productoId, sucursalId: sucursalIdTarget } },
               data: { stock: stockNuevo }
             });
-            await tx.remachadoMovimiento.create({
+
+            await tx.producto.update({
+              where: { id: detalle.productoId },
+              data: { stock: { increment: detalle.cantidad } }
+            });
+
+            await tx.movimientoStock.create({
               data: {
-                tipo: 'AJUSTE',
-                remacheId: trabajo.remacheId,
-                usuarioId: venta.usuarioId,
-                stockAnterior: remache.stock,
+                tipoMovimiento: 'AJUSTE',
+                productoId: detalle.productoId,
+                sucursalId: sucursalIdTarget,
+                stockAnterior,
                 stockNuevo,
-                cantidad: trabajo.cantidadRemaches,
+                cantidad: detalle.cantidad,
+                usuarioId: venta.usuarioId,
+                referenciaId: venta.id,
+                referenciaTipo: 'ANULACION',
                 notas: `Venta anulada - Motivo: ${motivo}`
               }
             });
           }
         }
       }
+    }
 
-      await tx.remachadoMovimiento.updateMany({
-        where: { trabajo: { ventaId: id } },
-        data: { trabajoId: null }
-      });
-      await tx.remachadoTrabajo.deleteMany({
-        where: { ventaId: id }
-      });
-      await tx.venta.delete({
-        where: { id }
-      });
+    for (const trabajo of venta.remachadoTrabajos) {
+      const medida = await tx.remachadoMedida.findUnique({ where: { id: trabajo.medidaId } });
+      if (medida) {
+        const stockNuevo = medida.stockJuegos + trabajo.cantidadJuegos;
+        await tx.remachadoMedida.update({
+          where: { id: trabajo.medidaId },
+          data: { stockJuegos: stockNuevo }
+        });
+        await tx.remachadoMovimiento.create({
+          data: {
+            tipo: 'AJUSTE',
+            medidaId: trabajo.medidaId,
+            usuarioId: venta.usuarioId,
+            stockAnterior: medida.stockJuegos,
+            stockNuevo,
+            cantidad: trabajo.cantidadJuegos,
+            notas: `Venta anulada - Motivo: ${motivo}`
+          }
+        });
+      }
 
-      return { success: true };
+      if (trabajo.remacheId) {
+        const remache = await tx.remachadoRemache.findUnique({ where: { id: trabajo.remacheId } });
+        if (remache) {
+          const stockNuevo = remache.stock + trabajo.cantidadRemaches;
+          await tx.remachadoRemache.update({
+            where: { id: trabajo.remacheId },
+            data: { stock: stockNuevo }
+          });
+          await tx.remachadoMovimiento.create({
+            data: {
+              tipo: 'AJUSTE',
+              remacheId: trabajo.remacheId,
+              usuarioId: venta.usuarioId,
+              stockAnterior: remache.stock,
+              stockNuevo,
+              cantidad: trabajo.cantidadRemaches,
+              notas: `Venta anulada - Motivo: ${motivo}`
+            }
+          });
+        }
+      }
+    }
+
+    await tx.remachadoMovimiento.updateMany({
+      where: { trabajo: { ventaId: id } },
+      data: { trabajoId: null }
     });
+    await tx.remachadoTrabajo.deleteMany({
+      where: { ventaId: id }
+    });
+    await tx.venta.delete({
+      where: { id }
+    });
+
+    return { success: true };
   }
 
   async closeCashRegister(data: CloseCashRegisterInput) {

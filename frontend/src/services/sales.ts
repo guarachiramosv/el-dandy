@@ -1,5 +1,5 @@
 import api from './api';
-import { CashClosing, CashExpense, DailySalesSummary, PendingCashClosing, Sale, SaleInput } from '../types';
+import { CashClosing, CashExpense, DailySalesSummary, PendingCashClosing, Sale, SaleInput, SaleVoidRequest } from '../types';
 
 export const createSale = async (sale: SaleInput): Promise<Sale> => {
   const response = await api.post<{ success: boolean; data: Sale }>('/sales', sale);
@@ -47,6 +47,18 @@ export const updateSalePaymentMethod = async (id: string, metodoPago: 'EFECTIVO'
 
 export const deleteSale = async (id: string, motivo: string): Promise<void> => {
   const response = await api.delete<{ success: boolean; message: string }>(`/sales/${id}`, { data: { motivo } });
+  if (!response.data.success) {
+    throw new Error(response.data.message);
+  }
+};
+
+export const requestSaleVoid = async (id: string, motivo: string): Promise<SaleVoidRequest> => {
+  const response = await api.post<{ success: boolean; data: SaleVoidRequest; message: string }>(`/sales/${id}/void-request`, { motivo });
+  return response.data.data;
+};
+
+export const approveSaleVoidRequest = async (requestId: string): Promise<void> => {
+  const response = await api.post<{ success: boolean; message: string }>(`/sales/void-requests/${requestId}/approve`);
   if (!response.data.success) {
     throw new Error(response.data.message);
   }

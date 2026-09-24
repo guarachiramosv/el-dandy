@@ -2,7 +2,7 @@ import { PaymentMethod } from '@prisma/client';
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
 import { SaleService } from '../services/sale.service';
-import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema } from '../validators/saleValidator';
+import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema, saleVoidRequestSchema } from '../validators/saleValidator';
 
 const service = new SaleService();
 
@@ -34,17 +34,24 @@ export const createSale = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getDailySalesSummary = asyncHandler(async (req: Request, res: Response) => {
-  const usuarioId = req.user?.id ?? String(req.query.usuarioId || '');
+  const isAdmin = req.user?.role === 'ADMIN';
+  const requestedUserId = typeof req.query.usuarioId === 'string' ? req.query.usuarioId : '';
+  const usuarioId = isAdmin ? requestedUserId : (req.user?.id ?? String(req.query.usuarioId || ''));
   const sucursalId = req.user?.role === 'SELLER' && req.user.sucursalId
     ? req.user.sucursalId
     : String(req.query.sucursalId || req.user?.sucursalId || '');
   const fecha = typeof req.query.fecha === 'string' ? req.query.fecha : null;
 
-  if (!usuarioId || !sucursalId) {
+  if ((!usuarioId && !isAdmin) || !sucursalId) {
     return res.status(400).json({ success: false, error: 'Usuario y sucursal requeridos' });
   }
 
-  const data = await service.getDailySummary({ usuarioId, sucursalId, fecha });
+  const data = await service.getDailySummary({
+    usuarioId,
+    sucursalId,
+    fecha,
+    includeAllSellers: isAdmin && !usuarioId,
+  });
   res.json({ success: true, data });
 });
 
@@ -68,6 +75,28 @@ export const deleteSale = asyncHandler(async (req: Request, res: Response) => {
   
   await service.deleteSale(String(id), String(motivo));
   res.json({ success: true, message: 'Venta anulada correctamente' });
+});
+
+export const requestSaleVoid = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
+
+  const parsed = saleVoidRequestSchema.parse(req.body);
+  const data = await service.requestSaleVoid(String(id), parsed.motivo, {
+    id: req.user?.id,
+    sucursalId: req.user?.sucursalId,
+    role: req.user?.role,
+  });
+  res.status(201).json({ success: true, data, message: 'Solicitud enviada al administrador' });
+});
+
+export const approveSaleVoidRequest = asyncHandler(async (req: Request, res: Response) => {
+  const { requestId } = req.params;
+  if (!requestId) return res.status(400).json({ success: false, error: 'ID de solicitud requerido' });
+  if (!req.user?.id) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+
+  await service.approveSaleVoidRequest(String(requestId), req.user.id);
+  res.json({ success: true, message: 'Solicitud aprobada. Venta anulada correctamente' });
 });
 
 export const closeCashRegister = asyncHandler(async (req: Request, res: Response) => {

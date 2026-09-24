@@ -54,6 +54,7 @@ export default function App() {
           <Route path="inventario" element={<Inventario />} />
           <Route path="remachado" element={<Remachado />} />
           <Route path="alertas" element={<Alertas />} />
+          <Route path="historial" element={<HistorialVentas />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="usuarios" element={<Usuarios />} />
           <Route path="ganancias" element={<div className="p-6"><h1 className="text-2xl text-white">Ganancias</h1></div>} />

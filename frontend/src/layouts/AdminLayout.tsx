@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer } from "lucide-react";
+import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer, ReceiptText } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 import BrandLogo from "../components/BrandLogo";
@@ -69,6 +69,9 @@ export default function AdminLayout() {
           </NavLink>
           <NavLink to="/admin/alertas" className={navLinkClass}>
             <AlertTriangle size={17} className="mr-3" /> Alertas
+          </NavLink>
+          <NavLink to="/admin/historial" className={navLinkClass}>
+            <ReceiptText size={17} className="mr-3" /> Historial
           </NavLink>
           <NavLink to="/admin/reportes" className={navLinkClass}>
             <FileText size={17} className="mr-3" /> Reportes

@@ -31,3 +31,7 @@ export const createCashExpenseSchema = z.object({
   metodoPago: z.enum(['EFECTIVO', 'QR']),
   notas: z.string().trim().max(300, 'Notas demasiado largas').optional().nullable(),
 });
+
+export const saleVoidRequestSchema = z.object({
+  motivo: z.string().trim().min(2, 'Motivo requerido').max(300, 'Motivo demasiado largo'),
+});

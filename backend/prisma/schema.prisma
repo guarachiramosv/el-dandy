@@ -95,6 +95,11 @@ enum RemachadoMovimientoTipo {
   TRABAJO
 }
 
+enum SaleVoidRequestStatus {
+  PENDIENTE
+  APROBADA
+}
+
 // ========================
 // MODELOS
 // ========================
@@ -138,6 +143,8 @@ model Usuario {
   auditoriasProducto ProductoAuditoria[]
   cierresCaja CierreCaja[]
   gastosCaja GastoCaja[]
+  solicitudesAnulacionVenta SolicitudAnulacionVenta[] @relation("SolicitudAnulacionSolicitante")
+  solicitudesAnulacionAprobadas SolicitudAnulacionVenta[] @relation("SolicitudAnulacionAdministrador")
   remachadoTrabajos RemachadoTrabajo[]
   remachadoMovimientos RemachadoMovimiento[]
   createdAt  DateTime @default(now())
@@ -310,7 +317,26 @@ model Venta {
   detalles   DetalleVenta[]
   remachadoTrabajos RemachadoTrabajo[]
   cuenta     CuentaCobrar?
+  solicitudAnulacion SolicitudAnulacionVenta?
   createdAt  DateTime       @default(now())
+}
+
+model SolicitudAnulacionVenta {
+  id              String                @id @default(uuid())
+  ventaId         String                @unique
+  venta           Venta                 @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  solicitanteId   String
+  solicitante     Usuario               @relation("SolicitudAnulacionSolicitante", fields: [solicitanteId], references: [id])
+  administradorId String?
+  administrador   Usuario?              @relation("SolicitudAnulacionAdministrador", fields: [administradorId], references: [id])
+  motivo          String
+  estado          SaleVoidRequestStatus @default(PENDIENTE)
+  approvedAt      DateTime?
+  createdAt       DateTime              @default(now())
+
+  @@index([estado, createdAt])
+  @@index([solicitanteId])
+  @@index([administradorId])
 }
 
 model DetalleVenta {

@@ -238,6 +238,7 @@ export interface Sale {
   clienteId?: string | null;
   cliente?: Customer | null;
   cuenta?: CreditAccount | null;
+  solicitudAnulacion?: SaleVoidRequest | null;
   detalles?: Array<{
     id: string;
     tipoLinea?: 'PRODUCTO' | 'REMACHADO';
@@ -250,6 +251,19 @@ export interface Sale {
     producto?: Product | null;
     remachadoTrabajoId?: string | null;
   }>;
+  createdAt: string;
+}
+
+export interface SaleVoidRequest {
+  id: string;
+  ventaId: string;
+  solicitanteId: string;
+  solicitante?: Pick<User, 'id' | 'nombre' | 'email'>;
+  administradorId?: string | null;
+  administrador?: Pick<User, 'id' | 'nombre' | 'email'> | null;
+  motivo: string;
+  estado: 'PENDIENTE' | 'APROBADA';
+  approvedAt?: string | null;
   createdAt: string;
 }
 

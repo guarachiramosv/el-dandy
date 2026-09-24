@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Banknote, CalendarDays, LockKeyhole, Plus, Printer, ReceiptText, Trash2, X } from "lucide-react";
+import { Banknote, CalendarDays, CheckCircle2, Clock3, LockKeyhole, Plus, Printer, ReceiptText, Trash2, X } from "lucide-react";
 import { CashClosing, CashExpense, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
-import { closeCashRegister, createCashExpense, deleteCashExpense, fetchDailySalesSummary, updateSalePaymentMethod, deleteSale } from "../services/sales";
+import { approveSaleVoidRequest, closeCashRegister, createCashExpense, deleteCashExpense, fetchDailySalesSummary, requestSaleVoid, updateSalePaymentMethod, deleteSale } from "../services/sales";
 import { addCreditPayment } from "../services/customers";
 import { getErrorMessage } from "../utils/errors";
 import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
@@ -211,11 +211,23 @@ export default function HistorialVentas() {
 
   const handleVoidSale = async (sale: Sale, motivo: string) => {
     try {
-      await deleteSale(sale.id, motivo);
-      alert("Venta anulada correctamente. Los productos han sido devueltos al inventario.");
+      const pendingRequest = sale.solicitudAnulacion?.estado === "PENDIENTE" ? sale.solicitudAnulacion : null;
+      if (user?.role === "ADMIN" && pendingRequest) {
+        await approveSaleVoidRequest(pendingRequest.id);
+        setSelectedSale(null);
+        setMessage("Solicitud aprobada. Venta anulada correctamente y stock devuelto al inventario.");
+      } else if (user?.role === "SELLER") {
+        await requestSaleVoid(sale.id, motivo);
+        setSelectedSale(null);
+        setMessage("Solicitud enviada al administrador. La venta se anulara cuando sea aprobada.");
+      } else {
+        await deleteSale(sale.id, motivo);
+        setSelectedSale(null);
+        setMessage("Venta anulada correctamente. Los productos han sido devueltos al inventario.");
+      }
       await loadSummary();
     } catch (err: unknown) {
-      alert(getErrorMessage(err));
+      setMessage(getErrorMessage(err));
     }
   };
 
@@ -226,6 +238,7 @@ export default function HistorialVentas() {
   const expectedCash = summary?.netos?.totalEfectivo ?? Math.max(grossCash + creditPaymentTotals.totalEfectivo - expenseTotals.totalEfectivo, 0);
   const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr + creditPaymentTotals.totalQr - expenseTotals.totalQr, 0);
   const difference = declaredCash - expectedCash;
+  const pendingVoidRequests = (summary?.ventas || []).filter((sale) => sale.solicitudAnulacion?.estado === "PENDIENTE");
 
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
 
@@ -282,6 +295,34 @@ export default function HistorialVentas() {
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 p-4">
           <div className="space-y-4">
+            {user?.role === "ADMIN" && pendingVoidRequests.length > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 font-semibold text-white">
+                    <Clock3 size={18} className="text-amber-300" /> Solicitudes de anulacion pendientes
+                  </p>
+                  <span className="rounded-lg bg-amber-400/15 px-2 py-1 text-xs font-bold text-amber-100">
+                    {pendingVoidRequests.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {pendingVoidRequests.map((sale) => (
+                    <button
+                      key={sale.id}
+                      type="button"
+                      onClick={() => setSelectedSale(sale)}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-grafito-900/60 px-3 py-2 text-left transition hover:border-amber-400/50"
+                    >
+                      <span>
+                        <span className="block font-semibold text-white">{sale.cliente?.nombre || "Cliente ocasional"} - {money(sale.total)}</span>
+                        <span className="block text-xs text-amber-100/80">{sale.solicitudAnulacion?.motivo}</span>
+                      </span>
+                      <span className="text-xs font-semibold text-amber-200">Revisar</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="rounded-xl border border-gray-800 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
@@ -301,9 +342,16 @@ export default function HistorialVentas() {
                       <td className="p-3 text-gray-300">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</td>
                       <td className="p-3 text-right font-bold text-primary-light">{money(sale.total)}</td>
                       <td className="p-3 text-right">
-                        <button onClick={() => setSelectedSale(sale)} className="text-gray-300 hover:text-white">
-                          Ver detalle
-                        </button>
+                        <div className="flex flex-col items-end gap-1">
+                          {sale.solicitudAnulacion?.estado === "PENDIENTE" && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-200">
+                              <Clock3 size={12} /> Pendiente
+                            </span>
+                          )}
+                          <button onClick={() => setSelectedSale(sale)} className="text-gray-300 hover:text-white">
+                            Ver detalle
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -536,6 +584,7 @@ export default function HistorialVentas() {
           }} 
           onVoid={(motivo) => handleVoidSale(selectedSale, motivo)}
           isClosed={Boolean(summary?.cerrado)}
+          userRole={user?.role}
         />
       )}
       {paymentSale && (
@@ -575,6 +624,7 @@ function SaleDetailModal({
   onPaymentUpdated,
   onVoid,
   isClosed,
+  userRole,
 }: {
   sale: Sale;
   onClose: () => void;
@@ -583,12 +633,17 @@ function SaleDetailModal({
   onPaymentUpdated: (method: "EFECTIVO" | "QR") => void;
   onVoid: (motivo: string) => Promise<void>;
   isClosed: boolean;
+  userRole?: string;
 }) {
   const [updating, setUpdating] = useState(false);
   const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const creditBalance = sale.cuenta?.saldo || 0;
+  const pendingVoidRequest = sale.solicitudAnulacion?.estado === "PENDIENTE" ? sale.solicitudAnulacion : null;
+  const isAdmin = userRole === "ADMIN";
+  const isSeller = userRole === "SELLER";
+  const voidActionLabel = isAdmin && pendingVoidRequest ? "Aprobar anulacion" : isSeller ? "Solicitar anulacion" : "Anular";
 
   const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
     setUpdating(true);
@@ -616,6 +671,19 @@ function SaleDetailModal({
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white"><X size={22} /></button>
         </div>
         <div className="p-5 space-y-4">
+          {pendingVoidRequest && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <div className="mb-1 flex items-center gap-2 font-semibold text-white">
+                <Clock3 size={16} className="text-amber-300" /> Solicitud de anulacion pendiente
+              </div>
+              <p>
+                {pendingVoidRequest.solicitante?.nombre || "Vendedor"} solicito anular esta venta.
+              </p>
+              <p className="mt-2 text-amber-100/90">
+                Motivo: <span className="font-semibold text-white">{pendingVoidRequest.motivo}</span>
+              </p>
+            </div>
+          )}
           <div className="rounded-xl border border-gray-700 overflow-hidden">
             <table className="w-full text-left">
               <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
@@ -684,14 +752,24 @@ function SaleDetailModal({
               ) : null}
             </div>
             <div className="flex gap-3">
-              {!isClosed && (
+              {!isClosed && (!pendingVoidRequest || isAdmin) && (
                 <button 
                   onClick={() => setConfirmVoid(true)} 
                   disabled={updating} 
-                  className="rounded-lg px-4 py-2 font-semibold text-sm border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition disabled:opacity-50 flex items-center justify-center"
+                  className={`rounded-lg px-4 py-2 font-semibold text-sm transition disabled:opacity-50 flex items-center justify-center ${
+                    isAdmin && pendingVoidRequest
+                      ? "border border-green-500/30 bg-green-500/10 text-green-300 hover:bg-green-500/20"
+                      : "border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                  }`}
                 >
-                  Anular
+                  {isAdmin && pendingVoidRequest && <CheckCircle2 size={16} className="mr-2" />}
+                  {voidActionLabel}
                 </button>
+              )}
+              {!isClosed && pendingVoidRequest && !isAdmin && (
+                <span className="inline-flex items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-200">
+                  Solicitud pendiente
+                </span>
               )}
               <button onClick={onClose} className="btn-secondary">Cerrar</button>
               <button onClick={onPrint} className="btn-primary flex items-center gap-2">
@@ -724,38 +802,50 @@ function SaleDetailModal({
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setConfirmVoid(false); setMotivoAnulacion(""); }} />
           <div className="relative w-full max-w-sm rounded-2xl border border-red-900/50 bg-grafito-800 shadow-premium p-6 text-center">
-            <h3 className="text-xl font-bold text-red-400 mb-2">Anular venta</h3>
+            <h3 className="text-xl font-bold text-red-400 mb-2">{voidActionLabel}</h3>
             <p className="text-gray-300 mb-4 text-sm">
-              ¿Seguro que deseas anular esta venta? Los productos y balatas volverán al inventario y esta acción no se puede deshacer.
+              {isAdmin && pendingVoidRequest
+                ? "Al aprobar, la venta se anulara y los productos volveran al inventario."
+                : isSeller
+                  ? "La solicitud sera enviada al administrador. La venta seguira activa hasta que sea aprobada."
+                  : "Seguro que deseas anular esta venta? Los productos y balatas volveran al inventario y esta accion no se puede deshacer."}
             </p>
             
-            <div className="text-left mb-6">
-              <label className="block text-xs font-semibold text-gray-400 mb-1">Motivo de anulación <span className="text-red-500">*</span></label>
-              <textarea
-                value={motivoAnulacion}
-                onChange={(e) => setMotivoAnulacion(e.target.value)}
-                className="w-full bg-grafito-900 border border-gray-700 rounded-lg p-2 text-white text-sm focus:outline-none focus:border-red-500"
-                placeholder="Escribe el motivo..."
-                rows={2}
-                disabled={updating}
-              />
-            </div>
+            {isAdmin && pendingVoidRequest ? (
+              <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-left text-sm text-amber-100">
+                <p className="font-semibold text-white">{pendingVoidRequest.solicitante?.nombre || "Vendedor"}</p>
+                <p className="mt-1">{pendingVoidRequest.motivo}</p>
+              </div>
+            ) : (
+              <div className="text-left mb-6">
+                <label className="block text-xs font-semibold text-gray-400 mb-1">Motivo de anulacion <span className="text-red-500">*</span></label>
+                <textarea
+                  value={motivoAnulacion}
+                  onChange={(e) => setMotivoAnulacion(e.target.value)}
+                  className="w-full bg-grafito-900 border border-gray-700 rounded-lg p-2 text-white text-sm focus:outline-none focus:border-red-500"
+                  placeholder="Escribe el motivo..."
+                  rows={2}
+                  disabled={updating}
+                />
+              </div>
+            )}
 
             <div className="flex justify-center gap-3">
               <button onClick={() => { setConfirmVoid(false); setMotivoAnulacion(""); }} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
               <button onClick={() => {
-                if (!motivoAnulacion.trim()) {
+                const motivo = pendingVoidRequest?.motivo || motivoAnulacion.trim();
+                if (!motivo) {
                   alert("Por favor ingresa un motivo para anular la venta");
                   return;
                 }
                 setUpdating(true);
-                onVoid(motivoAnulacion).finally(() => {
+                onVoid(motivo).finally(() => {
                   setUpdating(false);
                   setConfirmVoid(false);
                   setMotivoAnulacion("");
                 });
-              }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50 w-full" disabled={updating || !motivoAnulacion.trim()}>
-                {updating ? "Anulando..." : "Sí, anular"}
+              }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-50 w-full" disabled={updating || (!pendingVoidRequest && !motivoAnulacion.trim())}>
+                {updating ? "Procesando..." : isAdmin && pendingVoidRequest ? "Aprobar y anular" : isSeller ? "Enviar solicitud" : "Si, anular"}
               </button>
             </div>
           </div>
