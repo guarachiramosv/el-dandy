@@ -218,6 +218,9 @@ export default function Remachado() {
       .map((item) => item.product);
   }, [detailProductSearch, unitProducts]);
   const selectedDetailProduct = products.find((item) => item.id === detailProductId);
+  const availableTabs: Tab[] = isAdmin
+    ? ["BALATAS", "REMACHES", "HISTORIAL"]
+    : ["TRABAJO", "BALATAS"];
 
   const selectDetailProduct = (productId: string) => {
     setDetailProductId(productId);
@@ -577,10 +580,8 @@ export default function Remachado() {
         </button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        {(["TRABAJO", "BALATAS", "REMACHES", "HISTORIAL"] as Tab[])
-          .filter(t => isAdmin ? t !== "TRABAJO" : true)
-          .map((item) => (
+      <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        {availableTabs.map((item) => (
           <button
             key={item}
             onClick={() => setTab(item)}
@@ -707,7 +708,7 @@ export default function Remachado() {
             </div>
           )}
 
-          <div className="glass-panel overflow-hidden">
+          <div className="glass-panel overflow-x-auto">
             <div className="border-b border-gray-700 p-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
@@ -716,31 +717,50 @@ export default function Remachado() {
             </div>
             <table className="w-full text-left">
               <thead className="bg-grafito-800/80 text-sm uppercase text-gray-400">
-                <tr>
-                  <th className="p-4">Medida</th>
-                  <th className="p-4">Stock</th>
-                  <th className="p-4">Minimo</th>
-                  <th className="p-4">Remaches</th>
-                  <th className="p-4 text-right">Juego</th>
-                  <th className="p-4 text-right">1/2 juego</th>
-                  {isAdmin && <th className="p-4"></th>}
-                </tr>
+                {isAdmin ? (
+                  <tr>
+                    <th className="p-4">Medida</th>
+                    <th className="p-4">Stock</th>
+                    <th className="p-4">Minimo</th>
+                    <th className="p-4">Remaches</th>
+                    <th className="p-4 text-right">Juego</th>
+                    <th className="p-4 text-right">1/2 juego</th>
+                    <th className="p-4"></th>
+                  </tr>
+                ) : (
+                  <tr>
+                    <th className="p-4">Medida</th>
+                    <th className="p-4">Cantidad</th>
+                    <th className="p-4 text-right">Precio 1/2 juego</th>
+                    <th className="p-4 text-right">Precio 1 juego</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filteredMedidas.map((item) => (
                   <tr key={item.id}>
-                    <td className="p-4"><p className="font-bold text-white">{item.medida}</p><p className="text-xs text-gray-500">{item.descripcion}</p></td>
+                    <td className="p-4">
+                      <p className="font-bold text-white">{item.medida}</p>
+                      {isAdmin && <p className="text-xs text-gray-500">{item.descripcion}</p>}
+                    </td>
                     <td className={getStockTextClass(item.stockJuegos, item.stockMinimoJuegos)}>{item.stockJuegos} juegos</td>
-                    <td className="p-4 text-gray-300">{item.stockMinimoJuegos}</td>
-                    <td className="p-4 text-gray-300">{item.remachesPorJuego} / {item.remachesPorMedioJuego}</td>
-                    <td className="p-4 text-right text-primary-light">{money(item.precioJuego)}</td>
-                    <td className="p-4 text-right text-primary-light">{money(item.precioMedioJuego)}</td>
-                    {isAdmin && (
-                      <td className="p-4 text-right">
-                        <button onClick={() => handleEditMedida(item)} className="text-gray-400 hover:text-primary transition-colors text-sm underline">
-                          Editar
-                        </button>
-                      </td>
+                    {isAdmin ? (
+                      <>
+                        <td className="p-4 text-gray-300">{item.stockMinimoJuegos}</td>
+                        <td className="p-4 text-gray-300">{item.remachesPorJuego} / {item.remachesPorMedioJuego}</td>
+                        <td className="p-4 text-right text-primary-light">{money(item.precioJuego)}</td>
+                        <td className="p-4 text-right text-primary-light">{money(item.precioMedioJuego)}</td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => handleEditMedida(item)} className="text-gray-400 hover:text-primary transition-colors text-sm underline">
+                            Editar
+                          </button>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="p-4 text-right text-primary-light">{money(item.precioMedioJuego)}</td>
+                        <td className="p-4 text-right text-primary-light">{money(item.precioJuego)}</td>
+                      </>
                     )}
                   </tr>
                 ))}
