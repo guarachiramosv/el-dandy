@@ -23,6 +23,11 @@ export const getAllSales = asyncHandler(async (_req: Request, res: Response) => 
   res.json({ success: true, data });
 });
 
+export const getPendingSaleVoidRequests = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await service.getPendingVoidRequests();
+  res.json({ success: true, data });
+});
+
 export const createSale = asyncHandler(async (req: Request, res: Response) => {
   const parsed = createSaleSchema.parse(req.body);
   const data = await service.create({

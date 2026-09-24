@@ -38,6 +38,8 @@ export default function HistorialVentas() {
   const user = getCurrentUser();
   const [searchParams] = useSearchParams();
   const pendingDate = searchParams.get("fecha");
+  const requestedSaleId = searchParams.get("venta");
+  const requestedBranchId = searchParams.get("sucursal");
   const [reportDate, setReportDate] = useState(pendingDate || defaultDay);
   const [summary, setSummary] = useState<DailySalesSummary | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
@@ -61,7 +63,10 @@ export default function HistorialVentas() {
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchDailySalesSummary(reportDate);
+      const data = await fetchDailySalesSummary(
+        reportDate,
+        user?.role === "ADMIN" ? requestedBranchId || undefined : undefined,
+      );
       setSummary(data);
       setDeclaredCash(data.cierre?.montoDeclarado ?? data.netos?.totalEfectivo ?? data.totals.totalEfectivo);
       setCloseNotes(data.cierre?.notas || "");
@@ -70,7 +75,7 @@ export default function HistorialVentas() {
     } finally {
       setLoading(false);
     }
-  }, [reportDate]);
+  }, [reportDate, requestedBranchId, user?.role]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -82,6 +87,12 @@ export default function HistorialVentas() {
   useEffect(() => {
     if (pendingDate && pendingDate !== reportDate) setReportDate(pendingDate);
   }, [pendingDate, reportDate]);
+
+  useEffect(() => {
+    if (!requestedSaleId || !summary) return;
+    const requestedSale = summary.ventas.find((sale) => sale.id === requestedSaleId);
+    if (requestedSale) setSelectedSale(requestedSale);
+  }, [requestedSaleId, summary]);
 
   const handleCloseCash = async () => {
     setMessage(null);

@@ -6,10 +6,18 @@ export const createSale = async (sale: SaleInput): Promise<Sale> => {
   return response.data.data;
 };
 
-export const fetchDailySalesSummary = async (fecha?: string): Promise<DailySalesSummary> => {
+export const fetchDailySalesSummary = async (fecha?: string, sucursalId?: string): Promise<DailySalesSummary> => {
   const response = await api.get<{ success: boolean; data: DailySalesSummary }>('/sales/daily-summary', {
-    params: fecha ? { fecha } : undefined,
+    params: {
+      ...(fecha ? { fecha } : {}),
+      ...(sucursalId ? { sucursalId } : {}),
+    },
   });
+  return response.data.data;
+};
+
+export const fetchPendingSaleVoidRequests = async (): Promise<Sale[]> => {
+  const response = await api.get<{ success: boolean; data: Sale[] }>('/sales/void-requests/pending');
   return response.data.data;
 };
 

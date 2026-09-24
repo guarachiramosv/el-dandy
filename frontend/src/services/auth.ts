@@ -46,7 +46,18 @@ export const getCurrentCustomer = (): Customer | null => {
 
 export const getCurrentUser = (): User | null => {
   const raw = localStorage.getItem('authUser');
-  return raw ? JSON.parse(raw) as User : null;
+  if (!raw) return null;
+
+  const user = JSON.parse(raw) as User;
+  const token = localStorage.getItem('authToken');
+  if (!token) return user;
+
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { role?: User['role'] };
+    return payload.role ? { ...user, role: payload.role } : user;
+  } catch {
+    return user;
+  }
 };
 
 export const clearSession = () => {

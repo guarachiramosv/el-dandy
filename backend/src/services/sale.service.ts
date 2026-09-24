@@ -219,6 +219,18 @@ export class SaleService {
     });
   }
 
+  async getPendingVoidRequests() {
+    return prisma.venta.findMany({
+      where: {
+        solicitudAnulacion: {
+          is: { estado: 'PENDIENTE' },
+        },
+      },
+      include: saleInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async create(data: CreateSaleInput) {
     const productIds = data.items.map((item) => item.productoId);
     const uniqueProductIds = Array.from(new Set(productIds));
