@@ -318,32 +318,43 @@ export default function Inventario() {
     );
   }, [products, searchTerm]);
 
-  const selectedOrigin = useMemo(() => products.find((product) => product.id === origen) || null, [products, origen]);
+  const allOriginOptions = useMemo(() => products.flatMap((product) =>
+    (product.stockSucursales || [])
+      .filter((branch) => branch.activo !== false && branch.estado !== "INACTIVO" && branch.estado !== "DESCONTINUADO")
+      .map((branch) => ({
+        key: `${product.id}:${branch.sucursalId}`,
+        product,
+        branch,
+      })),
+  ), [products]);
+  const selectedOriginOption = useMemo(() => allOriginOptions.find((option) => option.key === origen) || null, [allOriginOptions, origen]);
+  const selectedOrigin = selectedOriginOption?.product || null;
+  const selectedOriginBranch = selectedOriginOption?.branch || null;
   const selectedDestination = useMemo(() => selectedOrigin?.stockSucursales?.find((branch) => branch.sucursalId === destino) || null, [destino, selectedOrigin]);
-  const transferSearchFields = useCallback((product: Product) => [
-    { value: product.codigo, weight: 2 },
-    { value: product.codigoRepuesto, weight: 1.9 },
-    { value: product.descripcion, weight: 1.5 },
-    { value: product.ubicacion, weight: 1.25 },
-    { value: product.marca, weight: 1 },
-    { value: product.sucursal?.nombre, weight: 0.8 },
+  const transferSearchFields = useCallback((option: (typeof allOriginOptions)[number]) => [
+    { value: option.product.codigo, weight: 2 },
+    { value: option.product.codigoRepuesto, weight: 1.9 },
+    { value: option.product.descripcion, weight: 1.5 },
+    { value: option.branch.ubicacion, weight: 1.25 },
+    { value: option.product.marca, weight: 1 },
+    { value: option.branch.sucursal?.nombre, weight: 0.8 },
   ], []);
   const branchTransferLabel = useCallback((branch: ProductBranchStock) =>
     `${selectedOrigin?.codigo || ""} - ${selectedOrigin?.descripcion || ""} - ${branch.sucursal?.nombre || "Sucursal"} - Estante ${inventoryShelf(branch.ubicacion || (selectedOrigin?.sucursalId === branch.sucursalId ? selectedOrigin?.ubicacion : null))} - Stock ${branch.stock} ${selectedOrigin ? getUnitLabel(selectedOrigin) : "u"}`,
   [selectedOrigin]);
   const originOptions = useMemo(() => {
-    if (!originSearch.trim()) return products;
-    return filterAndSortBySearch(products, originSearch, transferSearchFields, (product) => product.descripcion);
-  }, [originSearch, products, transferSearchFields]);
+    if (!originSearch.trim()) return allOriginOptions;
+    return filterAndSortBySearch(allOriginOptions, originSearch, transferSearchFields, (option) => option.product.descripcion);
+  }, [allOriginOptions, originSearch, transferSearchFields]);
   const destinationOptions = useMemo(() => {
-    if (!selectedOrigin) return [];
+    if (!selectedOrigin || !selectedOriginBranch) return [];
     return (selectedOrigin.stockSucursales || []).filter((branch) =>
-      branch.sucursalId !== selectedOrigin.sucursalId &&
+      branch.sucursalId !== selectedOriginBranch.sucursalId &&
       branch.activo !== false &&
       branch.estado !== "INACTIVO" &&
       branch.estado !== "DESCONTINUADO"
     );
-  }, [selectedOrigin]);
+  }, [selectedOrigin, selectedOriginBranch]);
   const filteredDestinationOptions = useMemo(() => {
     if (!destinationSearch.trim()) return destinationOptions;
     const term = destinationSearch.trim().toLowerCase();
@@ -389,25 +400,25 @@ export default function Inventario() {
 
   const submitTransfer = async () => {
     if (!user) return setMessage("Sesion requerida");
-    if (!selectedOrigin) return setMessage("Selecciona el producto que sale de la sucursal origen.");
+    if (!selectedOrigin || !selectedOriginBranch) return setMessage("Selecciona el producto que sale de la sucursal origen.");
     if (!selectedDestination) return setMessage("Selecciona la sucursal destino para el mismo codigo.");
-    if (selectedOrigin.sucursalId === selectedDestination.sucursalId) {
+    if (selectedOriginBranch.sucursalId === selectedDestination.sucursalId) {
       return setMessage("La sucursal origen y destino deben ser diferentes.");
     }
     if (!Number.isFinite(cantidad) || cantidad <= 0) return setMessage("La cantidad debe ser mayor a cero.");
-    if (selectedOrigin.stock < cantidad) {
-      return setMessage(`Stock insuficiente en ${selectedOrigin.sucursal?.nombre || "origen"}. Disponible: ${selectedOrigin.stock}`);
+    if (selectedOriginBranch.stock < cantidad) {
+      return setMessage(`Stock insuficiente en ${selectedOriginBranch.sucursal?.nombre || "origen"}. Disponible: ${selectedOriginBranch.stock}`);
     }
     try {
       await transferStock({
         productoOrigenId: selectedOrigin.id,
         productoDestinoId: selectedOrigin.id,
-        sucursalOrigenId: selectedOrigin.sucursalId,
+        sucursalOrigenId: selectedOriginBranch.sucursalId,
         sucursalDestinoId: selectedDestination.sucursalId,
         cantidad,
         usuarioId: user.id,
       });
-      setMessage(`Transferencia registrada: ${cantidad} ${getUnitLabel(selectedOrigin)} de ${selectedOrigin.sucursal?.nombre || "origen"} a ${selectedDestination.sucursal?.nombre || "destino"}.`);
+      setMessage(`Transferencia registrada: ${cantidad} ${getUnitLabel(selectedOrigin)} de ${selectedOriginBranch.sucursal?.nombre || "origen"} a ${selectedDestination.sucursal?.nombre || "destino"}.`);
       setOrigen("");
       setDestino("");
       setOriginSearch("");
@@ -718,9 +729,9 @@ export default function Inventario() {
             </div>
             <select className="premium-input" value={origen} onChange={(event) => setOrigen(event.target.value)}>
               <option value="">Elegir producto que sale</option>
-              {originOptions.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {productTransferLabel(product)}
+              {originOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {`${option.product.codigo} - ${option.product.descripcion} - ${option.branch.sucursal?.nombre || "Sucursal"} - Estante ${inventoryShelf(option.branch.ubicacion || (option.product.sucursalId === option.branch.sucursalId ? option.product.ubicacion : null))} - Stock ${option.branch.stock} ${getUnitLabel(option.product)}`}
                 </option>
               ))}
             </select>
@@ -755,12 +766,12 @@ export default function Inventario() {
               No hay otra sucursal activa preparada para el codigo {selectedOrigin.codigo}. Agrega el producto en la sucursal destino con stock 0 antes de transferir.
             </p>
           )}
-          {selectedOrigin && selectedDestination && (
+          {selectedOrigin && selectedOriginBranch && selectedDestination && (
             <div className="grid gap-3 rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm text-gray-200 md:grid-cols-[1fr_auto_1fr]">
               <div>
                 <p className="font-bold uppercase text-primary-light">Salida</p>
                 <p className="mt-1 text-white">{selectedOrigin.codigo} - {selectedOrigin.descripcion}</p>
-                <p>{selectedOrigin.sucursal?.nombre || "Sucursal"} - Estante {inventoryShelf(selectedOrigin.ubicacion)} - Stock actual {selectedOrigin.stock} {getUnitLabel(selectedOrigin)}</p>
+                <p>{selectedOriginBranch.sucursal?.nombre || "Sucursal"} - Estante {inventoryShelf(selectedOriginBranch.ubicacion || (selectedOrigin.sucursalId === selectedOriginBranch.sucursalId ? selectedOrigin.ubicacion : null))} - Stock actual {selectedOriginBranch.stock} {getUnitLabel(selectedOrigin)}</p>
               </div>
               <div className="flex items-center justify-center text-primary">
                 <ArrowRightLeft size={22} />
@@ -771,7 +782,7 @@ export default function Inventario() {
                 <p>{selectedDestination.sucursal?.nombre || "Sucursal"} - Estante {inventoryShelf(selectedDestination.ubicacion || (selectedOrigin.sucursalId === selectedDestination.sucursalId ? selectedOrigin.ubicacion : null))} - Stock actual {selectedDestination.stock} {getUnitLabel(selectedOrigin)}</p>
               </div>
               <p className="text-base font-black text-white md:col-span-3">
-                Se moveran {cantidad || 0} {getUnitLabel(selectedOrigin)} de {selectedOrigin.sucursal?.nombre || "origen"} a {selectedDestination.sucursal?.nombre || "destino"}.
+                Se moveran {cantidad || 0} {getUnitLabel(selectedOrigin)} de {selectedOriginBranch.sucursal?.nombre || "origen"} a {selectedDestination.sucursal?.nombre || "destino"}.
               </p>
             </div>
           )}
