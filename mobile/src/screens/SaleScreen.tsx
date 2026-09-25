@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Print from 'expo-print';
 import {
   ActivityIndicator,
@@ -10,13 +10,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { createSale, getCustomers, getProducts } from '../api';
+import { createSale, getCustomers, getProductsPage } from '../api';
 import { colors } from '../theme';
 import { buildThermalReceiptHtml, ReceiptSale } from '../thermalReceipt';
 import { CartItem, Customer, PaymentMethod, Product, Session } from '../types';
 
 const paymentMethods: PaymentMethod[] = ['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA'];
 const THERMAL_PRINT_WIDTH_PT = 198;
+const PRODUCT_PAGE_SIZE = 50;
 
 export default function SaleScreen({ session }: { session: Session }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -26,37 +27,54 @@ export default function SaleScreen({ session }: { session: Session }) {
   const [payment, setPayment] = useState<PaymentMethod>('EFECTIVO');
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [productPage, setProductPage] = useState(1);
+  const [productTotalPages, setProductTotalPages] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [lastSale, setLastSale] = useState<ReceiptSale | null>(null);
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async (options?: { page?: number; term?: string; append?: boolean }) => {
+    const page = options?.page ?? 1;
+    const term = options?.term ?? search;
+    const append = options?.append ?? false;
     setError('');
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     try {
-      setProducts((await getProducts(session.token)).filter((product) => product.stock > 0));
+      const result = await getProductsPage(session.token, term, page, PRODUCT_PAGE_SIZE);
+      const nextProducts = result.items.filter((product) => product.stock > 0);
+      setProducts((current) => {
+        if (!append) return nextProducts;
+        const merged = new Map(current.map((product) => [product.id, product]));
+        nextProducts.forEach((product) => merged.set(product.id, product));
+        return Array.from(merged.values());
+      });
+      setProductPage(result.page);
+      setProductTotalPages(result.totalPages || 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los productos.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  };
+  }, [search, session.token]);
 
   useEffect(() => {
-    loadProducts();
     getCustomers(session.token)
       .then(setCustomers)
       .catch(() => setCustomers([]));
   }, [session.token]);
 
-  const visibleProducts = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return products.slice(0, 12);
-    return products
-      .filter((product) =>
-        `${product.codigo} ${product.descripcion} ${product.marca || ''}`.toLowerCase().includes(term),
-      )
-      .slice(0, 20);
-  }, [products, search]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadProducts({ page: 1, term: search, append: false });
+    }, search.trim() ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [loadProducts, search]);
+
+  const visibleProducts = useMemo(() => products, [products]);
+  const canLoadMoreProducts = productPage < productTotalPages;
 
   const cartItems = Object.values(cart);
   const total = cartItems.reduce(
@@ -125,8 +143,7 @@ export default function SaleScreen({ session }: { session: Session }) {
       setCart({});
       setCustomerId(null);
       setSearch('');
-      setLoading(true);
-      await loadProducts();
+      await loadProducts({ page: 1, term: '', append: false });
     } catch (err) {
       Alert.alert('No se pudo registrar', err instanceof Error ? err.message : 'Intenta nuevamente.');
     } finally {
@@ -165,6 +182,15 @@ export default function SaleScreen({ session }: { session: Session }) {
               </View>
             </Pressable>
           ))}
+          {canLoadMoreProducts && (
+            <Pressable
+              disabled={loadingMore}
+              onPress={() => loadProducts({ page: productPage + 1, term: search, append: true })}
+              style={[styles.loadMoreButton, loadingMore && styles.disabled]}
+            >
+              {loadingMore ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.loadMoreText}>Cargar mas productos</Text>}
+            </Pressable>
+          )}
         </View>
       )}
 
@@ -265,6 +291,16 @@ const styles = StyleSheet.create({
   error: { color: '#FCA5A5', marginTop: 10 },
   loader: { marginVertical: 30 },
   results: { gap: 8, marginTop: 12 },
+  loadMoreButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 4,
+    paddingVertical: 14,
+  },
+  loadMoreText: { color: colors.primaryLight, fontWeight: '800' },
   productCard: {
     alignItems: 'center',
     backgroundColor: colors.surface,

@@ -16,6 +16,7 @@ export type Product = {
   codigo: string;
   codigoRepuesto?: string | null;
   descripcion: string;
+  descripcionDetallada?: string | null;
   marca?: string | null;
   condicion: 'NUEVO' | 'USADO';
   unidadVenta?: 'UNIDAD' | 'METRO';
@@ -32,6 +33,20 @@ export type Product = {
   sucursalId: string;
   sucursal?: { id: string; nombre: string; whatsapp?: string | null };
   categoria?: { id: string; nombre: string };
+  stockSucursales?: ProductBranchStock[];
+  createdAt?: string;
+};
+
+export type ProductBranchStock = {
+  id: string;
+  productoId?: string;
+  sucursalId: string;
+  sucursal?: { id: string; nombre: string; whatsapp?: string | null };
+  stock: number;
+  ubicacion?: string | null;
+  activo?: boolean;
+  estado?: ProductStatus;
+  createdAt?: string;
 };
 
 export type ProductImage = {
@@ -157,6 +172,145 @@ export type CustomerSale = {
 export type CartItem = {
   product: Product;
   quantity: number;
+};
+
+export type PaginatedProducts = {
+  items: Product[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+};
+
+export type ReportPeriod = 'day' | 'month' | 'year' | 'all';
+
+export type ReportUser = {
+  id: string;
+  nombre: string;
+  email?: string;
+  sucursal?: { id: string; nombre: string };
+};
+
+export type SalesHistoryReport = {
+  period: ReportPeriod;
+  label: string;
+  desde: string;
+  hasta: string;
+  totals: {
+    cantidadVentas: number;
+    cantidadItems: number;
+    unidadesVendidas: number;
+    subtotal: number;
+    descuento: number;
+    totalVentas: number;
+    totalEfectivo: number;
+    totalTransferencia: number;
+    totalQr: number;
+    totalTarjeta: number;
+    totalCredito: number;
+    totalCobrosCredito: number;
+    cobroCreditoEfectivo: number;
+    cobroCreditoTransferencia: number;
+    cobroCreditoQr: number;
+    cobroCreditoTarjeta: number;
+    gastoEfectivo: number;
+    gastoQr: number;
+    totalGastos: number;
+    netoEfectivo: number;
+    netoQr: number;
+    totalDisponible: number;
+    cantidadCierres?: number;
+    montoDeclarado?: number;
+    diferencia?: number;
+  };
+  ventas: Array<{
+    id: string;
+    subtotal: number;
+    descuento: number;
+    total: number;
+    metodoPago: string;
+    tipoVenta: string;
+    createdAt: string;
+    usuario?: ReportUser;
+    sucursal?: { id: string; nombre: string };
+    cliente?: { id: string; nombre: string } | null;
+    detalles?: Array<{
+      id: string;
+      cantidad: number;
+      precioUnitario: number;
+      subtotal: number;
+      descripcion?: string | null;
+      tipoLinea?: string;
+      producto?: {
+        codigo: string;
+        descripcion: string;
+        marca?: string | null;
+        categoria?: { nombre: string };
+      } | null;
+    }>;
+  }>;
+  gastos: Array<{
+    id: string;
+    motivo: string;
+    monto: number;
+    metodoPago: 'EFECTIVO' | 'QR';
+    notas?: string | null;
+    createdAt: string;
+    usuario?: ReportUser;
+    sucursal?: { id: string; nombre: string };
+  }>;
+  cierres: Array<{
+    id: string;
+    fecha: string;
+    notas?: string | null;
+    usuario?: ReportUser;
+    sucursal?: { id: string; nombre: string };
+  }>;
+};
+
+export type ProductInventoryReport = {
+  period: ReportPeriod;
+  label: string;
+  desde: string;
+  hasta: string;
+  totals: {
+    productos: number;
+    stockInicial: number;
+    ingresados: number;
+    vendidos: number;
+    editados: number;
+    otrosMovimientos: number;
+    stockActual: number;
+  };
+  items: Array<{
+    productoId: string;
+    codigo: string;
+    codigoRepuesto?: string | null;
+    descripcion: string;
+    marca?: string | null;
+    condicion: string;
+    categoria: string;
+    sucursal: string;
+    sucursalId: string;
+    ubicacion?: string | null;
+    precioVenta: number;
+    fechaAgregado: string;
+    agregadoEnPeriodo: boolean;
+    stockAlAgregar?: number | null;
+    stockInicial: number;
+    ingresados: number;
+    vendidos: number;
+    editados: number;
+    otrosMovimientos: number;
+    stockActual: number;
+    stockMinimo: number;
+    stockSucursales?: Array<{
+      sucursalId: string;
+      sucursal: string;
+      stock: number;
+      fechaAgregado: string;
+    }>;
+  }>;
 };
 
 export type RemachadoMedida = {

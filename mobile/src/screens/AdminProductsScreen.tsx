@@ -19,7 +19,7 @@ import {
 import {
   createProduct,
   deleteProduct,
-  getAdminProducts,
+  getAdminProductsPage,
   getCategories,
   getSucursales,
   updateProduct,
@@ -84,6 +84,7 @@ const statusOptions: Array<{ value: ProductStatusFilter; label: string }> = [
 
 const maxProductImages = 20;
 const acceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+const PRODUCT_PAGE_SIZE = 50;
 
 const apiOrigin = process.env.EXPO_PUBLIC_API_URL
   ? process.env.EXPO_PUBLIC_API_URL.replace(/\/api\/?$/, '')
@@ -186,7 +187,11 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ProductStatusFilter>('active');
+  const [selectedSucursalId, setSelectedSucursalId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [productPage, setProductPage] = useState(1);
+  const [productTotalPages, setProductTotalPages] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -224,17 +229,34 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     }));
   }, [token]);
 
-  const loadProducts = useCallback(async (term = search, nextStatus = status) => {
+  const loadProducts = useCallback(async (
+    term = search,
+    nextStatus = status,
+    page = 1,
+    append = false,
+    nextSucursalId = selectedSucursalId,
+  ) => {
     setError('');
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     try {
-      setProducts(await getAdminProducts(token, term, nextStatus));
+      const result = await getAdminProductsPage(token, term, nextStatus, page, PRODUCT_PAGE_SIZE, nextSucursalId);
+      setProducts((current) => {
+        if (!append) return result.items;
+        const merged = new Map(current.map((product) => [product.id, product]));
+        result.items.forEach((product) => merged.set(product.id, product));
+        return Array.from(merged.values());
+      });
+      setProductPage(result.page);
+      setProductTotalPages(result.totalPages || 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar productos.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
-  }, [search, status, token]);
+  }, [search, selectedSucursalId, status, token]);
 
   useEffect(() => {
     loadCatalogs().catch((err) => {
@@ -282,14 +304,22 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   };
 
   const submitSearch = () => {
-    setLoading(true);
-    loadProducts(search, status);
+    loadProducts(search, status, 1, false);
   };
 
   const changeStatus = (nextStatus: ProductStatusFilter) => {
     setStatus(nextStatus);
-    setLoading(true);
-    loadProducts(search, nextStatus);
+    loadProducts(search, nextStatus, 1, false, selectedSucursalId);
+  };
+
+  const changeSucursalFilter = (nextSucursalId: string) => {
+    setSelectedSucursalId(nextSucursalId);
+    loadProducts(search, status, 1, false, nextSucursalId);
+  };
+
+  const loadMoreProducts = () => {
+    if (loading || loadingMore || productPage >= productTotalPages) return;
+    loadProducts(search, status, productPage + 1, true, selectedSucursalId);
   };
 
   const validate = () => {
@@ -438,6 +468,10 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     const inactive = item.estado === 'INACTIVO';
     const discontinued = item.estado === 'DESCONTINUADO';
     const imageUrl = productImageUrl(productImageUrls(item)[0]);
+    const unitLabel = item.unidadVenta === 'METRO' ? 'm' : 'u';
+    const branchStocks = item.stockSucursales?.length
+      ? item.stockSucursales
+      : [{ sucursalId: item.sucursalId, sucursal: item.sucursal, stock: item.stock, ubicacion: item.ubicacion }];
 
     return (
       <View style={styles.card}>
@@ -475,9 +509,20 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         </View>
         <View style={styles.stockRow}>
           <Text style={[styles.stock, lowStock && styles.stockLow]}>
-            Stock {item.stock} {item.unidadVenta === 'METRO' ? 'm' : 'u'} / min. {item.stockMinimo}
+            Stock total {item.stock} {unitLabel} / min. {item.stockMinimo}
           </Text>
           <Text style={styles.cost}>Compra {money(item.precioCompra)}</Text>
+        </View>
+        <View style={styles.branchStockGrid}>
+          {branchStocks.map((branch) => (
+            <View key={`${item.id}-${branch.sucursalId}`} style={styles.branchStockPill}>
+              <Text style={styles.branchStockName}>{branch.sucursal?.nombre || 'Sucursal'}</Text>
+              <Text style={styles.branchStockValue}>
+                {branch.stock} {unitLabel}
+              </Text>
+              {!!branch.ubicacion && <Text style={styles.branchStockShelf}>Est. {branch.ubicacion}</Text>}
+            </View>
+          ))}
         </View>
         <View style={styles.actions}>
           <Pressable onPress={() => openView(item)} style={styles.secondaryAction}>
@@ -542,6 +587,33 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         ))}
       </ScrollView>
 
+      <ScrollView
+        horizontal
+        style={styles.statusTabsScroll}
+        contentContainerStyle={styles.statusTabs}
+        showsHorizontalScrollIndicator={false}
+      >
+        <Pressable
+          onPress={() => changeSucursalFilter('')}
+          style={[styles.statusTab, selectedSucursalId === '' && styles.statusTabActive]}
+        >
+          <Text style={[styles.statusTabText, selectedSucursalId === '' && styles.statusTabTextActive]}>
+            Todas las sucursales
+          </Text>
+        </Pressable>
+        {sucursales.map((sucursal) => (
+          <Pressable
+            key={sucursal.id}
+            onPress={() => changeSucursalFilter(sucursal.id)}
+            style={[styles.statusTab, selectedSucursalId === sucursal.id && styles.statusTabActive]}
+          >
+            <Text style={[styles.statusTabText, selectedSucursalId === sucursal.id && styles.statusTabTextActive]}>
+              {sucursal.nombre}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
       {!!catalogWarning && <Text style={styles.warning}>{catalogWarning}</Text>}
       {!!error && <Text style={styles.error}>{error}</Text>}
 
@@ -560,13 +632,18 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                 loadCatalogs().catch((err) => {
                   setError(err instanceof Error ? err.message : 'No se pudo cargar categorias o sucursales.');
                 });
-                loadProducts(search, status);
+                loadProducts(search, status, 1, false, selectedSucursalId);
               }}
               refreshing={refreshing}
               tintColor={colors.primary}
             />
           }
           renderItem={renderProduct}
+          onEndReached={loadMoreProducts}
+          onEndReachedThreshold={0.35}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator color={colors.primary} style={styles.footerLoader} /> : null
+          }
         />
       )}
 
@@ -881,6 +958,7 @@ const styles = StyleSheet.create({
   statusTabText: { color: colors.muted, fontSize: 13, fontWeight: '800' },
   statusTabTextActive: { color: colors.primaryLight },
   loader: { marginTop: 50 },
+  footerLoader: { paddingVertical: 18 },
   error: { color: '#FCA5A5', marginTop: 10 },
   warning: { color: '#FBBF24', fontSize: 13, marginTop: 10 },
   list: { gap: 10, paddingBottom: 24, paddingTop: 8 },
@@ -922,6 +1000,19 @@ const styles = StyleSheet.create({
   stock: { color: colors.success, fontSize: 13, fontWeight: '800' },
   stockLow: { color: '#FCA5A5' },
   cost: { color: colors.muted, fontSize: 12 },
+  branchStockGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  branchStockPill: {
+    backgroundColor: colors.surfaceSoft,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    minWidth: 132,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  branchStockName: { color: colors.muted, fontSize: 11, fontWeight: '800' },
+  branchStockValue: { color: colors.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  branchStockShelf: { color: colors.primaryLight, fontSize: 11, fontWeight: '800', marginTop: 2 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   secondaryAction: {
     backgroundColor: colors.surfaceSoft,

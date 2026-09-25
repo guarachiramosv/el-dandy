@@ -6,12 +6,16 @@ import {
   CustomerRegisterInput,
   CustomerSession,
   PaymentMethod,
+  PaginatedProducts,
   Product,
   ProductInput,
+  ProductInventoryReport,
   ProductStatusFilter,
+  ReportPeriod,
   RemachadoMedida,
   RemachadoSummary,
   RemachadoTrabajo,
+  SalesHistoryReport,
   Session,
   StockAlert,
   Sucursal,
@@ -79,6 +83,12 @@ export function getCustomerCatalog(token: string, search = '') {
   return request<Product[]>(`/auth/customers/catalog${params}`, {}, token);
 }
 
+export function getCustomerCatalogPage(token: string, search = '', page = 1, limit = 30) {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search.trim()) params.set('search', search.trim());
+  return request<PaginatedProducts>(`/auth/customers/catalog?${params}`, {}, token);
+}
+
 export function getCustomerHistory(token: string) {
   return request<CustomerSale[]>('/auth/customers/history', {}, token);
 }
@@ -88,10 +98,21 @@ export function getCustomerProfile(token: string) {
 }
 
 export async function getProducts(token: string, search = ''): Promise<Product[]> {
-  const params = new URLSearchParams({ limit: '100', status: 'active' });
+  const params = new URLSearchParams({ limit: '100', status: 'active', view: 'sale' });
   if (search.trim()) params.set('search', search.trim());
   const result = await request<{ items: Product[] }>(`/products?${params}`, {}, token);
   return result.items;
+}
+
+export async function getProductsPage(token: string, search = '', page = 1, limit = 50): Promise<PaginatedProducts> {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    status: 'active',
+    view: 'sale',
+  });
+  if (search.trim()) params.set('search', search.trim());
+  return request<PaginatedProducts>(`/products?${params}`, {}, token);
 }
 
 export async function getAdminProducts(
@@ -103,6 +124,44 @@ export async function getAdminProducts(
   if (search.trim()) params.set('search', search.trim());
   const result = await request<{ items: Product[] }>(`/products?${params}`, {}, token);
   return result.items;
+}
+
+export async function getAdminProductsPage(
+  token: string,
+  search = '',
+  status: ProductStatusFilter = 'active',
+  page = 1,
+  limit = 50,
+  sucursalId = '',
+): Promise<PaginatedProducts> {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    status,
+  });
+  if (search.trim()) params.set('search', search.trim());
+  if (sucursalId) params.set('sucursalId', sucursalId);
+  return request<PaginatedProducts>(`/products?${params}`, {}, token);
+}
+
+export function getSalesHistoryReport(
+  token: string,
+  params: { period: ReportPeriod; value: string; sucursalId?: string },
+) {
+  const query = new URLSearchParams({ period: params.period, value: params.value });
+  if (params.sucursalId) query.set('sucursalId', params.sucursalId);
+  return request<SalesHistoryReport>(`/reports/sales-history?${query}`, {}, token);
+}
+
+export function getProductInventoryReport(
+  token: string,
+  params: { period: ReportPeriod; value?: string; sucursalId?: string; search?: string },
+) {
+  const query = new URLSearchParams({ period: params.period });
+  if (params.value) query.set('value', params.value);
+  if (params.sucursalId) query.set('sucursalId', params.sucursalId);
+  if (params.search?.trim()) query.set('search', params.search.trim());
+  return request<ProductInventoryReport>(`/reports/product-inventory?${query}`, {}, token);
 }
 
 export function getCategories(token: string) {

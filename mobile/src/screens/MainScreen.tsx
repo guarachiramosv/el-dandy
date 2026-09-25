@@ -13,13 +13,14 @@ import { clearSession } from '../session';
 import { colors } from '../theme';
 import { Session } from '../types';
 import AdminProductsScreen from './AdminProductsScreen';
+import AdminReportsScreen from './AdminReportsScreen';
 import AlertsScreen from './AlertsScreen';
 import CustomersScreen from './CustomersScreen';
 import InventoryScreen from './InventoryScreen';
 import RemachadoScreen from './RemachadoScreen';
 import SaleScreen from './SaleScreen';
 
-type Tab = 'adminProducts' | 'stock' | 'sale' | 'remachado' | 'customers' | 'alerts';
+type Tab = 'adminProducts' | 'adminReports' | 'stock' | 'sale' | 'remachado' | 'customers' | 'alerts';
 
 type Props = {
   session: Session;
@@ -32,6 +33,7 @@ export default function MainScreen({ session, onLogout }: Props) {
   const tabs: Array<{ id: Tab; icon: string; label: string }> = isAdmin
     ? [
         { id: 'adminProducts', icon: 'PR', label: 'Productos' },
+        { id: 'adminReports', icon: 'RP', label: 'Reportes' },
         { id: 'remachado', icon: 'BA', label: 'Balatas' },
       ]
     : [
@@ -76,6 +78,7 @@ export default function MainScreen({ session, onLogout }: Props) {
 
       <View style={styles.content}>
         {tab === 'adminProducts' && <AdminProductsScreen session={session} />}
+        {tab === 'adminReports' && <AdminReportsScreen session={session} />}
         {tab === 'stock' && <InventoryScreen session={session} />}
         {tab === 'sale' && <SaleScreen session={session} />}
         {tab === 'remachado' && <RemachadoScreen session={session} />}

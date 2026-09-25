@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { API_URL, getCustomerCatalog, getCustomerProfile } from '../api';
+import { API_URL, getCustomerCatalogPage, getCustomerProfile } from '../api';
 import { clearCustomerSession, saveCustomerSession } from '../session';
 import { colors } from '../theme';
 import { CustomerSession, Product } from '../types';
@@ -28,6 +28,8 @@ type Props = {
   session: CustomerSession;
   onLogout: () => void;
 };
+
+const CATALOG_PAGE_SIZE = 30;
 
 const apiOrigin = API_URL.replace(/\/api$/, '');
 
@@ -66,20 +68,34 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogTotalPages, setCatalogTotalPages] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   const token = customerSession.token;
 
-  const loadCatalog = useCallback(async (term = search) => {
+  const loadCatalog = useCallback(async (term = search, page = 1, append = false) => {
     setError('');
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     try {
-      setProducts(await getCustomerCatalog(token, term));
+      const result = await getCustomerCatalogPage(token, term, page, CATALOG_PAGE_SIZE);
+      setProducts((current) => {
+        if (!append) return result.items;
+        const merged = new Map(current.map((product) => [product.id, product]));
+        result.items.forEach((product) => merged.set(product.id, product));
+        return Array.from(merged.values());
+      });
+      setCatalogPage(result.page);
+      setCatalogTotalPages(result.totalPages || 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar el catalogo.');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   }, [search, token]);
@@ -101,8 +117,12 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
   }, [token]);
 
   const submitSearch = () => {
-    setLoading(true);
-    loadCatalog(search);
+    loadCatalog(search, 1, false);
+  };
+
+  const loadMoreCatalog = () => {
+    if (loading || loadingMore || catalogPage >= catalogTotalPages) return;
+    loadCatalog(search, catalogPage + 1, true);
   };
 
   const logout = () => {
@@ -230,7 +250,7 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
               <RefreshControl
                 onRefresh={() => {
                   setRefreshing(true);
-                  loadCatalog(search);
+                  loadCatalog(search, 1, false);
                 }}
                 refreshing={refreshing}
                 tintColor={colors.primary}
@@ -238,6 +258,11 @@ export default function CustomerHomeScreen({ session, onLogout }: Props) {
             }
             renderItem={renderProduct}
             showsVerticalScrollIndicator={false}
+            onEndReached={loadMoreCatalog}
+            onEndReachedThreshold={0.35}
+            ListFooterComponent={
+              loadingMore ? <ActivityIndicator color={colors.primary} style={styles.footerLoader} /> : null
+            }
           />
         )}
       </View>
@@ -336,6 +361,7 @@ const styles = StyleSheet.create({
   searchButtonText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   error: { backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#FCA5A5', padding: 12, borderRadius: 12, overflow: 'hidden', marginBottom: 16 },
   loader: { marginTop: 80 },
+  footerLoader: { paddingVertical: 18 },
   list: { gap: 16, paddingBottom: 40, paddingTop: 8 },
   emptyContainer: { alignItems: 'center', marginTop: 80 },
   emptyIcon: { fontSize: 48, opacity: 0.5, marginBottom: 16 },
