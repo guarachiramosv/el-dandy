@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <g fill="#ffffff">
+    <rect x="486" y="214" width="52" height="82" rx="15"/>
+    <rect x="486" y="728" width="52" height="82" rx="15"/>
+    <rect x="214" y="486" width="82" height="52" rx="15"/>
+    <rect x="728" y="486" width="82" height="52" rx="15"/>
+    <rect x="678" y="270" width="52" height="82" rx="15" transform="rotate(45 704 311)"/>
+    <rect x="294" y="654" width="52" height="82" rx="15" transform="rotate(45 320 695)"/>
+    <rect x="294" y="270" width="52" height="82" rx="15" transform="rotate(-45 320 311)"/>
+    <rect x="678" y="654" width="52" height="82" rx="15" transform="rotate(-45 704 695)"/>
+    <path fill-rule="evenodd" d="M512 278a234 234 0 1 0 0 468 234 234 0 0 0 0-468Zm0 71a163 163 0 1 0 0 326 163 163 0 0 0 0-326Z"/>
+    <g transform="translate(512 503) rotate(-28) translate(-512 -503)">
+      <rect x="446" y="357" width="132" height="121" rx="21"/>
+      <rect x="494" y="465" width="37" height="181" rx="18"/>
+      <path fill-rule="evenodd" d="M512 606a56 56 0 1 0 0 112 56 56 0 0 0 0-112Zm0 37a19 19 0 1 0 0 38 19 19 0 0 0 0-38Z"/>
+    </g>
+  </g>
+</svg>
