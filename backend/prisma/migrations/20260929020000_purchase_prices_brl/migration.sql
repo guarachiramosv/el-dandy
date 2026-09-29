@@ -1,0 +1,6 @@
+ALTER TABLE "Producto"
+ADD COLUMN "precioCompraReales" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+ALTER TABLE "MovimientoStock"
+ADD COLUMN "precioCompraUnitarioReales" DOUBLE PRECISION,
+ADD COLUMN "costoTotalReales" DOUBLE PRECISION;

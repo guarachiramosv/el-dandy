@@ -12,7 +12,9 @@ export class StockService {
     cantidad: number;
     proveedorId?: string | null;
     precioCompraUnitario?: number | null;
+    precioCompraUnitarioReales?: number | null;
     costoTotal?: number | null;
+    costoTotalReales?: number | null;
     estante?: string | null;
     comprobante?: string | null;
     usuarioId?: string | null;

@@ -124,6 +124,7 @@ const trackedProductFields: Record<string, string> = {
   activo: 'Activo',
   estado: 'Estado',
   precioCompra: 'Precio compra',
+  precioCompraReales: 'Precio compra en reales',
   precioVenta: 'Precio venta',
   imagen: 'Imagen principal',
   proveedorId: 'Proveedor',
@@ -150,6 +151,7 @@ const buildProductChanges = (before: Record<string, unknown>, after: Record<stri
 type PurchaseStockInput = {
   proveedorId: string;
   precioCompraUnitario: number;
+  precioCompraUnitarioReales: number;
   cantidad?: number;
   comprobante?: string | null;
   notas?: string | null;
@@ -383,6 +385,7 @@ export class ProductService {
     createData.stock = initialStock;
     if (initialPurchase) {
       createData.precioCompra = initialPurchase.precioCompraUnitario;
+      createData.precioCompraReales = initialPurchase.precioCompraUnitarioReales;
       createData.proveedorId = initialPurchase.proveedorId;
     }
 
@@ -417,7 +420,9 @@ export class ProductService {
           cantidad: initialStock,
           proveedorId: initialPurchase?.proveedorId,
           precioCompraUnitario: initialPurchase?.precioCompraUnitario,
+          precioCompraUnitarioReales: initialPurchase?.precioCompraUnitarioReales,
           costoTotal: initialPurchase ? initialStock * initialPurchase.precioCompraUnitario : undefined,
+          costoTotalReales: initialPurchase ? initialStock * initialPurchase.precioCompraUnitarioReales : undefined,
           estante: product.ubicacion,
           comprobante: initialPurchase?.comprobante?.trim() || null,
           usuarioId,
@@ -448,6 +453,7 @@ export class ProductService {
           stockMinimo: product.stockMinimo,
           ubicacion: product.ubicacion,
           precioCompra: product.precioCompra,
+          precioCompraReales: product.precioCompraReales,
           precioVenta: product.precioVenta,
           categoriaId: product.categoriaId,
           proveedorId: product.proveedorId,
@@ -476,6 +482,7 @@ export class ProductService {
         activo: true,
         estado: true,
         precioCompra: true,
+        precioCompraReales: true,
         precioVenta: true,
         imagen: true,
         proveedorId: true,
@@ -601,6 +608,7 @@ export class ProductService {
     ubicacion?: string | null;
     proveedorId?: string | null;
     precioCompraUnitario: number;
+    precioCompraUnitarioReales: number;
     comprobante?: string | null;
     usuarioId?: string | null;
     notas?: string | null;
@@ -646,6 +654,7 @@ export class ProductService {
           where: { id },
           data: {
             precioCompra: data.precioCompraUnitario,
+            precioCompraReales: data.precioCompraUnitarioReales,
             proveedorId: data.proveedorId,
           },
         });
@@ -661,7 +670,9 @@ export class ProductService {
           cantidad: data.cantidad,
           proveedorId: data.proveedorId,
           precioCompraUnitario: data.precioCompraUnitario,
+          precioCompraUnitarioReales: data.precioCompraUnitarioReales,
           costoTotal: data.cantidad * data.precioCompraUnitario,
+          costoTotalReales: data.cantidad * data.precioCompraUnitarioReales,
           estante: ubicacion,
           comprobante: data.comprobante?.trim() || null,
           usuarioId: data.usuarioId,

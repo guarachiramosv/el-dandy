@@ -20,11 +20,13 @@ type ProductFormData = {
   stockMinimo?: number;
   ubicacion?: string | null;
   precioCompra: number;
+  precioCompraReales: number;
   precioVenta: number;
   sucursalId: string;
   compraInicial?: {
     proveedorId: string;
     precioCompraUnitario: number;
+    precioCompraUnitarioReales: number;
     cantidad: number;
     comprobante?: string | null;
     notas?: string | null;
@@ -73,6 +75,7 @@ const buildInitialFormData = (
       stockMinimo: product.stockMinimo || 5,
       ubicacion: product.ubicacion || "",
       precioCompra: product.precioCompra,
+      precioCompraReales: product.precioCompraReales || 0,
       precioVenta: product.precioVenta,
       sucursalId: product.sucursalId,
       compraInicial: null,
@@ -95,11 +98,13 @@ const buildInitialFormData = (
     stockMinimo: 5,
     ubicacion: "",
     precioCompra: 0,
+    precioCompraReales: 0,
     precioVenta: 0,
     sucursalId: defaultSucursalId,
     compraInicial: {
       proveedorId: providers[0]?.id || "",
       precioCompraUnitario: 0,
+      precioCompraUnitarioReales: 0,
       cantidad: 0,
       comprobante: "",
       notas: "",
@@ -165,19 +170,20 @@ function ProductModalContent({
     setFormError(null);
     setFormData(prev => ({
       ...prev,
-      [name]: name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioVenta" ? Number(value) : value,
+      [name]: name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioCompraReales" || name === "precioVenta" ? Number(value) : value,
     }));
   };
 
   const handlePurchaseChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const numericValue = name === "cantidad" || name === "precioCompraUnitario" ? Number(value) : value;
+    const numericValue = name === "cantidad" || name === "precioCompraUnitario" || name === "precioCompraUnitarioReales" ? Number(value) : value;
     setFormError(null);
     setFormData(prev => ({
       ...prev,
       compraInicial: {
         proveedorId: prev.compraInicial?.proveedorId || providers[0]?.id || "",
         precioCompraUnitario: prev.compraInicial?.precioCompraUnitario || 0,
+        precioCompraUnitarioReales: prev.compraInicial?.precioCompraUnitarioReales || 0,
         cantidad: prev.compraInicial?.cantidad || 0,
         comprobante: prev.compraInicial?.comprobante || "",
         notas: prev.compraInicial?.notas || "",
@@ -185,6 +191,7 @@ function ProductModalContent({
       },
       ...(name === "cantidad" ? { stock: Number(value) } : {}),
       ...(name === "precioCompraUnitario" ? { precioCompra: Number(value) } : {}),
+      ...(name === "precioCompraUnitarioReales" ? { precioCompraReales: Number(value) } : {}),
     }));
   };
 
@@ -239,11 +246,13 @@ function ProductModalContent({
     if (!payload.categoriaId) return setFormError("Selecciona una categoria.");
     if (!payload.sucursalId) return setFormError("Selecciona una sucursal.");
     if (payload.precioCompra < 0) return setFormError("El precio de compra no puede ser negativo.");
+    if (payload.precioCompraReales < 0) return setFormError("El precio de compra en reales no puede ser negativo.");
     if (payload.precioVenta <= 0) return setFormError("El precio de venta debe ser mayor a 0.");
     if (isCreateMode) {
       if (!payload.compraInicial?.proveedorId) return setFormError("Selecciona el proveedor de la compra inicial.");
       if (!Number.isFinite(payload.compraInicial.cantidad) || payload.compraInicial.cantidad <= 0) return setFormError("La cantidad inicial debe ser mayor a 0.");
       if (!Number.isFinite(payload.compraInicial.precioCompraUnitario) || payload.compraInicial.precioCompraUnitario < 0) return setFormError("El precio de compra inicial no puede ser negativo.");
+      if (!Number.isFinite(payload.compraInicial.precioCompraUnitarioReales) || payload.compraInicial.precioCompraUnitarioReales < 0) return setFormError("El precio de compra inicial en reales no puede ser negativo.");
     }
 
     onSave(payload);
@@ -258,7 +267,8 @@ function ProductModalContent({
     : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
   const initialPurchase = formData.compraInicial;
-  const initialPurchaseTotal = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitario || 0);
+  const initialPurchaseTotalBs = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitario || 0);
+  const initialPurchaseTotalReales = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitarioReales || 0);
 
   return (
     <AnimatePresence>
@@ -457,7 +467,7 @@ function ProductModalContent({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">
                     {isCreateMode ? "Stock Inicial" : `Stock ${selectedBranchName}`} {formData.unidadVenta === "METRO" ? "(m)" : ""}
@@ -469,8 +479,12 @@ function ProductModalContent({
                   <input required type="text" inputMode="decimal" name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">Precio de Compra</label>
+                  <label className="text-sm font-medium text-gray-300">Precio compra (Bs)</label>
                   <input required type="text" inputMode="decimal" name="precioCompra" value={formData.precioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-300">Precio compra (R$)</label>
+                  <input required type="text" inputMode="decimal" name="precioCompraReales" value={formData.precioCompraReales} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Precio de Venta</label>
@@ -494,12 +508,20 @@ function ProductModalContent({
                       <input type="text" inputMode="decimal" name="cantidad" value={initialPurchase?.cantidad || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio de compra unitario</label>
+                      <label className="text-sm font-medium text-gray-300">Precio unitario (Bs)</label>
                       <input type="text" inputMode="decimal" name="precioCompraUnitario" value={initialPurchase?.precioCompraUnitario || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Precio unitario (R$)</label>
+                      <input type="text" inputMode="decimal" name="precioCompraUnitarioReales" value={initialPurchase?.precioCompraUnitarioReales || 0} onChange={handlePurchaseChange} className="premium-input" />
+                    </div>
                     <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
-                      <p className="text-xs uppercase text-gray-500">Costo total</p>
-                      <p className="mt-1 text-lg font-black text-primary-light">Bs {initialPurchaseTotal.toLocaleString("es-BO")}</p>
+                      <p className="text-xs uppercase text-gray-500">Costo total (Bs)</p>
+                      <p className="mt-1 text-lg font-black text-primary-light">Bs {initialPurchaseTotalBs.toLocaleString("es-BO")}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
+                      <p className="text-xs uppercase text-gray-500">Costo total (R$)</p>
+                      <p className="mt-1 text-lg font-black text-green-300">R$ {initialPurchaseTotalReales.toLocaleString("pt-BR")}</p>
                     </div>
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-gray-300">Factura / Comprobante</label>

@@ -32,6 +32,11 @@ const salePriceValue = (item: { precioVenta?: number | null; precio?: number | n
 const salePriceLabel = (item: { precioVenta?: number | null; precio?: number | null }) =>
   `Bs ${salePriceValue(item).toLocaleString("es-BO")}`;
 const moneyLabel = (value?: number | null) => `Bs ${(Number(value) || 0).toLocaleString("es-BO")}`;
+const reaisLabel = (value?: number | null) => `R$ ${(Number(value) || 0).toLocaleString("pt-BR")}`;
+const dualCurrencyLabel = (bolivianos?: number | null, reales?: number | null) => {
+  if (bolivianos == null && reales == null) return "-";
+  return `${moneyLabel(bolivianos)} / ${reaisLabel(reales)}`;
+};
 const movementTypeLabel = (type: StockMovement["tipoMovimiento"]) => ({
   COMPRA: "Entrada",
   VENTA: "Salida",
@@ -730,8 +735,8 @@ export default function Inventario() {
                 <th className="p-4">Sucursal</th>
                 <th className="p-4">Proveedor</th>
                 <th className="p-4">Cantidad</th>
-                <th className="p-4">Precio compra</th>
-                <th className="p-4">Total</th>
+                <th className="p-4">Precio compra Bs / R$</th>
+                <th className="p-4">Total Bs / R$</th>
                 <th className="p-4">Usuario</th>
               </tr>
             </thead>
@@ -744,8 +749,8 @@ export default function Inventario() {
                   <td className="p-4 text-gray-300">{movement.sucursal?.nombre || "-"}</td>
                   <td className="p-4 text-gray-300">{movement.proveedor?.nombre || "-"}</td>
                   <td className="p-4 text-gray-300">{movement.cantidad > 0 ? `+${movement.cantidad}` : movement.cantidad}</td>
-                  <td className="p-4 text-gray-300">{movement.precioCompraUnitario != null ? moneyLabel(movement.precioCompraUnitario) : "-"}</td>
-                  <td className="p-4 text-white">{movement.costoTotal != null ? moneyLabel(movement.costoTotal) : "-"}</td>
+                  <td className="p-4 text-gray-300">{dualCurrencyLabel(movement.precioCompraUnitario, movement.precioCompraUnitarioReales)}</td>
+                  <td className="p-4 text-white">{dualCurrencyLabel(movement.costoTotal, movement.costoTotalReales)}</td>
                   <td className="p-4 text-gray-300">{movement.usuario?.nombre || "-"}</td>
                 </tr>
               ))}
@@ -923,7 +928,8 @@ function ProductDetailModal({
               <DetailCard label="Estante" value={product.ubicacion || "Sin ubicacion"} highlight />
               <DetailCard label="Condicion" value={product.condicion} />
               <DetailCard label="Precio venta" value={`Bs ${product.precioVenta.toLocaleString("es-BO")}`} highlight />
-              <DetailCard label="Precio compra" value={`Bs ${product.precioCompra.toLocaleString("es-BO")}`} />
+              <DetailCard label="Precio compra (Bs)" value={moneyLabel(product.precioCompra)} />
+              <DetailCard label="Precio compra (R$)" value={reaisLabel(product.precioCompraReales)} />
             </div>
 
             {product.descripcionDetallada?.trim() && (
@@ -972,8 +978,8 @@ function ProductDetailModal({
                       <th className="p-2">Sucursal</th>
                       <th className="p-2">Proveedor</th>
                       <th className="p-2">Cantidad</th>
-                      <th className="p-2">Precio compra</th>
-                      <th className="p-2">Total</th>
+                      <th className="p-2">Precio compra Bs / R$</th>
+                      <th className="p-2">Total Bs / R$</th>
                       <th className="p-2">Usuario</th>
                     </tr>
                   </thead>
@@ -985,8 +991,8 @@ function ProductDetailModal({
                         <td className="p-2 text-gray-300">{movement.sucursal?.nombre || "-"}</td>
                         <td className="p-2 text-gray-300">{movement.proveedor?.nombre || "-"}</td>
                         <td className="p-2 text-gray-300">{movement.cantidad > 0 ? `+${movement.cantidad}` : movement.cantidad}</td>
-                        <td className="p-2 text-gray-300">{movement.precioCompraUnitario != null ? moneyLabel(movement.precioCompraUnitario) : "-"}</td>
-                        <td className="p-2 text-white">{movement.costoTotal != null ? moneyLabel(movement.costoTotal) : "-"}</td>
+                        <td className="p-2 text-gray-300">{dualCurrencyLabel(movement.precioCompraUnitario, movement.precioCompraUnitarioReales)}</td>
+                        <td className="p-2 text-white">{dualCurrencyLabel(movement.costoTotal, movement.costoTotalReales)}</td>
                         <td className="p-2 text-gray-300">{movement.usuario?.nombre || "-"}</td>
                       </tr>
                     ))}

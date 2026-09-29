@@ -10,6 +10,7 @@ const finiteNumber = z.number().refine(Number.isFinite, 'Valor numerico invalido
 const purchaseInfoSchema = z.object({
   proveedorId: uuidLikeSchema,
   precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
   cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero').optional(),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
@@ -29,6 +30,7 @@ export const createProductSchema = z.object({
   activo: z.boolean().optional(),
   estado: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
   precioCompra: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioCompraReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional(),
   precioVenta: finiteNumber.positive('Precio de venta debe ser positivo'),
   categoriaId: uuidLikeSchema,
   sucursalId: uuidLikeSchema,
@@ -46,6 +48,7 @@ export const addProductStockSchema = z.object({
   ubicacion: z.string().trim().optional().nullable(),
   proveedorId: uuidLikeSchema.optional().nullable(),
   precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
 }).refine((data) => data.cantidad === 0 || Boolean(data.proveedorId), {

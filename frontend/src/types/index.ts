@@ -28,6 +28,7 @@ export interface Product {
   activo?: boolean;
   estado?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO';
   precioCompra: number;
+  precioCompraReales?: number;
   precioVenta: number;
   imagen?: string;
   imagenes?: ProductImage[];
@@ -131,7 +132,9 @@ export interface StockMovement {
   stockNuevo: number;
   cantidad: number;
   precioCompraUnitario?: number | null;
+  precioCompraUnitarioReales?: number | null;
   costoTotal?: number | null;
+  costoTotalReales?: number | null;
   estante?: string | null;
   comprobante?: string | null;
   usuarioId?: string | null;
