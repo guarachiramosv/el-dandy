@@ -123,6 +123,7 @@ const buildInitialFormData = (
 type ProductModalContentProps = Omit<ProductModalProps, "isOpen">;
 
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const roundExchangeRate = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000;
 
 export default function ProductModal({ isOpen, ...contentProps }: ProductModalProps) {
   if (!isOpen) return null;
@@ -178,7 +179,11 @@ function ProductModalContent({
     setFormData(prev => {
       const isNumeric = name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioCompraReales" || name === "tipoCambioCompra" || name === "precioVenta";
       const next = { ...prev, [name]: isNumeric ? Number(value) : value };
-      if (name === "precioCompraReales" || name === "tipoCambioCompra") {
+      if (name === "precioCompra") {
+        if (next.precioCompraReales > 0) next.tipoCambioCompra = roundExchangeRate(next.precioCompra / next.precioCompraReales);
+      } else if (name === "precioCompraReales" && next.precioCompraReales > 0 && next.tipoCambioCompra <= 0 && next.precioCompra > 0) {
+        next.tipoCambioCompra = roundExchangeRate(next.precioCompra / next.precioCompraReales);
+      } else if (name === "precioCompraReales" || name === "tipoCambioCompra") {
         next.precioCompra = roundCurrency(next.precioCompraReales * next.tipoCambioCompra);
       }
       return next;
@@ -200,7 +205,15 @@ function ProductModalContent({
         notas: prev.compraInicial?.notas || "",
         [name]: numericValue,
       };
-      nextPurchase.precioCompraUnitario = roundCurrency(nextPurchase.precioCompraUnitarioReales * nextPurchase.tipoCambio);
+      if (name === "precioCompraUnitario") {
+        if (nextPurchase.precioCompraUnitarioReales > 0) {
+          nextPurchase.tipoCambio = roundExchangeRate(nextPurchase.precioCompraUnitario / nextPurchase.precioCompraUnitarioReales);
+        }
+      } else if (name === "precioCompraUnitarioReales" && nextPurchase.precioCompraUnitarioReales > 0 && nextPurchase.tipoCambio <= 0 && nextPurchase.precioCompraUnitario > 0) {
+        nextPurchase.tipoCambio = roundExchangeRate(nextPurchase.precioCompraUnitario / nextPurchase.precioCompraUnitarioReales);
+      } else {
+        nextPurchase.precioCompraUnitario = roundCurrency(nextPurchase.precioCompraUnitarioReales * nextPurchase.tipoCambio);
+      }
       return {
         ...prev,
         compraInicial: nextPurchase,
@@ -510,7 +523,7 @@ function ProductModalContent({
                     </div>
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-gray-300">Precio compra calculado (Bs)</label>
-                      <input type="text" value={formData.precioCompra} readOnly className="premium-input bg-grafito-900/60" />
+                      <input type="text" inputMode="decimal" name="precioCompra" value={formData.precioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                     </div>
                   </>
                 )}
@@ -544,8 +557,8 @@ function ProductModalContent({
                       <input type="text" inputMode="decimal" name="tipoCambio" value={initialPurchase?.tipoCambio || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio unitario calculado (Bs)</label>
-                      <input type="text" value={initialPurchaseUnitBs} readOnly className="premium-input bg-grafito-900/60" />
+                      <label className="text-sm font-medium text-gray-300">Precio unitario (Bs)</label>
+                      <input type="text" inputMode="decimal" name="precioCompraUnitario" value={initialPurchaseUnitBs} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
                     <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
                       <p className="text-xs uppercase text-gray-500">Costo total (Bs)</p>

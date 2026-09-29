@@ -27,6 +27,7 @@ const statusFilterOptions: Array<{ value: ProductStatusFilter | "deleted"; label
 ];
 
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const roundExchangeRate = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000;
 
 export default function Productos() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -43,6 +44,7 @@ export default function Productos() {
   const [stockCantidad, setStockCantidad] = useState(1);
   const [stockUbicacion, setStockUbicacion] = useState("");
   const [stockProveedorId, setStockProveedorId] = useState("");
+  const [stockPrecioCompra, setStockPrecioCompra] = useState(0);
   const [stockPrecioCompraReales, setStockPrecioCompraReales] = useState(0);
   const [stockTipoCambio, setStockTipoCambio] = useState(0);
   const [stockComprobante, setStockComprobante] = useState("");
@@ -66,7 +68,6 @@ export default function Productos() {
   } | null>(null);
   const [statusFilter, setStatusFilter] = useState<ProductStatusFilter | "deleted">('active');
   const productStatusFilter: ProductStatusFilter = statusFilter === "deleted" ? "active" : statusFilter;
-  const stockPrecioCompra = roundCurrency(stockPrecioCompraReales * stockTipoCambio);
   const { data: filteredFetchedProducts, loading: filteredLoading, error: filteredError } = useProducts(productStatusFilter);
 
   useEffect(() => {
@@ -217,6 +218,7 @@ export default function Productos() {
     setStockCantidad(0);
     setStockUbicacion(initialBranch?.ubicacion || product.ubicacion || "");
     setStockProveedorId(product.proveedorId || providers[0]?.id || "");
+    setStockPrecioCompra(product.precioCompra || 0);
     setStockPrecioCompraReales(product.precioCompraReales || 0);
     setStockTipoCambio(product.tipoCambioCompra || 0);
     setStockComprobante("");
@@ -228,6 +230,27 @@ export default function Productos() {
     const branch = stockProduct?.stockSucursales?.find((item) => item.sucursalId === sucursalId);
     const fallbackLocation = stockProduct?.sucursalId === sucursalId ? stockProduct.ubicacion || "" : "";
     setStockUbicacion(branch?.ubicacion || fallbackLocation);
+  };
+
+  const handleStockPrecioCompraRealesChange = (value: number) => {
+    setStockPrecioCompraReales(value);
+    if (value > 0 && stockTipoCambio <= 0 && stockPrecioCompra > 0) {
+      setStockTipoCambio(roundExchangeRate(stockPrecioCompra / value));
+    } else {
+      setStockPrecioCompra(roundCurrency(value * stockTipoCambio));
+    }
+  };
+
+  const handleStockTipoCambioChange = (value: number) => {
+    setStockTipoCambio(value);
+    setStockPrecioCompra(roundCurrency(stockPrecioCompraReales * value));
+  };
+
+  const handleStockPrecioCompraChange = (value: number) => {
+    setStockPrecioCompra(value);
+    if (stockPrecioCompraReales > 0) {
+      setStockTipoCambio(roundExchangeRate(value / stockPrecioCompraReales));
+    }
   };
 
   const saveProductStock = async () => {
@@ -434,8 +457,9 @@ export default function Productos() {
           onCantidadChange={setStockCantidad}
           onUbicacionChange={setStockUbicacion}
           onProveedorChange={setStockProveedorId}
-          onPrecioCompraRealesChange={setStockPrecioCompraReales}
-          onTipoCambioChange={setStockTipoCambio}
+          onPrecioCompraChange={handleStockPrecioCompraChange}
+          onPrecioCompraRealesChange={handleStockPrecioCompraRealesChange}
+          onTipoCambioChange={handleStockTipoCambioChange}
           onComprobanteChange={setStockComprobante}
           onNotasChange={setStockNotas}
           onClose={() => {
@@ -564,6 +588,7 @@ function AddStockModal({
   onCantidadChange,
   onUbicacionChange,
   onProveedorChange,
+  onPrecioCompraChange,
   onPrecioCompraRealesChange,
   onTipoCambioChange,
   onComprobanteChange,
@@ -588,6 +613,7 @@ function AddStockModal({
   onCantidadChange: (value: number) => void;
   onUbicacionChange: (value: string) => void;
   onProveedorChange: (value: string) => void;
+  onPrecioCompraChange: (value: number) => void;
   onPrecioCompraRealesChange: (value: number) => void;
   onTipoCambioChange: (value: number) => void;
   onComprobanteChange: (value: string) => void;
@@ -679,8 +705,14 @@ function AddStockModal({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-300">Precio de compra calculado (Bs)</span>
-            <input className="premium-input bg-grafito-900/60" type="text" value={precioCompra} readOnly />
+            <span className="mb-1 block text-sm font-medium text-gray-300">Precio de compra unitario (Bs)</span>
+            <input
+              className="premium-input"
+              type="text"
+              inputMode="decimal"
+              value={precioCompra}
+              onChange={(event) => onPrecioCompraChange(Number(event.target.value))}
+            />
           </label>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
