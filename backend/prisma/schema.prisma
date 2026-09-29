@@ -113,6 +113,7 @@ model Sucursal {
   productoStocks ProductoStockSucursal[]
   eliminacionesProducto ProductoEliminacionHistorial[]
   auditoriasProducto ProductoAuditoria[]
+  movimientosStock MovimientoStock[]
   ventas    Venta[]
   compras   Compra[]
   cierresCaja CierreCaja[]
@@ -163,6 +164,7 @@ model Proveedor {
   activo          Boolean  @default(true)
   compras         Compra[]
   productos       Producto[]
+  movimientosStock MovimientoStock[]
   createdAt       DateTime @default(now())
 }
 
@@ -220,6 +222,7 @@ model Producto {
   remachadoGomaTrabajos    RemachadoTrabajo[] @relation("RemachadoGomaProducto")
   remachadoSeguroTrabajos  RemachadoTrabajo[] @relation("RemachadoSeguroProducto")
   createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@unique([codigo, sucursalId])
   @@index([estado, createdAt])
@@ -390,15 +393,27 @@ model MovimientoStock {
   productoId     String
   producto       Producto          @relation(fields: [productoId], references: [id])
   sucursalId      String
+  sucursal        Sucursal          @relation(fields: [sucursalId], references: [id])
+  proveedorId     String?
+  proveedor       Proveedor?        @relation(fields: [proveedorId], references: [id])
   stockAnterior   Float
   stockNuevo      Float
   cantidad        Float
+  precioCompraUnitario Float?
+  costoTotal      Float?
+  estante         String?
+  comprobante     String?
   usuarioId       String?
   usuario         Usuario?         @relation(fields: [usuarioId], references: [id])
   referenciaId    String?
   referenciaTipo  String?
   notas           String?
   createdAt       DateTime         @default(now())
+
+  @@index([productoId, createdAt])
+  @@index([sucursalId, createdAt])
+  @@index([proveedorId])
+  @@index([usuarioId])
 }
 
 model TransferenciaStock {

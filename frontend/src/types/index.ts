@@ -38,6 +38,7 @@ export interface Product {
   sucursalId: string;
   sucursal?: Sucursal;
   stockSucursales?: ProductBranchStock[];
+  movimientos?: StockMovement[];
   createdAt: string;
   updatedAt?: string;
 }
@@ -123,10 +124,18 @@ export interface StockMovement {
   productoId: string;
   producto?: Product;
   sucursalId: string;
+  sucursal?: Pick<Sucursal, 'id' | 'nombre'>;
+  proveedorId?: string | null;
+  proveedor?: Pick<Provider, 'id' | 'nombre'> | null;
   stockAnterior: number;
   stockNuevo: number;
   cantidad: number;
+  precioCompraUnitario?: number | null;
+  costoTotal?: number | null;
+  estante?: string | null;
+  comprobante?: string | null;
   usuarioId?: string | null;
+  usuario?: Pick<User, 'id' | 'nombre' | 'email'> | null;
   referenciaId?: string | null;
   referenciaTipo?: string | null;
   notas?: string | null;

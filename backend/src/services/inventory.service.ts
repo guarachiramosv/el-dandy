@@ -38,7 +38,12 @@ export class InventoryService {
         sucursalId: filters.sucursalId,
         createdAt: filters.from || filters.to ? { gte: filters.from, lte: filters.to } : undefined,
       },
-      include: { producto: true, usuario: { select: { id: true, nombre: true } } },
+      include: {
+        producto: true,
+        sucursal: { select: { id: true, nombre: true } },
+        proveedor: { select: { id: true, nombre: true } },
+        usuario: { select: { id: true, nombre: true, email: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 300,
     });

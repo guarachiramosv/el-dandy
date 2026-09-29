@@ -31,6 +31,40 @@ const salePriceValue = (item: { precioVenta?: number | null; precio?: number | n
 };
 const salePriceLabel = (item: { precioVenta?: number | null; precio?: number | null }) =>
   `Bs ${salePriceValue(item).toLocaleString("es-BO")}`;
+const moneyLabel = (value?: number | null) => `Bs ${(Number(value) || 0).toLocaleString("es-BO")}`;
+const movementTypeLabel = (type: StockMovement["tipoMovimiento"]) => ({
+  COMPRA: "Entrada",
+  VENTA: "Salida",
+  AJUSTE: "Ajuste",
+  TRANSFERENCIA_ENTRADA: "Entrada transferencia",
+  TRANSFERENCIA_SALIDA: "Salida transferencia",
+}[type] || type);
+
+const normalizeBranchName = (value?: string | null) => value?.trim() || "Sin sucursal";
+
+const formatInventoryQuantity = (value: number) => {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? value.toLocaleString("es-BO") : value.toLocaleString("es-BO", { maximumFractionDigits: 2 });
+};
+
+const getBranchStocks = (item: ProductInventoryReport["items"][number]) => {
+  const branches = item.stockSucursales?.length
+    ? item.stockSucursales
+    : [{ sucursalId: item.sucursalId, sucursal: item.sucursal, stock: item.stockActual, fechaAgregado: item.fechaAgregado }];
+
+  return branches
+    .map((branch) => ({
+      name: normalizeBranchName(branch.sucursal),
+      stock: Number(branch.stock) || 0,
+    }))
+    .filter((branch) => branch.stock > 0 || branches.length === 1);
+};
+
+const getBranchStockValue = (item: ProductInventoryReport["items"][number], branchName: string) => {
+  const target = branchName.trim().toLowerCase();
+  const branch = getBranchStocks(item).find((itemBranch) => itemBranch.name.trim().toLowerCase() === target);
+  return branch?.stock ?? 0;
+};
 
 const currentInventoryReportFromProducts = (products: Product[]): ProductInventoryReport => {
   const now = new Date().toISOString();
@@ -118,18 +152,19 @@ const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "
   const pageWidth = isCurrentInventory ? 612 : 792;
   const pageHeight = isCurrentInventory ? 792 : 612;
   const margin = 28;
-  const tableTop = isCurrentInventory ? 682 : 438;
+  const tableTop = isCurrentInventory ? 658 : 438;
   const rowHeight = isCurrentInventory ? 22 : 24;
   const bottom = 34;
   const rowsPerPage = Math.floor((tableTop - bottom) / rowHeight);
   const columns = isCurrentInventory
-    ? [
+      ? [
         { label: "Cod", x: 36, width: 42, chars: 8, align: "left" },
-        { label: "Nombre", x: 86, width: 238, chars: 48, align: "left" },
-        { label: "Cod producto", x: 332, width: 82, chars: 16, align: "left" },
-        { label: "Estante", x: 422, width: 54, chars: 10, align: "left" },
-        { label: "Precio", x: 484, width: 48, chars: 10, align: "right" },
-        { label: "Cantidad", x: 542, width: 38, chars: 8, align: "right" },
+        { label: "Nombre", x: 86, width: 158, chars: 32, align: "left" },
+        { label: "Cod producto", x: 252, width: 66, chars: 14, align: "left" },
+        { label: "Estante", x: 326, width: 48, chars: 10, align: "left" },
+        { label: "Precio", x: 382, width: 52, chars: 10, align: "right" },
+        { label: "Santa Cruz", x: 442, width: 52, chars: 10, align: "right" },
+        { label: "Cochabamba", x: 504, width: 54, chars: 10, align: "right" },
       ]
     : [
         { label: "Codigo", x: 34, width: 46, chars: 9, align: "left" },
@@ -149,7 +184,7 @@ const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "
     let content = "";
     if (isCurrentInventory) {
       content += pdfText("Inventario actual para tienda", margin, 754, 16, true);
-      content += pdfText("Cod, nombre, cod producto, estante, precio y cantidad disponible", margin, 734, 9);
+      content += pdfText("Cod, nombre, cod producto, estante, precio y stock por sucursal", margin, 734, 9);
       content += pdfText(`Generado: ${new Date().toLocaleString("es-BO")}`, margin, 720, 9);
       content += pdfText(`Productos: ${report.totals.productos}   Stock total: ${report.totals.stockActual}`, margin, 706, 9, true);
       content += pdfText(`Pagina ${pageNumber}`, 526, 754, 9, true);
@@ -184,7 +219,7 @@ const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "
     });
 
     pageItems.forEach((item, index) => {
-      const y = tableTop - 19 - index * rowHeight;
+      const y = tableTop - 18 - index * rowHeight;
       const rowValues = isCurrentInventory
         ? [
             item.codigo,
@@ -192,7 +227,8 @@ const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "
             item.codigoRepuesto || "",
             inventoryShelf(item.ubicacion),
             salePriceLabel(item),
-            item.stockActual,
+            `${formatInventoryQuantity(getBranchStockValue(item, "Santa Cruz"))} u`,
+            `${formatInventoryQuantity(getBranchStockValue(item, "Cochabamba"))} u`,
           ]
         : [
             item.codigo,
@@ -210,7 +246,7 @@ const inventoryPdfBytes = (report: ProductInventoryReport, variant: "period" | "
         const column = columns[valueIndex];
         const text = fitPdfText(value, column.chars);
         const x = column.align === "right" ? column.x + column.width - String(text).length * 4.5 : column.x;
-        content += pdfText(text, x, y + 3, 7);
+        content += pdfText(text, x, y + 4, 7);
       });
     });
 
@@ -498,9 +534,10 @@ export default function Inventario() {
     setMessage(null);
     setDownloadingCompleteInventory(true);
     try {
-      const report = currentInventoryReportFromProducts(products);
-      setInventoryReport(report);
-      downloadInventoryPdf(report, `inventario-actual-${defaultDay}`, "current");
+      const report = await fetchProductInventoryReport({ period: "all" });
+      const currentReport = { ...report, label: "Inventario actual" };
+      setInventoryReport(currentReport);
+      downloadInventoryPdf(currentReport, `inventario-actual-${defaultDay}`, "current");
     } catch (err: unknown) {
       setMessage(getErrorMessage(err, "No se pudo descargar el inventario actual."));
     } finally {
@@ -690,20 +727,26 @@ export default function Inventario() {
                 <th className="p-4">Fecha</th>
                 <th className="p-4">Tipo</th>
                 <th className="p-4">Producto</th>
+                <th className="p-4">Sucursal</th>
+                <th className="p-4">Proveedor</th>
                 <th className="p-4">Cantidad</th>
-                <th className="p-4">Antes</th>
-                <th className="p-4">Nuevo</th>
+                <th className="p-4">Precio compra</th>
+                <th className="p-4">Total</th>
+                <th className="p-4">Usuario</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
               {movements.map((movement) => (
                 <tr key={movement.id}>
-                  <td className="p-4 text-gray-300">{new Date(movement.createdAt).toLocaleString()}</td>
-                  <td className="p-4 text-primary-light">{movement.tipoMovimiento}</td>
+                  <td className="p-4 text-gray-300">{new Date(movement.createdAt).toLocaleString("es-BO")}</td>
+                  <td className="p-4 text-primary-light">{movementTypeLabel(movement.tipoMovimiento)}</td>
                   <td className="p-4 text-white">{movement.producto?.codigo} · {movement.producto?.descripcion}</td>
-                  <td className="p-4 text-gray-300">{movement.cantidad}</td>
-                  <td className="p-4 text-gray-300">{movement.stockAnterior}</td>
-                  <td className="p-4 text-white">{movement.stockNuevo}</td>
+                  <td className="p-4 text-gray-300">{movement.sucursal?.nombre || "-"}</td>
+                  <td className="p-4 text-gray-300">{movement.proveedor?.nombre || "-"}</td>
+                  <td className="p-4 text-gray-300">{movement.cantidad > 0 ? `+${movement.cantidad}` : movement.cantidad}</td>
+                  <td className="p-4 text-gray-300">{movement.precioCompraUnitario != null ? moneyLabel(movement.precioCompraUnitario) : "-"}</td>
+                  <td className="p-4 text-white">{movement.costoTotal != null ? moneyLabel(movement.costoTotal) : "-"}</td>
+                  <td className="p-4 text-gray-300">{movement.usuario?.nombre || "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -796,6 +839,7 @@ export default function Inventario() {
         <ProductDetailModal
           product={selectedProduct}
           images={getProductImages(selectedProduct)}
+          movements={movements.filter((movement) => movement.productoId === selectedProduct.id)}
           isSeller={isSeller}
           unitLabel={getUnitLabel(selectedProduct)}
           onClose={() => setSelectedProduct(null)}
@@ -811,6 +855,7 @@ export default function Inventario() {
 function ProductDetailModal({
   product,
   images,
+  movements,
   isSeller,
   unitLabel,
   onClose,
@@ -819,6 +864,7 @@ function ProductDetailModal({
 }: {
   product: Product;
   images: string[];
+  movements: StockMovement[];
   isSeller: boolean;
   unitLabel: string;
   onClose: () => void;
@@ -914,6 +960,43 @@ function ProductDetailModal({
                 </div>
               </div>
             )}
+
+            <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+              <p className="mb-3 text-sm font-bold uppercase text-gray-400">Historial de inventario</p>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="p-2">Fecha</th>
+                      <th className="p-2">Tipo</th>
+                      <th className="p-2">Sucursal</th>
+                      <th className="p-2">Proveedor</th>
+                      <th className="p-2">Cantidad</th>
+                      <th className="p-2">Precio compra</th>
+                      <th className="p-2">Total</th>
+                      <th className="p-2">Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {movements.map((movement) => (
+                      <tr key={movement.id}>
+                        <td className="p-2 text-gray-300">{new Date(movement.createdAt).toLocaleString("es-BO")}</td>
+                        <td className="p-2 text-primary-light">{movementTypeLabel(movement.tipoMovimiento)}</td>
+                        <td className="p-2 text-gray-300">{movement.sucursal?.nombre || "-"}</td>
+                        <td className="p-2 text-gray-300">{movement.proveedor?.nombre || "-"}</td>
+                        <td className="p-2 text-gray-300">{movement.cantidad > 0 ? `+${movement.cantidad}` : movement.cantidad}</td>
+                        <td className="p-2 text-gray-300">{movement.precioCompraUnitario != null ? moneyLabel(movement.precioCompraUnitario) : "-"}</td>
+                        <td className="p-2 text-white">{movement.costoTotal != null ? moneyLabel(movement.costoTotal) : "-"}</td>
+                        <td className="p-2 text-gray-300">{movement.usuario?.nombre || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {movements.length === 0 && (
+                  <div className="p-4 text-center text-sm text-gray-500">Sin movimientos registrados para este producto.</div>
+                )}
+              </div>
+            </div>
 
             {isSeller && (
               <div className="flex justify-end">
@@ -1018,21 +1101,23 @@ function InventoryPrintStyles() {
           table-layout: fixed !important;
         }
         #product-inventory-print th:nth-child(1),
-        #product-inventory-print td:nth-child(1) { width: 9% !important; }
+        #product-inventory-print td:nth-child(1) { width: 8% !important; }
         #product-inventory-print th:nth-child(2),
-        #product-inventory-print td:nth-child(2) { width: 29% !important; }
+        #product-inventory-print td:nth-child(2) { width: 26% !important; }
         #product-inventory-print th:nth-child(3),
-        #product-inventory-print td:nth-child(3) { width: 12% !important; }
+        #product-inventory-print td:nth-child(3) { width: 11% !important; }
         #product-inventory-print th:nth-child(4),
         #product-inventory-print td:nth-child(4) { width: 10% !important; }
         #product-inventory-print th:nth-child(5),
-        #product-inventory-print td:nth-child(5) { width: 11% !important; }
+        #product-inventory-print td:nth-child(5) { width: 10% !important; }
         #product-inventory-print th:nth-child(6),
-        #product-inventory-print td:nth-child(6) { width: 10% !important; }
+        #product-inventory-print td:nth-child(6) { width: 9% !important; }
         #product-inventory-print th:nth-child(7),
         #product-inventory-print td:nth-child(7) { width: 8% !important; }
         #product-inventory-print th:nth-child(8),
-        #product-inventory-print td:nth-child(8) { width: 11% !important; }
+        #product-inventory-print td:nth-child(8) { width: 9% !important; }
+        #product-inventory-print th:nth-child(9),
+        #product-inventory-print td:nth-child(9) { width: 9% !important; }
         #product-inventory-print thead, #product-inventory-print th {
           background: #f3f4f6 !important;
           color: #111827 !important;
@@ -1089,7 +1174,8 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
             <th className="p-2 text-right">Precio venta</th>
             <th className="p-2 text-right">Stock inicio</th>
             <th className="p-2 text-right">Vendido</th>
-            <th className="p-2 text-right">Stock actual</th>
+            <th className="p-2 text-right">Santa Cruz</th>
+            <th className="p-2 text-right">Cochabamba</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
@@ -1105,7 +1191,8 @@ function InventoryPrintArea({ report }: { report: ProductInventoryReport | null 
               <td className="p-2 text-right">{salePriceLabel(item)}</td>
               <td className="p-2 text-right">{item.stockInicial}</td>
               <td className="p-2 text-right">{item.vendidos}</td>
-              <td className="p-2 text-right font-bold">{item.stockActual}</td>
+              <td className="p-2 text-right font-bold">{formatInventoryQuantity(getBranchStockValue(item, "Santa Cruz"))}</td>
+              <td className="p-2 text-right font-bold">{formatInventoryQuantity(getBranchStockValue(item, "Cochabamba"))}</td>
             </tr>
           ))}
         </tbody>

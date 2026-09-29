@@ -5,6 +5,16 @@ const uuidLikeSchema = z.string().regex(
   'ID invalido'
 );
 
+const finiteNumber = z.number().refine(Number.isFinite, 'Valor numerico invalido');
+
+const purchaseInfoSchema = z.object({
+  proveedorId: uuidLikeSchema,
+  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero').optional(),
+  comprobante: z.string().trim().optional().nullable(),
+  notas: z.string().trim().optional().nullable(),
+});
+
 export const createProductSchema = z.object({
   codigo: z.string().trim().optional().nullable(),
   codigoRepuesto: z.string().trim().optional().nullable(),
@@ -13,28 +23,34 @@ export const createProductSchema = z.object({
   marca: z.string().trim().optional().nullable(),
   condicion: z.enum(['NUEVO', 'USADO']).optional(),
   unidadVenta: z.enum(['UNIDAD', 'METRO']).optional(),
-  stock: z.number().min(0, 'Stock no puede ser negativo'),
-  stockMinimo: z.number().min(0).optional(),
+  stock: finiteNumber.min(0, 'Stock no puede ser negativo'),
+  stockMinimo: finiteNumber.min(0).optional(),
   ubicacion: z.string().trim().optional().nullable(),
   activo: z.boolean().optional(),
   estado: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
-  precioCompra: z.number().positive('Precio de compra debe ser positivo'),
-  precioVenta: z.number().positive('Precio de venta debe ser positivo'),
+  precioCompra: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioVenta: finiteNumber.positive('Precio de venta debe ser positivo'),
   categoriaId: uuidLikeSchema,
   sucursalId: uuidLikeSchema,
   proveedorId: uuidLikeSchema.optional().nullable(),
   imagen: z.string().optional().nullable(),
   deletedImageUrls: z.array(z.string()).optional(),
+  compraInicial: purchaseInfoSchema.optional().nullable(),
 });
 
 export const updateProductSchema = createProductSchema.partial();
 
 export const addProductStockSchema = z.object({
   sucursalId: uuidLikeSchema,
-  cantidad: z.number().min(0, 'Cantidad no puede ser negativa'),
+  cantidad: finiteNumber.min(0, 'Cantidad no puede ser negativa'),
   ubicacion: z.string().trim().optional().nullable(),
-  usuarioId: z.string().uuid('ID de usuario invalido').optional().nullable(),
+  proveedorId: uuidLikeSchema.optional().nullable(),
+  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
+}).refine((data) => data.cantidad === 0 || Boolean(data.proveedorId), {
+  message: 'Proveedor es requerido para registrar una compra',
+  path: ['proveedorId'],
 });
 
 export const updateProductBranchStatusSchema = z.object({

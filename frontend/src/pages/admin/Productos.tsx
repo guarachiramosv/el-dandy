@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import ProductTable from "../../components/admin/productos/ProductTable";
 import ProductFilters from "../../components/admin/productos/ProductFilters";
 import ProductModal, { ProductFormData } from "../../components/admin/productos/ProductModal";
-import { Category, Product, ProductDeletionHistory, Sucursal } from "../../types";
+import { Category, Product, ProductDeletionHistory, Provider, Sucursal } from "../../types";
 import { useProducts } from "../../hooks/useProducts";
 import {
   addProductStock,
@@ -14,6 +14,7 @@ import {
   type ProductStatusFilter,
 } from "../../services/products";
 import { fetchCategories, fetchSucursales } from "../../services/catalog";
+import { fetchProviders } from "../../services/providers";
 import { uploadProductImages } from "../../services/uploads";
 import { getErrorMessage } from "../../utils/errors";
 import { filterAndSortBySearch } from "../../utils/fuzzySearch";
@@ -29,6 +30,7 @@ export default function Productos() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"CREATE" | "EDIT" | "VIEW">("CREATE");
@@ -38,6 +40,10 @@ export default function Productos() {
   const [stockSucursalId, setStockSucursalId] = useState("");
   const [stockCantidad, setStockCantidad] = useState(1);
   const [stockUbicacion, setStockUbicacion] = useState("");
+  const [stockProveedorId, setStockProveedorId] = useState("");
+  const [stockPrecioCompra, setStockPrecioCompra] = useState(0);
+  const [stockComprobante, setStockComprobante] = useState("");
+  const [stockNotas, setStockNotas] = useState("");
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionHistory, setDeletionHistory] = useState<ProductDeletionHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -69,12 +75,14 @@ export default function Productos() {
   useEffect(() => {
     const loadCatalogs = async () => {
       try {
-        const [categoryData, sucursalData] = await Promise.all([
+        const [categoryData, sucursalData, providerData] = await Promise.all([
           fetchCategories(),
           fetchSucursales(),
+          fetchProviders(),
         ]);
         setCategories(categoryData);
         setSucursales(sucursalData);
+        setProviders(providerData);
       } catch (err: unknown) {
         setSaveError(getErrorMessage(err));
       }
@@ -204,6 +212,10 @@ export default function Productos() {
     setStockSucursalId(initialSucursalId);
     setStockCantidad(0);
     setStockUbicacion(initialBranch?.ubicacion || product.ubicacion || "");
+    setStockProveedorId(product.proveedorId || providers[0]?.id || "");
+    setStockPrecioCompra(product.precioCompra || 0);
+    setStockComprobante("");
+    setStockNotas("");
   };
 
   const handleStockSucursalChange = (sucursalId: string) => {
@@ -223,13 +235,18 @@ export default function Productos() {
         sucursalId: stockSucursalId,
         cantidad: stockCantidad,
         ubicacion,
+        proveedorId: stockProveedorId,
+        precioCompraUnitario: stockPrecioCompra,
+        comprobante: stockComprobante.trim() || null,
         notas: stockCantidad > 0
-          ? `Ingreso manual desde Productos. Estante: ${ubicacion || "Sin ubicacion"}`
+          ? stockNotas.trim() || `Ingreso manual desde Productos. Estante: ${ubicacion || "Sin ubicacion"}`
           : `Sucursal preparada con stock cero. Estante: ${ubicacion || "Sin ubicacion"}`,
       });
       setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)));
       setStockProduct(null);
       setStockUbicacion("");
+      setStockComprobante("");
+      setStockNotas("");
       setConfirmZeroStock(false);
       setSaveError(stockCantidad > 0 ? "Stock agregado correctamente sin duplicar el producto." : "Sucursal agregada con stock 0 correctamente.");
     } catch (err: unknown) {
@@ -247,6 +264,8 @@ export default function Productos() {
       setConfirmZeroStock(true);
       return;
     }
+    if (!stockProveedorId) return setSaveError("Selecciona un proveedor.");
+    if (!Number.isFinite(stockPrecioCompra) || stockPrecioCompra < 0) return setSaveError("El precio de compra no puede ser negativo.");
     await saveProductStock();
   };
 
@@ -378,6 +397,7 @@ export default function Productos() {
         selectedSucursalId={selectedSucursalId}
         categories={categories}
         sucursales={sucursales}
+        providers={providers}
         onClose={() => {
           setModalOpen(false);
           setSelectedSucursalId("");
@@ -391,13 +411,22 @@ export default function Productos() {
         <AddStockModal
           product={stockProduct}
           sucursales={sucursales}
+          providers={providers}
           sucursalId={stockSucursalId}
           cantidad={stockCantidad}
           ubicacion={stockUbicacion}
+          proveedorId={stockProveedorId}
+          precioCompra={stockPrecioCompra}
+          comprobante={stockComprobante}
+          notas={stockNotas}
           saving={savingProduct}
           onSucursalChange={handleStockSucursalChange}
           onCantidadChange={setStockCantidad}
           onUbicacionChange={setStockUbicacion}
+          onProveedorChange={setStockProveedorId}
+          onPrecioCompraChange={setStockPrecioCompra}
+          onComprobanteChange={setStockComprobante}
+          onNotasChange={setStockNotas}
           onClose={() => {
             setStockProduct(null);
             setConfirmZeroStock(false);
@@ -509,31 +538,50 @@ function ConfirmProductActionModal({
 function AddStockModal({
   product,
   sucursales,
+  providers,
   sucursalId,
   cantidad,
   ubicacion,
+  proveedorId,
+  precioCompra,
+  comprobante,
+  notas,
   saving,
   onSucursalChange,
   onCantidadChange,
   onUbicacionChange,
+  onProveedorChange,
+  onPrecioCompraChange,
+  onComprobanteChange,
+  onNotasChange,
   onClose,
   onConfirm,
 }: {
   product: Product;
   sucursales: Sucursal[];
+  providers: Provider[];
   sucursalId: string;
   cantidad: number;
   ubicacion: string;
+  proveedorId: string;
+  precioCompra: number;
+  comprobante: string;
+  notas: string;
   saving: boolean;
   onSucursalChange: (value: string) => void;
   onCantidadChange: (value: number) => void;
   onUbicacionChange: (value: string) => void;
+  onProveedorChange: (value: string) => void;
+  onPrecioCompraChange: (value: number) => void;
+  onComprobanteChange: (value: string) => void;
+  onNotasChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const branchStock = product.stockSucursales?.find((item) => item.sucursalId === sucursalId);
   const currentStock = branchStock?.stock || 0;
   const nextStock = currentStock + (Number.isFinite(cantidad) ? cantidad : 0);
+  const totalCompra = (Number.isFinite(cantidad) ? cantidad : 0) * (Number.isFinite(precioCompra) ? precioCompra : 0);
   const defaultUbicacion = branchStock?.ubicacion || (product.sucursalId === sucursalId ? product.ubicacion || "" : "");
 
   useEffect(() => {
@@ -543,13 +591,13 @@ function AddStockModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={saving ? undefined : onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+      <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
         <div className="border-b border-gray-700 bg-grafito-900/70 p-5">
           <h3 className="text-xl font-bold text-white">Agregar stock</h3>
           <p className="mt-1 text-sm text-gray-400">{product.codigo} - {product.descripcion}</p>
         </div>
 
-        <div className="space-y-4 p-5">
+        <div className="space-y-4 overflow-y-auto p-5 custom-scrollbar">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-300">Sucursal</span>
             <select className="premium-input" value={sucursalId} onChange={(event) => onSucursalChange(event.target.value)}>
@@ -570,6 +618,16 @@ function AddStockModal({
           </label>
 
           <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-300">Proveedor</span>
+            <select className="premium-input" value={proveedorId} onChange={(event) => onProveedorChange(event.target.value)}>
+              <option value="">Seleccionar proveedor</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>{provider.nombre}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-300">Cantidad a agregar</span>
             <input
               className="premium-input"
@@ -579,6 +637,22 @@ function AddStockModal({
               onChange={(event) => onCantidadChange(Number(event.target.value))}
             />
           </label>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-300">Precio de compra unitario</span>
+            <input
+              className="premium-input"
+              type="text"
+              inputMode="decimal"
+              value={precioCompra}
+              onChange={(event) => onPrecioCompraChange(Number(event.target.value))}
+            />
+          </label>
+
+          <div className="rounded-lg border border-primary/25 bg-primary/10 p-3">
+            <p className="text-xs uppercase text-primary-light">Costo total</p>
+            <p className="mt-1 text-xl font-black text-white">Bs {totalCompra.toLocaleString("es-BO")}</p>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-gray-700 bg-grafito-900/40 p-3">
@@ -590,6 +664,26 @@ function AddStockModal({
               <p className="mt-1 text-lg font-bold text-green-200">{nextStock}</p>
             </div>
           </div>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-300">Factura / Comprobante</span>
+            <input
+              className="premium-input"
+              value={comprobante}
+              onChange={(event) => onComprobanteChange(event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-300">Observacion</span>
+            <textarea
+              className="premium-input min-h-[90px] resize-y"
+              value={notas}
+              onChange={(event) => onNotasChange(event.target.value)}
+              placeholder="Opcional"
+            />
+          </label>
         </div>
 
         <div className="flex justify-end gap-3 border-t border-gray-700 bg-grafito-900/60 p-5">

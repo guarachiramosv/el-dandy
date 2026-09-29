@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const createPurchaseSchema = z.object({
   proveedorId: z.string().uuid('Proveedor invalido'),
   sucursalId: z.string().uuid('Sucursal invalida'),
-  usuarioId: z.string().uuid('Usuario invalido'),
+  usuarioId: z.string().uuid('Usuario invalido').optional(),
   notas: z.string().optional().nullable(),
   items: z.array(z.object({
     productoId: z.string().uuid('Producto invalido'),

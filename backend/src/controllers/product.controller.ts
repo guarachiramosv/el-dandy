@@ -50,7 +50,7 @@ export const addProductStock = asyncHandler(async (req: Request, res: Response) 
   const parsed = addProductStockSchema.parse(req.body);
   const product = await service.addStock(id, {
     ...parsed,
-    usuarioId: parsed.usuarioId || req.user?.id || null,
+    usuarioId: req.user?.id || null,
   });
   res.json({ success: true, data: product });
 });

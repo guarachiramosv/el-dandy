@@ -11,5 +11,7 @@ export const getAllPurchases = asyncHandler(async (_req: Request, res: Response)
 
 export const createPurchase = asyncHandler(async (req: Request, res: Response) => {
   const parsed = createPurchaseSchema.parse(req.body);
-  res.status(201).json({ success: true, data: await service.create(parsed) });
+  const usuarioId = req.user?.id || parsed.usuarioId;
+  if (!usuarioId) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+  res.status(201).json({ success: true, data: await service.create({ ...parsed, usuarioId }) });
 });

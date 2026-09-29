@@ -147,6 +147,14 @@ const buildProductChanges = (before: Record<string, unknown>, after: Record<stri
     return [{ campo: field, etiqueta: label, anterior: previousValue, nuevo: nextValue }];
   });
 
+type PurchaseStockInput = {
+  proveedorId: string;
+  precioCompraUnitario: number;
+  cantidad?: number;
+  comprobante?: string | null;
+  notas?: string | null;
+};
+
 export class ProductService {
   private buildSearchFilter(search: string): Prisma.ProductoWhereInput {
     const terms = getSearchTerms(search).slice(0, 6);
@@ -355,7 +363,7 @@ export class ProductService {
     return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[] }, usuarioId?: string | null) {
+  async create(data: Prisma.ProductoUncheckedCreateInput & { deletedImageUrls?: string[]; compraInicial?: PurchaseStockInput | null }, usuarioId?: string | null) {
     if (typeof data.codigoRepuesto === 'string') {
       data.codigoRepuesto = data.codigoRepuesto.trim() || null;
     }
@@ -365,15 +373,30 @@ export class ProductService {
     data.marca = typeof data.marca === 'string' && data.marca.trim()
       ? data.marca.trim()
       : DEFAULT_PRODUCT_BRAND;
-    const initialStock = typeof data.stock === 'number' ? data.stock : 0;
+    const initialPurchase = data.compraInicial || null;
+    const initialStock = typeof initialPurchase?.cantidad === 'number'
+      ? initialPurchase.cantidad
+      : typeof data.stock === 'number' ? data.stock : 0;
     
     // Remove deletedImageUrls so it's not passed to Prisma during creation
-    const { deletedImageUrls, ...createData } = data as any;
+    const { deletedImageUrls, compraInicial, ...createData } = data as any;
+    createData.stock = initialStock;
+    if (initialPurchase) {
+      createData.precioCompra = initialPurchase.precioCompraUnitario;
+      createData.proveedorId = initialPurchase.proveedorId;
+    }
 
     return prisma.$transaction(async (tx) => {
+      if (initialPurchase) {
+        const provider = await tx.proveedor.findFirst({
+          where: { id: initialPurchase.proveedorId, activo: true },
+          select: { id: true },
+        });
+        if (!provider) throw Object.assign(new Error('Proveedor no encontrado o inactivo'), { status: 404 });
+      }
       createData.codigo = await this.nextSequentialCode(tx);
       const product = await tx.producto.create({
-        data: { ...createData, stock: initialStock },
+        data: createData,
         include: productInclude,
       });
       await tx.productoStockSucursal.create({
@@ -386,15 +409,20 @@ export class ProductService {
       });
       if (initialStock > 0) {
         await stockService.recordMovement(tx, {
-          tipoMovimiento: 'AJUSTE',
+          tipoMovimiento: initialPurchase ? 'COMPRA' : 'AJUSTE',
           productoId: product.id,
           sucursalId: data.sucursalId,
           stockAnterior: 0,
           stockNuevo: initialStock,
           cantidad: initialStock,
+          proveedorId: initialPurchase?.proveedorId,
+          precioCompraUnitario: initialPurchase?.precioCompraUnitario,
+          costoTotal: initialPurchase ? initialStock * initialPurchase.precioCompraUnitario : undefined,
+          estante: product.ubicacion,
+          comprobante: initialPurchase?.comprobante?.trim() || null,
           usuarioId,
-          referenciaTipo: 'ALTA_PRODUCTO',
-          notas: 'Stock inicial al crear producto',
+          referenciaTipo: initialPurchase ? 'COMPRA_INICIAL_PRODUCTO' : 'ALTA_PRODUCTO',
+          notas: initialPurchase?.notas?.trim() || 'Stock inicial al crear producto',
         });
       }
       await productAuditService.record(tx, {
@@ -473,6 +501,7 @@ export class ProductService {
       const updateData: any = { ...data };
       delete updateData.stock;
       delete updateData.deletedImageUrls;
+      delete updateData.compraInicial;
 
       if (data.deletedImageUrls && data.deletedImageUrls.length > 0) {
         await tx.productoImagen.deleteMany({
@@ -566,13 +595,30 @@ export class ProductService {
     });
   }
 
-  async addStock(id: string, data: { sucursalId: string; cantidad: number; ubicacion?: string | null; usuarioId?: string | null; notas?: string | null }) {
+  async addStock(id: string, data: {
+    sucursalId: string;
+    cantidad: number;
+    ubicacion?: string | null;
+    proveedorId?: string | null;
+    precioCompraUnitario: number;
+    comprobante?: string | null;
+    usuarioId?: string | null;
+    notas?: string | null;
+  }) {
     const product = await prisma.$transaction(async (tx) => {
       const current = await tx.producto.findUnique({
         where: { id },
         include: { stockSucursales: true },
       });
       if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
+      if (data.cantidad > 0) {
+        if (!data.proveedorId) throw Object.assign(new Error('Proveedor es requerido para registrar una compra'), { status: 400 });
+        const provider = await tx.proveedor.findFirst({
+          where: { id: data.proveedorId, activo: true },
+          select: { id: true },
+        });
+        if (!provider) throw Object.assign(new Error('Proveedor no encontrado o inactivo'), { status: 404 });
+      }
 
       const branchStock = current.stockSucursales.find((item) => item.sucursalId === data.sucursalId);
       const stockAnterior = branchStock?.stock ?? 0;
@@ -595,15 +641,29 @@ export class ProductService {
         },
       });
       await this.syncProductTotalStock(tx, id);
+      if (data.cantidad > 0) {
+        await tx.producto.update({
+          where: { id },
+          data: {
+            precioCompra: data.precioCompraUnitario,
+            proveedorId: data.proveedorId,
+          },
+        });
+      }
 
       if (data.cantidad > 0) {
         await stockService.recordMovement(tx, {
-          tipoMovimiento: 'AJUSTE',
+          tipoMovimiento: 'COMPRA',
           productoId: id,
           sucursalId: data.sucursalId,
           stockAnterior,
           stockNuevo,
           cantidad: data.cantidad,
+          proveedorId: data.proveedorId,
+          precioCompraUnitario: data.precioCompraUnitario,
+          costoTotal: data.cantidad * data.precioCompraUnitario,
+          estante: ubicacion,
+          comprobante: data.comprobante?.trim() || null,
           usuarioId: data.usuarioId,
           referenciaTipo: 'AGREGAR_STOCK',
           notas: data.notas,

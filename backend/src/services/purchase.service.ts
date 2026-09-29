@@ -64,9 +64,14 @@ export class PurchaseService {
           stockAnterior,
           stockNuevo,
           cantidad: item.cantidad,
+          proveedorId: data.proveedorId,
+          precioCompraUnitario: item.precioUnitario,
+          costoTotal: item.cantidad * item.precioUnitario,
+          estante: branchStock?.ubicacion ?? producto.ubicacion,
           usuarioId: data.usuarioId,
           referenciaId: compra.id,
           referenciaTipo: 'COMPRA',
+          notas: data.notas,
         });
       }
 

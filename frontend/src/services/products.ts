@@ -40,7 +40,15 @@ export const updateProduct = async (id: string, product: Partial<Omit<Product, "
 
 export const addProductStock = async (
   id: string,
-  payload: { sucursalId: string; cantidad: number; ubicacion?: string | null; notas?: string | null },
+  payload: {
+    sucursalId: string;
+    cantidad: number;
+    ubicacion?: string | null;
+    proveedorId: string;
+    precioCompraUnitario: number;
+    comprobante?: string | null;
+    notas?: string | null;
+  },
 ): Promise<Product> => {
   const response = await api.patch<{ success: boolean; data: Product }>(`/products/${id}/stock`, payload);
   if (!response.data.success) throw new Error("Failed to add product stock");

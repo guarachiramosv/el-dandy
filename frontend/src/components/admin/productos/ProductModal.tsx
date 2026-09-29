@@ -3,7 +3,7 @@ import type React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera, ImagePlus, Save, Truck, X } from "lucide-react";
 import ImageLightbox from "../../ImageLightbox";
-import type { Category, Product, Sucursal } from "../../../types";
+import type { Category, Product, Provider, Sucursal } from "../../../types";
 import { productImageUrl } from "../../../utils/images";
 
 type ProductFormData = {
@@ -22,6 +22,13 @@ type ProductFormData = {
   precioCompra: number;
   precioVenta: number;
   sucursalId: string;
+  compraInicial?: {
+    proveedorId: string;
+    precioCompraUnitario: number;
+    cantidad: number;
+    comprobante?: string | null;
+    notas?: string | null;
+  } | null;
   imagen?: string;
   imageFiles?: File[];
   deletedImageUrls?: string[];
@@ -34,6 +41,7 @@ interface ProductModalProps {
   selectedSucursalId?: string;
   categories: Category[];
   sucursales: Sucursal[];
+  providers: Provider[];
   onClose: () => void;
   onSave: (product: ProductFormData) => void;
   saving?: boolean;
@@ -45,6 +53,7 @@ const buildInitialFormData = (
   mode: ProductModalProps["mode"],
   categories: Category[],
   sucursales: Sucursal[],
+  providers: Provider[],
 ): ProductFormData => {
   const defaultCategoryId = categories[0]?.id || "";
   const defaultSucursalId = sucursales[0]?.id || "";
@@ -66,6 +75,7 @@ const buildInitialFormData = (
       precioCompra: product.precioCompra,
       precioVenta: product.precioVenta,
       sucursalId: product.sucursalId,
+      compraInicial: null,
       imagen: product.imagen,
       imageFiles: [],
       deletedImageUrls: [],
@@ -87,6 +97,13 @@ const buildInitialFormData = (
     precioCompra: 0,
     precioVenta: 0,
     sucursalId: defaultSucursalId,
+    compraInicial: {
+      proveedorId: providers[0]?.id || "",
+      precioCompraUnitario: 0,
+      cantidad: 0,
+      comprobante: "",
+      notas: "",
+    },
     imagen: undefined,
     imageFiles: [],
     deletedImageUrls: [],
@@ -115,6 +132,7 @@ function ProductModalContent({
   selectedSucursalId,
   categories,
   sucursales,
+  providers,
   onClose,
   onSave,
   saving = false,
@@ -123,7 +141,7 @@ function ProductModalContent({
   const [lightboxImage, setLightboxImage] = useState<{ url: string; alt: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<ProductFormData>(() =>
-    buildInitialFormData(product, mode, categories, sucursales)
+    buildInitialFormData(product, mode, categories, sucursales, providers)
   );
 
   const selectedPreviewUrls = useMemo(
@@ -148,6 +166,25 @@ function ProductModalContent({
     setFormData(prev => ({
       ...prev,
       [name]: name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioVenta" ? Number(value) : value,
+    }));
+  };
+
+  const handlePurchaseChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    const numericValue = name === "cantidad" || name === "precioCompraUnitario" ? Number(value) : value;
+    setFormError(null);
+    setFormData(prev => ({
+      ...prev,
+      compraInicial: {
+        proveedorId: prev.compraInicial?.proveedorId || providers[0]?.id || "",
+        precioCompraUnitario: prev.compraInicial?.precioCompraUnitario || 0,
+        cantidad: prev.compraInicial?.cantidad || 0,
+        comprobante: prev.compraInicial?.comprobante || "",
+        notas: prev.compraInicial?.notas || "",
+        [name]: numericValue,
+      },
+      ...(name === "cantidad" ? { stock: Number(value) } : {}),
+      ...(name === "precioCompraUnitario" ? { precioCompra: Number(value) } : {}),
     }));
   };
 
@@ -188,14 +225,26 @@ function ProductModalContent({
       descripcionDetallada: formData.descripcionDetallada?.trim() || null,
       marca: formData.marca.trim(),
       ubicacion: formData.ubicacion?.trim() || null,
+      compraInicial: isCreateMode && formData.compraInicial
+        ? {
+            ...formData.compraInicial,
+            comprobante: formData.compraInicial.comprobante?.trim() || null,
+            notas: formData.compraInicial.notas?.trim() || null,
+          }
+        : null,
     };
 
     if (!payload.descripcion) return setFormError("La descripcion es obligatoria.");
     if (!payload.marca) return setFormError("La marca es obligatoria.");
     if (!payload.categoriaId) return setFormError("Selecciona una categoria.");
     if (!payload.sucursalId) return setFormError("Selecciona una sucursal.");
-    if (payload.precioCompra <= 0) return setFormError("El precio de compra debe ser mayor a 0.");
+    if (payload.precioCompra < 0) return setFormError("El precio de compra no puede ser negativo.");
     if (payload.precioVenta <= 0) return setFormError("El precio de venta debe ser mayor a 0.");
+    if (isCreateMode) {
+      if (!payload.compraInicial?.proveedorId) return setFormError("Selecciona el proveedor de la compra inicial.");
+      if (!Number.isFinite(payload.compraInicial.cantidad) || payload.compraInicial.cantidad <= 0) return setFormError("La cantidad inicial debe ser mayor a 0.");
+      if (!Number.isFinite(payload.compraInicial.precioCompraUnitario) || payload.compraInicial.precioCompraUnitario < 0) return setFormError("El precio de compra inicial no puede ser negativo.");
+    }
 
     onSave(payload);
   };
@@ -208,6 +257,8 @@ function ProductModalContent({
     ? selectedBranch.ubicacion || (product?.sucursalId === selectedBranch.sucursalId ? product?.ubicacion : null) || "Sin ubicacion"
     : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
+  const initialPurchase = formData.compraInicial;
+  const initialPurchaseTotal = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitario || 0);
 
   return (
     <AnimatePresence>
@@ -426,6 +477,41 @@ function ProductModalContent({
                   <input required type="text" inputMode="decimal" name="precioVenta" value={formData.precioVenta} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
               </div>
+
+              {isCreateMode && (
+                <div className="rounded-xl border border-primary/25 bg-primary/10 p-4">
+                  <h4 className="text-sm font-bold uppercase tracking-wide text-primary-light">Informacion de compra inicial</h4>
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Proveedor</label>
+                      <select name="proveedorId" value={initialPurchase?.proveedorId || ""} onChange={handlePurchaseChange} className="premium-input">
+                        <option value="">Seleccionar proveedor</option>
+                        {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.nombre}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Cantidad inicial</label>
+                      <input type="text" inputMode="decimal" name="cantidad" value={initialPurchase?.cantidad || 0} onChange={handlePurchaseChange} className="premium-input" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Precio de compra unitario</label>
+                      <input type="text" inputMode="decimal" name="precioCompraUnitario" value={initialPurchase?.precioCompraUnitario || 0} onChange={handlePurchaseChange} className="premium-input" />
+                    </div>
+                    <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
+                      <p className="text-xs uppercase text-gray-500">Costo total</p>
+                      <p className="mt-1 text-lg font-black text-primary-light">Bs {initialPurchaseTotal.toLocaleString("es-BO")}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Factura / Comprobante</label>
+                      <input name="comprobante" value={initialPurchase?.comprobante || ""} onChange={handlePurchaseChange} className="premium-input" placeholder="Opcional" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Observacion</label>
+                      <input name="notas" value={initialPurchase?.notas || ""} onChange={handlePurchaseChange} className="premium-input" placeholder="Opcional" />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {(product?.stockSucursales?.length || 0) > 0 && (
                 <div className="space-y-3">
