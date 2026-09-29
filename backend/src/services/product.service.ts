@@ -20,6 +20,8 @@ const positiveInt = (value: unknown, fallback: number, max = Number.MAX_SAFE_INT
   return Math.min(Math.floor(parsed), max);
 };
 
+const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
 const productInclude = {
   categoria: true,
   sucursal: true,
@@ -125,6 +127,7 @@ const trackedProductFields: Record<string, string> = {
   estado: 'Estado',
   precioCompra: 'Precio compra',
   precioCompraReales: 'Precio compra en reales',
+  tipoCambioCompra: 'Tipo de cambio de compra',
   precioVenta: 'Precio venta',
   imagen: 'Imagen principal',
   proveedorId: 'Proveedor',
@@ -152,6 +155,7 @@ type PurchaseStockInput = {
   proveedorId: string;
   precioCompraUnitario: number;
   precioCompraUnitarioReales: number;
+  tipoCambio: number;
   cantidad?: number;
   comprobante?: string | null;
   notas?: string | null;
@@ -379,13 +383,17 @@ export class ProductService {
     const initialStock = typeof initialPurchase?.cantidad === 'number'
       ? initialPurchase.cantidad
       : typeof data.stock === 'number' ? data.stock : 0;
+    const initialUnitCostBs = initialPurchase
+      ? roundCurrency(initialPurchase.precioCompraUnitarioReales * initialPurchase.tipoCambio)
+      : 0;
     
     // Remove deletedImageUrls so it's not passed to Prisma during creation
     const { deletedImageUrls, compraInicial, ...createData } = data as any;
     createData.stock = initialStock;
     if (initialPurchase) {
-      createData.precioCompra = initialPurchase.precioCompraUnitario;
+      createData.precioCompra = initialUnitCostBs;
       createData.precioCompraReales = initialPurchase.precioCompraUnitarioReales;
+      createData.tipoCambioCompra = initialPurchase.tipoCambio;
       createData.proveedorId = initialPurchase.proveedorId;
     }
 
@@ -419,10 +427,11 @@ export class ProductService {
           stockNuevo: initialStock,
           cantidad: initialStock,
           proveedorId: initialPurchase?.proveedorId,
-          precioCompraUnitario: initialPurchase?.precioCompraUnitario,
+          precioCompraUnitario: initialPurchase ? initialUnitCostBs : undefined,
           precioCompraUnitarioReales: initialPurchase?.precioCompraUnitarioReales,
-          costoTotal: initialPurchase ? initialStock * initialPurchase.precioCompraUnitario : undefined,
-          costoTotalReales: initialPurchase ? initialStock * initialPurchase.precioCompraUnitarioReales : undefined,
+          tipoCambio: initialPurchase?.tipoCambio,
+          costoTotal: initialPurchase ? roundCurrency(initialStock * initialUnitCostBs) : undefined,
+          costoTotalReales: initialPurchase ? roundCurrency(initialStock * initialPurchase.precioCompraUnitarioReales) : undefined,
           estante: product.ubicacion,
           comprobante: initialPurchase?.comprobante?.trim() || null,
           usuarioId,
@@ -454,6 +463,7 @@ export class ProductService {
           ubicacion: product.ubicacion,
           precioCompra: product.precioCompra,
           precioCompraReales: product.precioCompraReales,
+          tipoCambioCompra: product.tipoCambioCompra,
           precioVenta: product.precioVenta,
           categoriaId: product.categoriaId,
           proveedorId: product.proveedorId,
@@ -483,6 +493,7 @@ export class ProductService {
         estado: true,
         precioCompra: true,
         precioCompraReales: true,
+        tipoCambioCompra: true,
         precioVenta: true,
         imagen: true,
         proveedorId: true,
@@ -609,11 +620,13 @@ export class ProductService {
     proveedorId?: string | null;
     precioCompraUnitario: number;
     precioCompraUnitarioReales: number;
+    tipoCambio: number;
     comprobante?: string | null;
     usuarioId?: string | null;
     notas?: string | null;
   }) {
     const product = await prisma.$transaction(async (tx) => {
+      const precioCompraUnitarioBs = roundCurrency(data.precioCompraUnitarioReales * data.tipoCambio);
       const current = await tx.producto.findUnique({
         where: { id },
         include: { stockSucursales: true },
@@ -653,8 +666,9 @@ export class ProductService {
         await tx.producto.update({
           where: { id },
           data: {
-            precioCompra: data.precioCompraUnitario,
+            precioCompra: precioCompraUnitarioBs,
             precioCompraReales: data.precioCompraUnitarioReales,
+            tipoCambioCompra: data.tipoCambio,
             proveedorId: data.proveedorId,
           },
         });
@@ -669,10 +683,11 @@ export class ProductService {
           stockNuevo,
           cantidad: data.cantidad,
           proveedorId: data.proveedorId,
-          precioCompraUnitario: data.precioCompraUnitario,
+          precioCompraUnitario: precioCompraUnitarioBs,
           precioCompraUnitarioReales: data.precioCompraUnitarioReales,
-          costoTotal: data.cantidad * data.precioCompraUnitario,
-          costoTotalReales: data.cantidad * data.precioCompraUnitarioReales,
+          tipoCambio: data.tipoCambio,
+          costoTotal: roundCurrency(data.cantidad * precioCompraUnitarioBs),
+          costoTotalReales: roundCurrency(data.cantidad * data.precioCompraUnitarioReales),
           estante: ubicacion,
           comprobante: data.comprobante?.trim() || null,
           usuarioId: data.usuarioId,

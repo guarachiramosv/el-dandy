@@ -47,6 +47,7 @@ export const addProductStock = async (
     proveedorId: string;
     precioCompraUnitario: number;
     precioCompraUnitarioReales: number;
+    tipoCambio: number;
     comprobante?: string | null;
     notas?: string | null;
   },

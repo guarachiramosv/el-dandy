@@ -29,6 +29,7 @@ export interface Product {
   estado?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO';
   precioCompra: number;
   precioCompraReales?: number;
+  tipoCambioCompra?: number;
   precioVenta: number;
   imagen?: string;
   imagenes?: ProductImage[];
@@ -133,6 +134,7 @@ export interface StockMovement {
   cantidad: number;
   precioCompraUnitario?: number | null;
   precioCompraUnitarioReales?: number | null;
+  tipoCambio?: number | null;
   costoTotal?: number | null;
   costoTotalReales?: number | null;
   estante?: string | null;

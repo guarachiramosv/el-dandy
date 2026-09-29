@@ -201,6 +201,7 @@ model Producto {
   estado       ProductStatus    @default(ACTIVO)
   precioCompra Float
   precioCompraReales Float      @default(0)
+  tipoCambioCompra Float        @default(0)
   precioVenta  Float
   imagen       String?
   proveedorId  String?
@@ -402,6 +403,7 @@ model MovimientoStock {
   cantidad        Float
   precioCompraUnitario Float?
   precioCompraUnitarioReales Float?
+  tipoCambio     Float?
   costoTotal      Float?
   costoTotalReales Float?
   estante         String?

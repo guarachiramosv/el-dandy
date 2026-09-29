@@ -9,8 +9,9 @@ const finiteNumber = z.number().refine(Number.isFinite, 'Valor numerico invalido
 
 const purchaseInfoSchema = z.object({
   proveedorId: uuidLikeSchema,
-  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo').optional().default(0),
   precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
+  tipoCambio: finiteNumber.positive('Tipo de cambio debe ser mayor a cero'),
   cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero').optional(),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
@@ -31,6 +32,7 @@ export const createProductSchema = z.object({
   estado: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
   precioCompra: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
   precioCompraReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional(),
+  tipoCambioCompra: finiteNumber.min(0, 'Tipo de cambio no puede ser negativo').optional(),
   precioVenta: finiteNumber.positive('Precio de venta debe ser positivo'),
   categoriaId: uuidLikeSchema,
   sucursalId: uuidLikeSchema,
@@ -47,13 +49,17 @@ export const addProductStockSchema = z.object({
   cantidad: finiteNumber.min(0, 'Cantidad no puede ser negativa'),
   ubicacion: z.string().trim().optional().nullable(),
   proveedorId: uuidLikeSchema.optional().nullable(),
-  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo'),
+  precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo').optional().default(0),
   precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
+  tipoCambio: finiteNumber.min(0, 'Tipo de cambio no puede ser negativo').optional().default(0),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
 }).refine((data) => data.cantidad === 0 || Boolean(data.proveedorId), {
   message: 'Proveedor es requerido para registrar una compra',
   path: ['proveedorId'],
+}).refine((data) => data.cantidad === 0 || data.tipoCambio > 0, {
+  message: 'Tipo de cambio debe ser mayor a cero',
+  path: ['tipoCambio'],
 });
 
 export const updateProductBranchStatusSchema = z.object({

@@ -21,12 +21,14 @@ type ProductFormData = {
   ubicacion?: string | null;
   precioCompra: number;
   precioCompraReales: number;
+  tipoCambioCompra: number;
   precioVenta: number;
   sucursalId: string;
   compraInicial?: {
     proveedorId: string;
     precioCompraUnitario: number;
     precioCompraUnitarioReales: number;
+    tipoCambio: number;
     cantidad: number;
     comprobante?: string | null;
     notas?: string | null;
@@ -76,6 +78,7 @@ const buildInitialFormData = (
       ubicacion: product.ubicacion || "",
       precioCompra: product.precioCompra,
       precioCompraReales: product.precioCompraReales || 0,
+      tipoCambioCompra: product.tipoCambioCompra || 0,
       precioVenta: product.precioVenta,
       sucursalId: product.sucursalId,
       compraInicial: null,
@@ -99,12 +102,14 @@ const buildInitialFormData = (
     ubicacion: "",
     precioCompra: 0,
     precioCompraReales: 0,
+    tipoCambioCompra: 0,
     precioVenta: 0,
     sucursalId: defaultSucursalId,
     compraInicial: {
       proveedorId: providers[0]?.id || "",
       precioCompraUnitario: 0,
       precioCompraUnitarioReales: 0,
+      tipoCambio: 0,
       cantidad: 0,
       comprobante: "",
       notas: "",
@@ -116,6 +121,8 @@ const buildInitialFormData = (
 };
 
 type ProductModalContentProps = Omit<ProductModalProps, "isOpen">;
+
+const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 export default function ProductModal({ isOpen, ...contentProps }: ProductModalProps) {
   if (!isOpen) return null;
@@ -168,31 +175,41 @@ function ProductModalContent({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormError(null);
-    setFormData(prev => ({
-      ...prev,
-      [name]: name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioCompraReales" || name === "precioVenta" ? Number(value) : value,
-    }));
+    setFormData(prev => {
+      const isNumeric = name === "stock" || name === "stockMinimo" || name === "precioCompra" || name === "precioCompraReales" || name === "tipoCambioCompra" || name === "precioVenta";
+      const next = { ...prev, [name]: isNumeric ? Number(value) : value };
+      if (name === "precioCompraReales" || name === "tipoCambioCompra") {
+        next.precioCompra = roundCurrency(next.precioCompraReales * next.tipoCambioCompra);
+      }
+      return next;
+    });
   };
 
   const handlePurchaseChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const numericValue = name === "cantidad" || name === "precioCompraUnitario" || name === "precioCompraUnitarioReales" ? Number(value) : value;
+    const numericValue = name === "cantidad" || name === "precioCompraUnitario" || name === "precioCompraUnitarioReales" || name === "tipoCambio" ? Number(value) : value;
     setFormError(null);
-    setFormData(prev => ({
-      ...prev,
-      compraInicial: {
+    setFormData(prev => {
+      const nextPurchase = {
         proveedorId: prev.compraInicial?.proveedorId || providers[0]?.id || "",
         precioCompraUnitario: prev.compraInicial?.precioCompraUnitario || 0,
         precioCompraUnitarioReales: prev.compraInicial?.precioCompraUnitarioReales || 0,
+        tipoCambio: prev.compraInicial?.tipoCambio || 0,
         cantidad: prev.compraInicial?.cantidad || 0,
         comprobante: prev.compraInicial?.comprobante || "",
         notas: prev.compraInicial?.notas || "",
         [name]: numericValue,
-      },
-      ...(name === "cantidad" ? { stock: Number(value) } : {}),
-      ...(name === "precioCompraUnitario" ? { precioCompra: Number(value) } : {}),
-      ...(name === "precioCompraUnitarioReales" ? { precioCompraReales: Number(value) } : {}),
-    }));
+      };
+      nextPurchase.precioCompraUnitario = roundCurrency(nextPurchase.precioCompraUnitarioReales * nextPurchase.tipoCambio);
+      return {
+        ...prev,
+        compraInicial: nextPurchase,
+        stock: name === "cantidad" ? Number(value) : prev.stock,
+        precioCompra: nextPurchase.precioCompraUnitario,
+        precioCompraReales: nextPurchase.precioCompraUnitarioReales,
+        tipoCambioCompra: nextPurchase.tipoCambio,
+      };
+    });
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -247,12 +264,14 @@ function ProductModalContent({
     if (!payload.sucursalId) return setFormError("Selecciona una sucursal.");
     if (payload.precioCompra < 0) return setFormError("El precio de compra no puede ser negativo.");
     if (payload.precioCompraReales < 0) return setFormError("El precio de compra en reales no puede ser negativo.");
+    if (!isCreateMode && payload.precioCompraReales > 0 && payload.tipoCambioCompra <= 0) return setFormError("El tipo de cambio debe ser mayor a 0.");
     if (payload.precioVenta <= 0) return setFormError("El precio de venta debe ser mayor a 0.");
     if (isCreateMode) {
       if (!payload.compraInicial?.proveedorId) return setFormError("Selecciona el proveedor de la compra inicial.");
       if (!Number.isFinite(payload.compraInicial.cantidad) || payload.compraInicial.cantidad <= 0) return setFormError("La cantidad inicial debe ser mayor a 0.");
       if (!Number.isFinite(payload.compraInicial.precioCompraUnitario) || payload.compraInicial.precioCompraUnitario < 0) return setFormError("El precio de compra inicial no puede ser negativo.");
       if (!Number.isFinite(payload.compraInicial.precioCompraUnitarioReales) || payload.compraInicial.precioCompraUnitarioReales < 0) return setFormError("El precio de compra inicial en reales no puede ser negativo.");
+      if (!Number.isFinite(payload.compraInicial.tipoCambio) || payload.compraInicial.tipoCambio <= 0) return setFormError("El tipo de cambio debe ser mayor a 0.");
     }
 
     onSave(payload);
@@ -267,8 +286,9 @@ function ProductModalContent({
     : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
   const initialPurchase = formData.compraInicial;
-  const initialPurchaseTotalBs = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitario || 0);
-  const initialPurchaseTotalReales = (initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitarioReales || 0);
+  const initialPurchaseUnitBs = roundCurrency((initialPurchase?.precioCompraUnitarioReales || 0) * (initialPurchase?.tipoCambio || 0));
+  const initialPurchaseTotalBs = roundCurrency((initialPurchase?.cantidad || 0) * initialPurchaseUnitBs);
+  const initialPurchaseTotalReales = roundCurrency((initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitarioReales || 0));
 
   return (
     <AnimatePresence>
@@ -467,7 +487,7 @@ function ProductModalContent({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">
                     {isCreateMode ? "Stock Inicial" : `Stock ${selectedBranchName}`} {formData.unidadVenta === "METRO" ? "(m)" : ""}
@@ -478,14 +498,22 @@ function ProductModalContent({
                   <label className="text-sm font-medium text-gray-300">Stock Minimo</label>
                   <input required type="text" inputMode="decimal" name="stockMinimo" value={formData.stockMinimo || 0} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">Precio compra (Bs)</label>
-                  <input required type="text" inputMode="decimal" name="precioCompra" value={formData.precioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">Precio compra (R$)</label>
-                  <input required type="text" inputMode="decimal" name="precioCompraReales" value={formData.precioCompraReales} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
-                </div>
+                {!isCreateMode && (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Precio compra (R$)</label>
+                      <input required type="text" inputMode="decimal" name="precioCompraReales" value={formData.precioCompraReales} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Tipo de cambio (Bs por R$)</label>
+                      <input required type="text" inputMode="decimal" name="tipoCambioCompra" value={formData.tipoCambioCompra} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Precio compra calculado (Bs)</label>
+                      <input type="text" value={formData.precioCompra} readOnly className="premium-input bg-grafito-900/60" />
+                    </div>
+                  </>
+                )}
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">Precio de Venta</label>
                   <input required type="text" inputMode="decimal" name="precioVenta" value={formData.precioVenta} onChange={handleChange} readOnly={isReadOnly} className="premium-input" />
@@ -508,12 +536,16 @@ function ProductModalContent({
                       <input type="text" inputMode="decimal" name="cantidad" value={initialPurchase?.cantidad || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio unitario (Bs)</label>
-                      <input type="text" inputMode="decimal" name="precioCompraUnitario" value={initialPurchase?.precioCompraUnitario || 0} onChange={handlePurchaseChange} className="premium-input" />
+                      <label className="text-sm font-medium text-gray-300">Precio de compra unitario (R$)</label>
+                      <input type="text" inputMode="decimal" name="precioCompraUnitarioReales" value={initialPurchase?.precioCompraUnitarioReales || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio unitario (R$)</label>
-                      <input type="text" inputMode="decimal" name="precioCompraUnitarioReales" value={initialPurchase?.precioCompraUnitarioReales || 0} onChange={handlePurchaseChange} className="premium-input" />
+                      <label className="text-sm font-medium text-gray-300">Tipo de cambio (Bs por R$)</label>
+                      <input type="text" inputMode="decimal" name="tipoCambio" value={initialPurchase?.tipoCambio || 0} onChange={handlePurchaseChange} className="premium-input" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-gray-300">Precio unitario calculado (Bs)</label>
+                      <input type="text" value={initialPurchaseUnitBs} readOnly className="premium-input bg-grafito-900/60" />
                     </div>
                     <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
                       <p className="text-xs uppercase text-gray-500">Costo total (Bs)</p>
