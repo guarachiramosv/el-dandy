@@ -20,6 +20,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('authUser');
+      localStorage.removeItem('customerToken');
+      localStorage.removeItem('authCustomer');
+      window.location.replace('/login');
+    }
+
     // Ensure API returns our { success, error } shape
     const msg = error.response?.data?.error || error.message;
     return Promise.reject(new Error(msg));

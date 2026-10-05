@@ -46,17 +46,32 @@ export const getCurrentCustomer = (): Customer | null => {
 
 export const getCurrentUser = (): User | null => {
   const raw = localStorage.getItem('authUser');
-  if (!raw) return null;
-
-  const user = JSON.parse(raw) as User;
   const token = localStorage.getItem('authToken');
-  if (!token) return user;
+  if (!raw || !token) {
+    clearSession();
+    return null;
+  }
 
   try {
-    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { role?: User['role'] };
+    const user = JSON.parse(raw) as User;
+    const encodedPayload = token.split('.')[1];
+    if (!encodedPayload) throw new Error('Token invalido');
+
+    const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))) as {
+      exp?: number;
+      role?: User['role'];
+    };
+
+    if (!payload.exp || payload.exp * 1000 <= Date.now()) {
+      clearSession();
+      return null;
+    }
+
     return payload.role ? { ...user, role: payload.role } : user;
   } catch {
-    return user;
+    clearSession();
+    return null;
   }
 };
 
