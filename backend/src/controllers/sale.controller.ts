@@ -8,13 +8,17 @@ const service = new SaleService();
 
 export const updatePaymentMethod = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { metodoPago } = req.body;
+  const { metodoPago, pagos } = req.body;
   
   if (!id || !metodoPago) {
     return res.status(400).json({ success: false, error: 'ID y metodo de pago requeridos' });
   }
 
-  const data = await service.updatePaymentMethod(String(id), metodoPago as PaymentMethod);
+  const data = await service.updatePaymentMethod(String(id), metodoPago as PaymentMethod, {
+    id: req.user?.id,
+    sucursalId: req.user?.sucursalId,
+    role: req.user?.role,
+  }, Array.isArray(pagos) ? pagos : undefined);
   res.json({ success: true, data });
 });
 

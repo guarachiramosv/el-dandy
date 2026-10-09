@@ -366,6 +366,11 @@ function saleReceiptCopyHtml(sale: Sale, fallbackSellerName: string) {
   const customerNit = sale.cliente?.nit;
   const branchName = sale.sucursal?.nombre || "Sucursal";
   const paymentLabel = salePaymentLabel(sale.tipoVenta, sale.metodoPago);
+  const paymentBreakdown = sale.metodoPago === "MIXTO"
+    ? (sale.pagos || []).map((payment) => `
+        <div><span>${escapeHtml(payment.metodoPago === "EFECTIVO" ? "Pago efectivo" : "Pago QR")}</span><strong>${escapeHtml(moneyShort(payment.monto))}</strong></div>
+      `).join("")
+    : "";
 
   const rows = details.map((detail) => {
     const product = detail.producto;
@@ -430,6 +435,7 @@ function saleReceiptCopyHtml(sale: Sale, fallbackSellerName: string) {
       <div class="summary">
         <div><span>Subtotal</span><strong>${escapeHtml(moneyShort(sale.subtotal || 0))}</strong></div>
         <div><span>Descuento</span><strong>${escapeHtml(moneyShort(sale.descuento || 0))}</strong></div>
+        ${paymentBreakdown}
         <div class="grand-total"><span>Total</span><strong>${escapeHtml(moneyShort(sale.total))}</strong></div>
       </div>
 

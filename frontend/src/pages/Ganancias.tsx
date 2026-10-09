@@ -181,7 +181,7 @@ export default function Ganancias() {
             </ReportTable>
           </div>
 
-          <p className="text-xs text-gray-500">Ganancia estimada: ventas menos costo registrado de productos y gastos de caja. Los servicios de remachado no tienen costo de mano de obra configurado.</p>
+          <p className="text-xs text-gray-500">Ganancia estimada: ventas menos costo registrado de productos, gastos de caja y gastos del negocio registrados por el administrador. Los retiros personales y las compras de mercaderia no se cuentan como perdida del mes.</p>
         </>
       )}
     </section>

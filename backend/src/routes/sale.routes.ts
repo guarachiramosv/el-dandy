@@ -15,6 +15,6 @@ router.get('/', getAllSales);
 router.post('/', createSale);
 router.post('/:id/void-request', requestSaleVoid);
 router.delete('/:id', requireAdmin, deleteSale);
-router.patch('/:id/payment-method', requireAdmin, updatePaymentMethod);
+router.patch('/:id/payment-method', updatePaymentMethod);
 
 export default router;

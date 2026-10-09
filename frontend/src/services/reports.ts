@@ -19,6 +19,7 @@ export type MonthlyProfitReport = {
     costoProductos: number;
     gananciaBruta: number;
     totalGastos: number;
+    gastosAdministrador: number;
     gananciaNeta: number;
     margenNeto: number;
     ticketPromedio: number;

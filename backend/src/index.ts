@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import { prisma } from './lib/prisma';
 import categoryRoutes from './routes/category.routes';
@@ -17,8 +18,10 @@ import inventoryRoutes from './routes/inventory.routes';
 import uploadRoutes from './routes/upload.routes';
 import reportRoutes from './routes/report.routes';
 import remachadoRoutes from './routes/remachado.routes';
+import financeRoutes from './routes/finance.routes';
 import { errorHandler } from './middlewares/errorHandler';
 import { requireAuth, requireAdmin } from './middlewares/auth';
+import { requestPerformance } from './middlewares/requestPerformance';
 
 dotenv.config();
 
@@ -26,6 +29,8 @@ const app = express();
 
 app.use(cors({ origin: '*' }));
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(compression());
+app.use(requestPerformance);
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
@@ -60,6 +65,7 @@ app.use('/api/remachado', requireAuth, remachadoRoutes);
 app.use('/api/upload', requireAuth, uploadRoutes);
 app.use('/api/dashboard', requireAuth, dashboardRoutes);
 app.use('/api/reports', requireAuth, requireAdmin, reportRoutes);
+app.use('/api/finances', requireAuth, requireAdmin, financeRoutes);
 
 // ─── Global Error Handler ────────────────────────────────
 app.use(errorHandler);

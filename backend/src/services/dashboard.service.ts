@@ -96,33 +96,48 @@ export class DashboardService {
       }),
     ]);
 
-    // Enrich top products with product details
-    const topProductosEnriched = await Promise.all(
-      topProductos.filter((tp) => Boolean(tp.productoId)).map(async (tp) => {
-        const producto = await prisma.producto.findUnique({
-          where: { id: tp.productoId! },
-          select: { descripcion: true, codigo: true, imagen: true },
-        });
-        return { ...producto, vendidos: tp._sum.cantidad };
-      })
-    );
+    // Fetch related records in two batches. The previous implementation issued one
+    // query per row (up to 15 extra round trips on every dashboard load).
+    const productIds = Array.from(new Set([
+      ...topProductos.map((item) => item.productoId).filter((id): id is string => Boolean(id)),
+      ...productosMasMovidos.map((item) => item.productoId),
+    ]));
+    const customerIds = ventasPorCliente.map((item) => item.clienteId).filter((id): id is string => Boolean(id));
+    const [relatedProducts, relatedCustomers] = await Promise.all([
+      prisma.producto.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, descripcion: true, codigo: true, imagen: true },
+      }),
+      prisma.cliente.findMany({
+        where: { id: { in: customerIds } },
+        select: { id: true, nombre: true, empresa: true },
+      }),
+    ]);
+    const productsById = new Map(relatedProducts.map((product) => [product.id, product]));
+    const customersById = new Map(relatedCustomers.map((customer) => [customer.id, customer]));
 
-    const ventasPorClienteEnriched = await Promise.all(
-      ventasPorCliente.map(async (vc) => {
-        const cliente = vc.clienteId
-          ? await prisma.cliente.findUnique({ where: { id: vc.clienteId }, select: { nombre: true, empresa: true } })
-          : null;
-        return { clienteId: vc.clienteId, cliente, total: vc._sum.total ?? 0, ventas: vc._count.id };
-      })
-    );
+    const topProductosEnriched = topProductos.map((item) => {
+      const producto = item.productoId ? productsById.get(item.productoId) : null;
+      return { ...producto, vendidos: item._sum.cantidad };
+    });
+
+    const ventasPorClienteEnriched = ventasPorCliente.map((item) => ({
+      clienteId: item.clienteId,
+      cliente: item.clienteId ? customersById.get(item.clienteId) ?? null : null,
+      total: item._sum.total ?? 0,
+      ventas: item._count.id,
+    }));
 
     const clientesFrecuentes = ventasPorClienteEnriched.filter((item) => item.ventas >= 3 || item.total >= 3000);
-    const productosMasMovidosEnriched = await Promise.all(
-      productosMasMovidos.map(async (pm) => {
-        const producto = await prisma.producto.findUnique({ where: { id: pm.productoId }, select: { codigo: true, descripcion: true } });
-        return { productoId: pm.productoId, producto, movimientos: pm._count.id, cantidad: pm._sum.cantidad ?? 0 };
-      })
-    );
+    const productosMasMovidosEnriched = productosMasMovidos.map((item) => {
+      const producto = productsById.get(item.productoId);
+      return {
+        productoId: item.productoId,
+        producto: producto ? { codigo: producto.codigo, descripcion: producto.descripcion } : null,
+        movimientos: item._count.id,
+        cantidad: item._sum.cantidad ?? 0,
+      };
+    });
 
     return {
       ventasHoy,

@@ -589,8 +589,8 @@ export default function HistorialVentas() {
           onClose={() => setSelectedSale(null)} 
           onPrint={() => printSale(selectedSale)} 
           onRegisterCreditPayment={openCreditPayment}
-          onPaymentUpdated={(newMethod) => {
-            setSelectedSale({ ...selectedSale, metodoPago: newMethod });
+          onPaymentUpdated={(updatedSale) => {
+            setSelectedSale(updatedSale);
             loadSummary();
           }} 
           onVoid={(motivo) => handleVoidSale(selectedSale, motivo)}
@@ -641,13 +641,14 @@ function SaleDetailModal({
   onClose: () => void;
   onPrint: () => void;
   onRegisterCreditPayment: (sale: Sale) => void;
-  onPaymentUpdated: (method: "EFECTIVO" | "QR") => void;
+  onPaymentUpdated: (sale: Sale) => void;
   onVoid: (motivo: string) => Promise<void>;
   isClosed: boolean;
   userRole?: string;
 }) {
   const [updating, setUpdating] = useState(false);
-  const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | null>(null);
+  const [confirmMethod, setConfirmMethod] = useState<"EFECTIVO" | "QR" | "MIXTO" | null>(null);
+  const [mixedCashInput, setMixedCashInput] = useState("");
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const creditBalance = sale.cuenta?.saldo || 0;
@@ -656,12 +657,32 @@ function SaleDetailModal({
   const isSeller = userRole === "SELLER";
   const voidActionLabel = isAdmin && pendingVoidRequest ? "Aprobar anulacion" : isSeller ? "Solicitar anulacion" : "Anular";
 
-  const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR") => {
+  const mixedCashAmount = Number(mixedCashInput.replace(",", ".")) || 0;
+  const mixedQrAmount = Math.max(Math.round((sale.total - mixedCashAmount) * 100) / 100, 0);
+
+  const openPaymentChange = (method: "EFECTIVO" | "QR" | "MIXTO") => {
+    setMixedCashInput(method === "MIXTO" ? String(sale.pagos?.find((pago) => pago.metodoPago === "EFECTIVO")?.monto || "") : "");
+    setConfirmMethod(method);
+  };
+
+  const handleUpdatePayment = async (newMethod: "EFECTIVO" | "QR" | "MIXTO") => {
+    if (newMethod === "MIXTO" && (mixedCashAmount <= 0 || mixedCashAmount >= sale.total)) {
+      alert("El monto en efectivo debe ser mayor a cero y menor al total de la venta.");
+      return;
+    }
     setUpdating(true);
     try {
-      await updateSalePaymentMethod(sale.id, newMethod);
-      onPaymentUpdated(newMethod);
+      const updatedSale = await updateSalePaymentMethod(
+        sale.id,
+        newMethod,
+        newMethod === "MIXTO" ? [
+          { metodoPago: "EFECTIVO", monto: mixedCashAmount },
+          { metodoPago: "QR", monto: mixedQrAmount },
+        ] : undefined,
+      );
+      onPaymentUpdated(updatedSale);
       setConfirmMethod(null);
+      setMixedCashInput("");
     } catch (error) {
       alert(getErrorMessage(error));
       setConfirmMethod(null);
@@ -752,15 +773,24 @@ function SaleDetailModal({
             </div>
           </div>
           <div className="flex items-center justify-between border-t border-gray-700 pt-4">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-gray-400">Pago actual: <strong className="text-white">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</strong></span>
               {sale.tipoVenta === "CREDITO" && sale.cuenta && creditBalance > 0 ? (
                 <button onClick={() => onRegisterCreditPayment(sale)} className="btn-secondary py-1 px-2 text-xs">Registrar pago</button>
-              ) : sale.metodoPago === "EFECTIVO" ? (
-                <button onClick={() => setConfirmMethod("QR")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a QR</button>
-              ) : sale.metodoPago === "QR" ? (
-                <button onClick={() => setConfirmMethod("EFECTIVO")} disabled={updating} className="btn-secondary py-1 px-2 text-xs">Cambiar a Efectivo</button>
+              ) : sale.tipoVenta === "CONTADO" ? (
+                <>
+                  {(["EFECTIVO", "QR", "MIXTO"] as const).filter((method) => method !== sale.metodoPago).map((method) => (
+                    <button key={method} onClick={() => openPaymentChange(method)} disabled={updating} className="btn-secondary py-1 px-2 text-xs">
+                      Cambiar a {method === "EFECTIVO" ? "Efectivo" : method === "MIXTO" ? "Mixto" : "QR"}
+                    </button>
+                  ))}
+                </>
               ) : null}
+              {sale.metodoPago === "MIXTO" && sale.pagos?.map((pago) => (
+                <span key={pago.metodoPago} className="rounded-md border border-gray-700 px-2 py-1 text-xs text-gray-300">
+                  {pago.metodoPago}: {money(pago.monto)}
+                </span>
+              ))}
             </div>
             <div className="flex gap-3">
               {!isClosed && (!pendingVoidRequest || isAdmin) && (
@@ -799,6 +829,28 @@ function SaleDetailModal({
             <p className="text-gray-300 mb-6">
               ¿Seguro que deseas cambiar el método de pago a <strong className="text-white">{confirmMethod}</strong>?
             </p>
+            {confirmMethod === "MIXTO" && (
+              <div className="mb-6 space-y-3 text-left">
+                <label className="block text-sm text-gray-300">
+                  <span className="mb-1 block font-semibold">Monto en efectivo</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={mixedCashInput}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (/^[0-9]*([.,][0-9]{0,2})?$/.test(value)) setMixedCashInput(value);
+                    }}
+                    className="premium-input"
+                    placeholder="0,00"
+                  />
+                </label>
+                <div className="flex justify-between text-sm text-gray-300">
+                  <span>Monto por QR</span>
+                  <strong className="text-primary-light">{money(mixedQrAmount)}</strong>
+                </div>
+              </div>
+            )}
             <div className="flex justify-center gap-3">
               <button onClick={() => setConfirmMethod(null)} className="btn-secondary w-full" disabled={updating}>Cancelar</button>
               <button onClick={() => handleUpdatePayment(confirmMethod)} className="btn-primary w-full" disabled={updating}>

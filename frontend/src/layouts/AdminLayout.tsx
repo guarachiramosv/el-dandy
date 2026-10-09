@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer, CheckCircle2, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Users, FileText, Settings, LogOut, Bell, ChevronDown, CircleDollarSign, Truck, PackagePlus, AlertTriangle, Boxes, Tags, Hammer, CheckCircle2, RefreshCw, Landmark } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
 import { approveSaleVoidRequest, fetchPendingSaleVoidRequests } from "../services/sales";
 import { Sale } from "../types";
@@ -137,6 +137,9 @@ export default function AdminLayout() {
           </NavLink>
           <NavLink to="/admin/ganancias" className={navLinkClass}>
             <CircleDollarSign size={17} className="mr-3" /> Ganancias
+          </NavLink>
+          <NavLink to="/admin/finanzas" className={navLinkClass}>
+            <Landmark size={17} className="mr-3" /> Finanzas
           </NavLink>
           <NavLink to="/admin/configuracion" className={navLinkClass}>
             <Settings size={17} className="mr-3" /> Configuración

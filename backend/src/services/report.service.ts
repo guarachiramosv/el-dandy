@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ProductAuditService } from './productAudit.service';
 
@@ -136,6 +136,19 @@ const sumMovementQuantity = (movements: Array<{ cantidad: number }>) =>
 const isInitialStockMovement = (movement: { tipoMovimiento: string; referenciaTipo?: string | null }) =>
   movement.tipoMovimiento === 'AJUSTE' && movement.referenciaTipo === 'ALTA_PRODUCTO';
 
+function addSalePaymentsToTotals(
+  totals: { totalEfectivo: number; totalTransferencia: number; totalQr: number; totalTarjeta: number },
+  venta: { total: number; metodoPago: PaymentMethod; pagos?: Array<{ metodoPago: PaymentMethod; monto: number }> },
+) {
+  const pagos = venta.pagos?.length ? venta.pagos : [{ metodoPago: venta.metodoPago, monto: venta.total }];
+  pagos.forEach((pago) => {
+    if (pago.metodoPago === 'EFECTIVO') totals.totalEfectivo += pago.monto;
+    else if (pago.metodoPago === 'TRANSFERENCIA') totals.totalTransferencia += pago.monto;
+    else if (pago.metodoPago === 'QR') totals.totalQr += pago.monto;
+    else if (pago.metodoPago === 'TARJETA') totals.totalTarjeta += pago.monto;
+  });
+}
+
 export class ReportService {
   async getMonthlyProfitReport(params: { month?: string | null; sucursalId?: string | null }) {
     const range = parsePeriod('month', params.month);
@@ -151,8 +164,13 @@ export class ReportService {
       createdAt: { gte: range.start, lt: range.end },
       ...(params.sucursalId ? { cuenta: { sucursalId: params.sucursalId } } : {}),
     };
+    const adminExpenseWhere: Prisma.MovimientoFinancieroWhereInput = {
+      fecha: { gte: range.start, lt: range.end },
+      categoria: 'GASTO_NEGOCIO',
+      ...(params.sucursalId ? { sucursalId: params.sucursalId } : {}),
+    };
 
-    const [ventas, gastos, cobrosCredito] = await Promise.all([
+    const [ventas, gastos, cobrosCredito, gastosAdministrador] = await Promise.all([
       prisma.venta.findMany({
         where: saleWhere,
         include: {
@@ -163,6 +181,7 @@ export class ReportService {
               producto: { select: { id: true, codigo: true, descripcion: true, precioCompra: true } },
             },
           },
+          pagos: true,
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -175,6 +194,11 @@ export class ReportService {
         where: paymentWhere,
         include: { cuenta: { include: { venta: { include: { sucursal: true } } } } },
         orderBy: { createdAt: 'asc' },
+      }),
+      prisma.movimientoFinanciero.findMany({
+        where: adminExpenseWhere,
+        include: { sucursal: true },
+        orderBy: { fecha: 'asc' },
       }),
     ]);
 
@@ -191,6 +215,7 @@ export class ReportService {
       costoProductos: 0,
       gananciaBruta: 0,
       totalGastos: 0,
+      gastosAdministrador: 0,
       gananciaNeta: 0,
       margenNeto: 0,
       ticketPromedio: 0,
@@ -205,10 +230,7 @@ export class ReportService {
       totals.totalVentas += venta.total;
       totals.descuentos += venta.descuento;
       if (venta.tipoVenta === 'CREDITO') totals.totalCredito += venta.total;
-      else if (venta.metodoPago === 'EFECTIVO') totals.totalEfectivo += venta.total;
-      else if (venta.metodoPago === 'QR') totals.totalQr += venta.total;
-      else if (venta.metodoPago === 'TRANSFERENCIA') totals.totalTransferencia += venta.total;
-      else if (venta.metodoPago === 'TARJETA') totals.totalTarjeta += venta.total;
+      else addSalePaymentsToTotals(totals, venta);
 
       const dayKey = boliviaDateLabel(venta.createdAt);
       const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
@@ -278,6 +300,29 @@ export class ReportService {
       branchMap.set(gasto.sucursalId, branch);
     });
 
+    gastosAdministrador.forEach((gasto) => {
+      totals.totalGastos += gasto.monto;
+      totals.gastosAdministrador += gasto.monto;
+      const dayKey = boliviaDateLabel(gasto.fecha);
+      const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
+      day.gastos += gasto.monto;
+      dailyMap.set(dayKey, day);
+
+      if (gasto.sucursalId && gasto.sucursal) {
+        const branch = branchMap.get(gasto.sucursalId) || {
+          id: gasto.sucursalId,
+          nombre: gasto.sucursal.nombre,
+          ventas: 0,
+          ingresos: 0,
+          costos: 0,
+          gastos: 0,
+          ganancia: 0,
+        };
+        branch.gastos += gasto.monto;
+        branchMap.set(gasto.sucursalId, branch);
+      }
+    });
+
     cobrosCredito.forEach((pago) => {
       totals.cobrosCredito += pago.monto;
       if (pago.metodoPago === 'EFECTIVO') totals.totalEfectivo += pago.monto;
@@ -345,6 +390,7 @@ export class ReportService {
               producto: { include: { categoria: true, sucursal: true } },
             },
           },
+          pagos: true,
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -372,10 +418,7 @@ export class ReportService {
       acc.descuento += venta.descuento;
       acc.totalVentas += venta.total;
       if (venta.tipoVenta === 'CREDITO') acc.totalCredito += venta.total;
-      else if (venta.metodoPago === 'EFECTIVO') acc.totalEfectivo += venta.total;
-      else if (venta.metodoPago === 'TRANSFERENCIA') acc.totalTransferencia += venta.total;
-      else if (venta.metodoPago === 'QR') acc.totalQr += venta.total;
-      else if (venta.metodoPago === 'TARJETA') acc.totalTarjeta += venta.total;
+      else addSalePaymentsToTotals(acc, venta);
 
       venta.detalles.forEach((detalle) => {
         acc.cantidadItems += 1;

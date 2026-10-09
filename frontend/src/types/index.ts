@@ -236,7 +236,14 @@ export interface CustomerSession {
   token: string;
 }
 
-export type PaymentMethod = 'EFECTIVO' | 'TRANSFERENCIA' | 'QR' | 'TARJETA';
+export type PaymentMethod = 'EFECTIVO' | 'TRANSFERENCIA' | 'QR' | 'TARJETA' | 'MIXTO';
+
+export interface SalePayment {
+  id?: string;
+  metodoPago: PaymentMethod;
+  monto: number;
+  createdAt?: string;
+}
 
 export interface Sale {
   id: string;
@@ -253,6 +260,7 @@ export interface Sale {
   cliente?: Customer | null;
   cuenta?: CreditAccount | null;
   solicitudAnulacion?: SaleVoidRequest | null;
+  pagos?: SalePayment[];
   detalles?: Array<{
     id: string;
     tipoLinea?: 'PRODUCTO' | 'REMACHADO';
@@ -389,6 +397,7 @@ export interface SaleInput {
   tipoVenta: 'CONTADO' | 'CREDITO';
   descuento: number;
   fechaVencimiento?: string | null;
+  pagos?: Array<Pick<SalePayment, 'metodoPago' | 'monto'>>;
   items: SaleItemInput[];
 }
 

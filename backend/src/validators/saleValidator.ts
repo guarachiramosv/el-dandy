@@ -4,7 +4,11 @@ export const createSaleSchema = z.object({
   usuarioId: z.string().uuid('Usuario invalido'),
   sucursalId: z.string().uuid('Sucursal invalida'),
   clienteId: z.string().uuid('Cliente invalido').optional().nullable(),
-  metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA']),
+  metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA', 'MIXTO']),
+  pagos: z.array(z.object({
+    metodoPago: z.enum(['EFECTIVO', 'QR']),
+    monto: z.number().positive('El monto debe ser mayor a cero'),
+  })).max(2).optional(),
   tipoVenta: z.enum(['CONTADO', 'CREDITO']).default('CONTADO'),
   descuento: z.number().min(0).default(0),
   fechaVencimiento: z.string().optional().nullable(),

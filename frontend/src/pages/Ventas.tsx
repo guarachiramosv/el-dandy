@@ -37,7 +37,7 @@ const formatInputDate = (value: string) => {
 };
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
-const sellerPaymentOptions = ["EFECTIVO", "QR", "CREDITO"] as const;
+const sellerPaymentOptions = ["EFECTIVO", "QR", "MIXTO", "CREDITO"] as const;
 type SellerPaymentOption = (typeof sellerPaymentOptions)[number];
 const salePaymentLabel = (tipoVenta: "CONTADO" | "CREDITO", metodoPago: PaymentMethod) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
@@ -60,6 +60,7 @@ export default function Ventas() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [metodoPago, setMetodoPago] = useState<PaymentMethod>("EFECTIVO");
+  const [montoEfectivoMixto, setMontoEfectivoMixto] = useState("");
   const [tipoVenta, setTipoVenta] = useState<"CONTADO" | "CREDITO">("CONTADO");
   const [fechaVencimiento, setFechaVencimiento] = useState("");
   const [descuento, setDescuento] = useState(0);
@@ -92,7 +93,7 @@ export default function Ventas() {
   }, [loadDailySummary]);
 
   useEffect(() => {
-    if (tipoVenta === "CONTADO" && metodoPago !== "EFECTIVO" && metodoPago !== "QR") {
+    if (tipoVenta === "CONTADO" && metodoPago !== "EFECTIVO" && metodoPago !== "QR" && metodoPago !== "MIXTO") {
       const timer = window.setTimeout(() => setMetodoPago("EFECTIVO"), 0);
       return () => window.clearTimeout(timer);
     }
@@ -173,7 +174,9 @@ export default function Ventas() {
   const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
   const totalQuantity = cart.reduce((acc, item) => acc + item.cantidad, 0);
   const total = Math.max(subtotal - descuento, 0);
-  const selectedPaymentOption: SellerPaymentOption = tipoVenta === "CREDITO" ? "CREDITO" : metodoPago === "QR" ? "QR" : "EFECTIVO";
+  const selectedPaymentOption: SellerPaymentOption = tipoVenta === "CREDITO" ? "CREDITO" : metodoPago === "MIXTO" ? "MIXTO" : metodoPago === "QR" ? "QR" : "EFECTIVO";
+  const mixedCashAmount = Number(montoEfectivoMixto.replace(",", ".")) || 0;
+  const mixedQrAmount = Math.max(Math.round((total - mixedCashAmount) * 100) / 100, 0);
 
   const selectPaymentOption = (option: SellerPaymentOption) => {
     setMessage(null);
@@ -184,6 +187,7 @@ export default function Ventas() {
     }
     setTipoVenta("CONTADO");
     setMetodoPago(option);
+    if (option !== "MIXTO") setMontoEfectivoMixto("");
     setFechaVencimiento("");
   };
 
@@ -259,6 +263,9 @@ export default function Ventas() {
     if (cart.length === 0) return setMessage("Agrega al menos un producto.");
     if (dailySummary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
     if (tipoVenta === "CREDITO" && !fechaVencimiento) return setMessage("Indica la fecha en que el cliente pagara el credito.");
+    if (metodoPago === "MIXTO" && (mixedCashAmount <= 0 || mixedCashAmount >= total)) {
+      return setMessage("En pago mixto, el monto en efectivo debe ser mayor a cero y menor al total.");
+    }
     setInvoiceCustomerName("");
     setInvoiceCustomerNit("");
     setInvoiceCustomerPhone("");
@@ -318,6 +325,10 @@ export default function Ventas() {
         metodoPago,
         tipoVenta,
         fechaVencimiento: tipoVenta === "CREDITO" && fechaVencimiento ? fechaVencimiento : null,
+        pagos: metodoPago === "MIXTO" ? [
+          { metodoPago: "EFECTIVO", monto: mixedCashAmount },
+          { metodoPago: "QR", monto: mixedQrAmount },
+        ] : undefined,
         descuento,
         items: cart.map((item) => ({
           productoId: item.product.id,
@@ -328,6 +339,8 @@ export default function Ventas() {
       setCart([]);
       setDescuento(0);
       setTipoVenta("CONTADO");
+      setMetodoPago("EFECTIVO");
+      setMontoEfectivoMixto("");
       setFechaVencimiento("");
       setInvoiceOpen(false);
       setInvoiceCustomerName("");
@@ -584,7 +597,7 @@ export default function Ventas() {
             <Receipt className="text-gray-400" size={20} /> Resumen
           </h3>
           <div className="space-y-4 flex-1">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               {sellerPaymentOptions.map((option) => (
                 <button
                   key={option}
@@ -595,6 +608,29 @@ export default function Ventas() {
                 </button>
               ))}
             </div>
+            {metodoPago === "MIXTO" && tipoVenta === "CONTADO" && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                <label className="block text-gray-300">
+                  <span className="mb-1 block text-sm font-semibold">Monto en efectivo</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={montoEfectivoMixto}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (/^[0-9]*([.,][0-9]{0,2})?$/.test(value)) setMontoEfectivoMixto(value);
+                    }}
+                    placeholder="0,00"
+                    className="premium-input"
+                  />
+                </label>
+                <div className="flex justify-between text-sm text-gray-300">
+                  <span>Monto por QR</span>
+                  <strong className="text-primary-light">{money(mixedQrAmount)}</strong>
+                </div>
+                <p className="text-xs text-gray-500">El monto QR se calcula automáticamente para completar el total.</p>
+              </div>
+            )}
             {tipoVenta === "CREDITO" && (
               <label className="block text-gray-400">
                 <span className="mb-1 block">Fecha vencimiento</span>
@@ -633,6 +669,8 @@ export default function Ventas() {
           descuento={descuento}
           metodoPago={metodoPago}
           tipoVenta={tipoVenta}
+          mixedCashAmount={mixedCashAmount}
+          mixedQrAmount={mixedQrAmount}
           fechaVencimiento={fechaVencimiento}
           total={total}
           subtotal={subtotal}
@@ -661,6 +699,8 @@ function InvoiceModal({
   descuento,
   metodoPago,
   tipoVenta,
+  mixedCashAmount,
+  mixedQrAmount,
   fechaVencimiento,
   total,
   subtotal,
@@ -679,6 +719,8 @@ function InvoiceModal({
   descuento: number;
   metodoPago: PaymentMethod;
   tipoVenta: "CONTADO" | "CREDITO";
+  mixedCashAmount: number;
+  mixedQrAmount: number;
   fechaVencimiento: string;
   total: number;
   subtotal: number;
@@ -748,6 +790,8 @@ function InvoiceModal({
               <div className="grid grid-cols-2 gap-3">
                 <Stat label="Tipo" value={tipoVenta} />
                 <Stat label="Metodo" value={salePaymentLabel(tipoVenta, metodoPago)} />
+                {metodoPago === "MIXTO" && <Stat label="Efectivo" value={money(mixedCashAmount)} />}
+                {metodoPago === "MIXTO" && <Stat label="QR" value={money(mixedQrAmount)} />}
                 {tipoVenta === "CREDITO" && <Stat label="Vence" value={formatInputDate(fechaVencimiento)} />}
               </div>
             </div>
@@ -801,6 +845,11 @@ function SaleDetailModal({ sale, onClose, onPrint }: { sale: Sale; onClose: () =
             <Stat label="Descuento" value={money(sale.descuento || 0)} />
             <Stat label="Total" value={money(sale.total)} />
           </div>
+          {sale.metodoPago === "MIXTO" && sale.pagos && (
+            <div className="grid grid-cols-2 gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+              {sale.pagos.map((pago) => <Stat key={pago.metodoPago} label={pago.metodoPago} value={money(pago.monto)} />)}
+            </div>
+          )}
           <div className="rounded-xl border border-gray-700 overflow-hidden">
             <table className="w-full text-left">
               <thead className="bg-grafito-900 text-xs uppercase text-gray-500">

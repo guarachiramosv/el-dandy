@@ -69,7 +69,7 @@ const trabajoInclude = {
   seguroProducto: true,
   usuario: { select: { id: true, nombre: true, email: true } },
   sucursal: true,
-  venta: { include: { detalles: { include: { producto: true } }, cliente: true } },
+  venta: { include: { detalles: { include: { producto: true } }, cliente: true, pagos: true } },
 } satisfies Prisma.RemachadoTrabajoInclude;
 
 export class RemachadoService {
@@ -535,6 +535,9 @@ export class RemachadoService {
           detalles: {
             create: [...ventaDetalles, ...accessoryDetailLines]
           },
+          pagos: data.tipoVenta === 'CONTADO' ? {
+            create: [{ metodoPago: data.metodoPago, monto: total - (data.descuento || 0) }],
+          } : undefined,
         },
       });
 

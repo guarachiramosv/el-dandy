@@ -1,28 +1,29 @@
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-import Login from "./pages/Login";
-import ClientePortal from "./pages/ClientePortal";
-import AdminLayout from "./layouts/AdminLayout";
-import SellerLayout from "./layouts/SellerLayout";
-
-import Dashboard from "./components/dashboard/Dashboard";
-import Inventario from "./pages/Inventario";
-import Ventas from "./pages/Ventas";
-import HistorialVentas from "./pages/HistorialVentas";
-import Clientes from "./pages/Clientes";
-import Proveedores from "./pages/Proveedores";
-import Compras from "./pages/Compras";
-import Reportes from "./pages/Reportes";
-import Alertas from "./pages/Alertas";
-import Remachado from "./pages/Remachado";
-
-import AdminProductos from "./pages/admin/Productos";
-import AdminCategorias from "./pages/admin/Categorias";
-import Usuarios from "./pages/Usuarios";
 import { getCurrentUser } from "./services/auth";
 
+const AdminLayout = lazy(() => import("./layouts/AdminLayout"));
+const SellerLayout = lazy(() => import("./layouts/SellerLayout"));
+const Login = lazy(() => import("./pages/Login"));
+const ClientePortal = lazy(() => import("./pages/ClientePortal"));
+const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
+const Inventario = lazy(() => import("./pages/Inventario"));
+const Ventas = lazy(() => import("./pages/Ventas"));
+const HistorialVentas = lazy(() => import("./pages/HistorialVentas"));
+const Clientes = lazy(() => import("./pages/Clientes"));
+const Proveedores = lazy(() => import("./pages/Proveedores"));
+const Compras = lazy(() => import("./pages/Compras"));
+const Reportes = lazy(() => import("./pages/Reportes"));
+const Alertas = lazy(() => import("./pages/Alertas"));
+const Remachado = lazy(() => import("./pages/Remachado"));
+const AdminProductos = lazy(() => import("./pages/admin/Productos"));
+const AdminCategorias = lazy(() => import("./pages/admin/Categorias"));
+const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Ganancias = lazy(() => import("./pages/Ganancias"));
+const Finanzas = lazy(() => import("./pages/Finanzas"));
+
+const routeFallback = <div className="p-6 text-gray-400">Cargando...</div>;
 
 const ProtectedAdminRoute = ({ children }: { children: React.ReactNode }) => {
   const user = getCurrentUser();
@@ -41,6 +42,7 @@ const ProtectedSellerRoute = ({ children }: { children: React.ReactNode }) => {
 export default function App() {
   return (
     <BrowserRouter>
+      <Suspense fallback={routeFallback}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/cliente" element={<ClientePortal />} />
@@ -59,7 +61,8 @@ export default function App() {
           <Route path="historial" element={<HistorialVentas />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="usuarios" element={<Usuarios />} />
-          <Route path="ganancias" element={<Suspense fallback={<div className="p-6 text-gray-400">Cargando ganancias...</div>}><Ganancias /></Suspense>} />
+          <Route path="ganancias" element={<Ganancias />} />
+          <Route path="finanzas" element={<Finanzas />} />
           <Route path="configuracion" element={<div className="p-6"><h1 className="text-2xl text-white">Configuración</h1></div>} />
         </Route>
 
@@ -76,6 +79,7 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

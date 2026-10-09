@@ -18,7 +18,13 @@ type CreateSaleInput = {
   tipoVenta: SaleType;
   descuento: number;
   fechaVencimiento?: string | null;
+  pagos?: SalePaymentInput[];
   items: SaleItemInput[];
+};
+
+type SalePaymentInput = {
+  metodoPago: 'EFECTIVO' | 'QR';
+  monto: number;
 };
 
 type CloseCashRegisterInput = {
@@ -166,6 +172,46 @@ function getNetTotals(
   };
 }
 
+function buildSalePayments(
+  total: number,
+  tipoVenta: SaleType,
+  metodoPago: PaymentMethod,
+  pagos?: SalePaymentInput[],
+) {
+  if (tipoVenta === 'CREDITO') return [];
+
+  if (metodoPago !== 'MIXTO') {
+    return [{ metodoPago, monto: total }];
+  }
+
+  const efectivo = pagos?.find((pago) => pago.metodoPago === 'EFECTIVO')?.monto ?? 0;
+  const qr = pagos?.find((pago) => pago.metodoPago === 'QR')?.monto ?? 0;
+  const roundedTotal = Math.round(total * 100);
+  const roundedPayments = Math.round((efectivo + qr) * 100);
+
+  if (efectivo <= 0 || qr <= 0 || roundedPayments !== roundedTotal) {
+    throw Object.assign(new Error('Los montos en efectivo y QR deben ser mayores a cero y sumar exactamente el total de la venta.'), { status: 400 });
+  }
+
+  return [
+    { metodoPago: PaymentMethod.EFECTIVO, monto: efectivo },
+    { metodoPago: PaymentMethod.QR, monto: qr },
+  ];
+}
+
+function addSalePaymentsToTotals(
+  totals: { totalEfectivo: number; totalTransferencia: number; totalQr: number; totalTarjeta: number },
+  venta: { total: number; metodoPago: PaymentMethod; pagos?: Array<{ metodoPago: PaymentMethod; monto: number }> },
+) {
+  const pagos = venta.pagos?.length ? venta.pagos : [{ metodoPago: venta.metodoPago, monto: venta.total }];
+  pagos.forEach((pago) => {
+    if (pago.metodoPago === 'EFECTIVO') totals.totalEfectivo += pago.monto;
+    else if (pago.metodoPago === 'TRANSFERENCIA') totals.totalTransferencia += pago.monto;
+    else if (pago.metodoPago === 'QR') totals.totalQr += pago.monto;
+    else if (pago.metodoPago === 'TARJETA') totals.totalTarjeta += pago.monto;
+  });
+}
+
 function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId: string) {
   const activeBranches = producto.stockSucursales.filter((stock) => stock.estado === 'ACTIVO' && stock.activo);
   const requestedBranch = activeBranches.find((stock) => stock.sucursalId === requestedSucursalId);
@@ -197,18 +243,41 @@ const saleInclude = {
   cliente: true,
   cuenta: { include: { pagos: true } },
   detalles: { include: { producto: true } },
+  pagos: { orderBy: { createdAt: 'asc' as const } },
   solicitudAnulacion: { include: saleVoidRequestInclude },
 } satisfies Prisma.VentaInclude;
 
 export class SaleService {
-  async updatePaymentMethod(id: string, metodoPago: PaymentMethod) {
-    if (metodoPago !== 'EFECTIVO' && metodoPago !== 'QR') {
-      throw Object.assign(new Error('Solo se permite cambiar a EFECTIVO o QR'), { status: 400 });
+  async updatePaymentMethod(id: string, metodoPago: PaymentMethod, actor: InternalUserScope, pagos?: SalePaymentInput[]) {
+    if (metodoPago !== 'EFECTIVO' && metodoPago !== 'QR' && metodoPago !== 'MIXTO') {
+      throw Object.assign(new Error('Solo se permite cambiar a EFECTIVO, QR o MIXTO'), { status: 400 });
     }
-    
-    return prisma.venta.update({
+
+    const venta = await prisma.venta.findUnique({
       where: { id },
-      data: { metodoPago }
+      select: { usuarioId: true, sucursalId: true, total: true, tipoVenta: true },
+    });
+
+    if (!venta) {
+      throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
+    }
+
+    if (actor.role === 'SELLER' && (venta.usuarioId !== actor.id || venta.sucursalId !== actor.sucursalId)) {
+      throw Object.assign(new Error('No puedes cambiar el metodo de pago de una venta de otro vendedor.'), { status: 403 });
+    }
+
+    const paymentRows = buildSalePayments(venta.total, venta.tipoVenta, metodoPago, pagos);
+
+    return prisma.$transaction(async (tx) => {
+      await tx.pagoVenta.deleteMany({ where: { ventaId: id } });
+      if (paymentRows.length) {
+        await tx.pagoVenta.createMany({ data: paymentRows.map((pago) => ({ ...pago, ventaId: id })) });
+      }
+      return tx.venta.update({
+        where: { id },
+        data: { metodoPago },
+        include: saleInclude,
+      });
     });
   }
 
@@ -300,6 +369,7 @@ export class SaleService {
 
       const subtotal = detalles.reduce((sum, item) => sum + item.subtotal, 0);
       const total = Math.max(subtotal - data.descuento, 0);
+      const pagos = buildSalePayments(total, data.tipoVenta, data.metodoPago, data.pagos);
 
       const venta = await tx.venta.create({
         data: {
@@ -312,6 +382,7 @@ export class SaleService {
           descuento: data.descuento,
           total,
           detalles: { create: detalles },
+          pagos: pagos.length ? { create: pagos } : undefined,
         },
       });
 
@@ -427,10 +498,7 @@ export class SaleService {
       acc.cantidadVentas += 1;
       acc.totalVentas += venta.total;
       if (venta.tipoVenta === 'CREDITO') acc.totalCredito += venta.total;
-      else if (venta.metodoPago === 'EFECTIVO') acc.totalEfectivo += venta.total;
-      else if (venta.metodoPago === 'TRANSFERENCIA') acc.totalTransferencia += venta.total;
-      else if (venta.metodoPago === 'QR') acc.totalQr += venta.total;
-      else if (venta.metodoPago === 'TARJETA') acc.totalTarjeta += venta.total;
+      else addSalePaymentsToTotals(acc, venta);
       return acc;
     }, emptyTotals());
 

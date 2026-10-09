@@ -25,19 +25,29 @@ export const useProducts = (status: ProductStatusFilter = 'active', options: Use
     setError(null);
     try {
       const pageSize = 500;
-      const items: Product[] = [];
-      let page = 1;
-      let totalPages = 1;
+      const params = { limit: pageSize, status, scope: scope === 'all' ? 'all' : undefined };
+      const firstResponse = await api.get<{ success: boolean; data: PaginatedProducts }>('/products', {
+        params: { ...params, page: 1 },
+      });
+      if (!firstResponse.data.success) throw new Error('Error al cargar productos');
 
-      do {
-        const resp = await api.get<{ success: boolean; data: PaginatedProducts }>('/products', {
-          params: { page, limit: pageSize, status, scope: scope === 'all' ? 'all' : undefined },
-        });
-        if (!resp.data.success) throw new Error('Error al cargar productos');
-        items.push(...resp.data.data.items);
-        totalPages = resp.data.data.totalPages || 1;
-        page += 1;
-      } while (page <= totalPages);
+      const totalPages = firstResponse.data.data.totalPages || 1;
+      const remainingResponses = totalPages > 1
+        ? await Promise.all(
+            Array.from({ length: totalPages - 1 }, (_, index) =>
+              api.get<{ success: boolean; data: PaginatedProducts }>('/products', {
+                params: { ...params, page: index + 2 },
+              }),
+            ),
+          )
+        : [];
+      const items = [
+        ...firstResponse.data.data.items,
+        ...remainingResponses.flatMap((response) => {
+          if (!response.data.success) throw new Error('Error al cargar productos');
+          return response.data.data.items;
+        }),
+      ];
 
       setData(items);
     } catch (e: unknown) {
