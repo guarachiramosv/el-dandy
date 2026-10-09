@@ -591,12 +591,12 @@ export default function Ventas() {
         </motion.div>
       </div>
 
-      <aside className="w-full xl:w-[420px] flex flex-col space-y-6">
-        <div className="glass-panel p-6 flex-1 flex flex-col">
+      <aside className="flex w-full flex-col space-y-6 xl:sticky xl:top-0 xl:h-[calc(100vh-6.5rem)] xl:w-[420px] xl:self-start">
+        <div className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
           <h3 className="font-medium text-white flex items-center gap-2 mb-6">
             <Receipt className="text-gray-400" size={20} /> Resumen
           </h3>
-          <div className="space-y-4 flex-1">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2">
             <div className="grid grid-cols-2 gap-3">
               {sellerPaymentOptions.map((option) => (
                 <button
@@ -654,9 +654,15 @@ export default function Ventas() {
               <span className="text-3xl font-bold text-primary-light">{money(total)}</span>
             </div>
           </div>
-          <button onClick={openInvoice} disabled={cart.length === 0 || dailySummary?.cerrado} className="w-full btn-primary flex items-center justify-center gap-2 mt-6 text-lg disabled:opacity-60">
-            Pasar a Factura <ArrowRight size={20} />
-          </button>
+          <div className="shrink-0 border-t border-gray-700 bg-grafito-800 pt-4 mt-4">
+            <button
+              onClick={openInvoice}
+              disabled={cart.length === 0 || dailySummary?.cerrado}
+              className="btn-primary flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base font-bold shadow-lg shadow-primary/20 disabled:opacity-60"
+            >
+              Pasar a Factura <ArrowRight size={20} className="shrink-0" />
+            </button>
+          </div>
         </div>
       </aside>
 
