@@ -489,31 +489,57 @@ export default function HistorialVentas() {
 
           <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4 space-y-3">
             <h4 className="font-semibold text-white flex items-center gap-2">
-              <Banknote size={18} className="text-green-300" /> Cierre de caja
+              <Banknote size={18} className="text-green-300" /> Dinero disponible y cierre de caja
             </h4>
-            <div className="flex justify-between text-sm text-gray-400">
-              <span>Ventas efectivo</span>
-              <span className="font-semibold text-white">{money(grossCash)}</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-green-200/80">Queda en efectivo</p>
+                <p className="mt-1 text-xl font-black text-green-200">{money(expectedCash)}</p>
+              </div>
+              <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-200/80">Queda en QR</p>
+                <p className="mt-1 text-xl font-black text-blue-200">{money(expectedQr)}</p>
+              </div>
             </div>
-            <div className="flex justify-between text-sm text-gray-400">
-              <span>Cobros credito efectivo</span>
-              <span className="font-semibold text-green-200">+{money(creditPaymentTotals.totalEfectivo)}</span>
+
+            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-green-300">Detalle efectivo</p>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Ventas en efectivo</span>
+                <span className="font-semibold text-white">{money(grossCash)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Cobros de credito</span>
+                <span className="font-semibold text-green-200">+{money(creditPaymentTotals.totalEfectivo)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Gastos pagados en efectivo</span>
+                <span className="font-semibold text-amber-200">-{money(expenseTotals.totalEfectivo)}</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-800 pt-2 text-sm">
+                <span className="font-semibold text-white">Efectivo disponible</span>
+                <span className="font-bold text-green-200">{money(expectedCash)}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-sm text-gray-400">
-              <span>Gastos efectivo</span>
-              <span className="font-semibold text-amber-200">-{money(expenseTotals.totalEfectivo)}</span>
-            </div>
-            <div className="flex justify-between border-t border-gray-800 pt-3 text-sm text-gray-400">
-              <span>Efectivo esperado</span>
-              <span className="font-semibold text-green-200">{money(expectedCash)}</span>
-            </div>
-            <div className="flex justify-between text-sm text-gray-400">
-              <span>QR neto</span>
-              <span className="font-semibold text-blue-200">{money(expectedQr)}</span>
-            </div>
-            <div className="flex justify-between text-sm text-gray-400">
-              <span>Cobros credito QR</span>
-              <span className="font-semibold text-blue-200">+{money(creditPaymentTotals.totalQr)}</span>
+
+            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-blue-300">Detalle QR</p>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Ventas por QR</span>
+                <span className="font-semibold text-white">{money(grossQr)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Cobros de credito</span>
+                <span className="font-semibold text-blue-200">+{money(creditPaymentTotals.totalQr)}</span>
+              </div>
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>Gastos pagados por QR</span>
+                <span className="font-semibold text-amber-200">-{money(expenseTotals.totalQr)}</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-800 pt-2 text-sm">
+                <span className="font-semibold text-white">QR disponible</span>
+                <span className="font-bold text-blue-200">{money(expectedQr)}</span>
+              </div>
             </div>
             <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
               Si el efectivo se deposita al banco al cerrar, cuenta el dinero en caja, deja ese monto en el cierre y registra la nota de deposito.
