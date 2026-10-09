@@ -591,25 +591,25 @@ export default function Ventas() {
         </motion.div>
       </div>
 
-      <aside className="flex w-full flex-col space-y-6 xl:sticky xl:top-0 xl:h-[calc(100vh-6.5rem)] xl:w-[420px] xl:self-start">
-        <div className="glass-panel flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-          <h3 className="font-medium text-white flex items-center gap-2 mb-6">
+      <aside className="flex w-full flex-col space-y-6 xl:w-[420px]">
+        <div className="glass-panel flex flex-1 flex-col p-5">
+          <h3 className="mb-4 flex items-center gap-2 font-medium text-white">
             <Receipt className="text-gray-400" size={20} /> Resumen
           </h3>
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2">
+          <div className="flex-1 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               {sellerPaymentOptions.map((option) => (
                 <button
                   key={option}
                   onClick={() => selectPaymentOption(option)}
-                  className={`py-2.5 rounded-lg border text-sm font-medium ${selectedPaymentOption === option ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}
+                  className={`rounded-lg border py-2 text-sm font-medium ${selectedPaymentOption === option ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}
                 >
                   {option}
                 </button>
               ))}
             </div>
             {metodoPago === "MIXTO" && tipoVenta === "CONTADO" && (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
                 <label className="block text-gray-300">
                   <span className="mb-1 block text-sm font-semibold">Monto en efectivo</span>
                   <input
@@ -654,7 +654,7 @@ export default function Ventas() {
               <span className="text-3xl font-bold text-primary-light">{money(total)}</span>
             </div>
           </div>
-          <div className="shrink-0 border-t border-gray-700 bg-grafito-800 pt-4 mt-4">
+          <div className="mt-4 shrink-0 border-t border-gray-700 pt-4">
             <button
               onClick={openInvoice}
               disabled={cart.length === 0 || dailySummary?.cerrado}
