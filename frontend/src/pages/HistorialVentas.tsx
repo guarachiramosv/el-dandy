@@ -45,6 +45,9 @@ export default function HistorialVentas() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [declaredCash, setDeclaredCash] = useState(0);
   const [closeNotes, setCloseNotes] = useState("");
+  const [depositToBank, setDepositToBank] = useState(false);
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositReference, setDepositReference] = useState("");
   const [expenseReason, setExpenseReason] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseMethod, setExpenseMethod] = useState<ExpenseMethod>("EFECTIVO");
@@ -70,6 +73,9 @@ export default function HistorialVentas() {
       setSummary(data);
       setDeclaredCash(data.cierre?.montoDeclarado ?? data.netos?.totalEfectivo ?? data.totals.totalEfectivo);
       setCloseNotes(data.cierre?.notas || "");
+      setDepositToBank(Boolean(data.cierre?.depositadoBanco));
+      setDepositAmount(data.cierre?.montoDepositado != null ? String(data.cierre.montoDepositado) : "");
+      setDepositReference(data.cierre?.referenciaDeposito || "");
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
     } finally {
@@ -98,8 +104,20 @@ export default function HistorialVentas() {
     setMessage(null);
     setClosingCash(true);
     try {
-      const closing = await closeCashRegister({ fecha: reportDate, montoDeclarado: declaredCash, notas: closeNotes || null });
-      setMessage(`Caja cerrada correctamente. Diferencia: ${money(closing.diferencia)}.`);
+      const parsedDeposit = parseMoneyInput(depositAmount);
+      if (depositToBank && (!Number.isFinite(parsedDeposit) || parsedDeposit <= 0)) {
+        setClosingCash(false);
+        return setMessage("Indica el monto que se depositó al banco.");
+      }
+      const closing = await closeCashRegister({
+        fecha: reportDate,
+        montoDeclarado: declaredCash,
+        notas: closeNotes || null,
+        depositadoBanco: depositToBank,
+        montoDepositado: depositToBank ? parsedDeposit : null,
+        referenciaDeposito: depositToBank ? depositReference.trim() || null : null,
+      });
+      setMessage(`Cierre enviado a revisión. Diferencia: ${money(closing.diferencia)}.`);
       await loadSummary();
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
@@ -114,6 +132,7 @@ export default function HistorialVentas() {
     const monto = parseMoneyInput(expenseAmount);
     if (!motivo) return setMessage("Indica para que se saco dinero.");
     if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
+    if (reportDate !== defaultDay) return setMessage("Los gastos históricos no se pueden registrar desde esta pantalla.");
     if (summary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
 
     setSavingExpense(true);
@@ -159,13 +178,15 @@ export default function HistorialVentas() {
   const fillBankDepositNote = () => {
     const amount = money(expectedCash);
     setDeclaredCash(expectedCash);
+    setDepositToBank(true);
+    setDepositAmount(String(expectedCash));
     setCloseNotes(`Efectivo neto del dia (${amount}) entregado para deposito al banco. Ya no queda efectivo de ventas en caja.`);
   };
 
   const printCashClosing = () => {
     if (!summary) return;
-    if (!summary.cerrado || !summary.cierre) {
-      return setMessage("Primero cierra caja para imprimir el reporte con el monto real cerrado.");
+    if (!summary.cierre || summary.cierre.estado !== "APROBADO") {
+      return setMessage("El administrador debe aprobar el cierre antes de imprimir el reporte definitivo.");
     }
     const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
@@ -287,9 +308,9 @@ export default function HistorialVentas() {
               {summary?.fecha || "Hoy"} - {summary?.totals.cantidadVentas || 0} ventas registradas
             </p>
           </div>
-          {summary?.cerrado && (
-            <span className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm font-semibold text-green-200">
-              Caja cerrada
+          {summary?.cierre && (
+            <span className={`rounded-lg border px-3 py-2 text-sm font-semibold ${summary.cierre.estado === "APROBADO" ? "border-green-500/30 bg-green-500/10 text-green-200" : summary.cierre.estado === "OBSERVADO" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-blue-500/30 bg-blue-500/10 text-blue-200"}`}>
+              Caja {summary.cierre.estado.toLowerCase()}
             </span>
           )}
         </div>
@@ -542,7 +563,7 @@ export default function HistorialVentas() {
               </div>
             </div>
             <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
-              Si el efectivo se deposita al banco al cerrar, cuenta el dinero en caja, deja ese monto en el cierre y registra la nota de deposito.
+              El dinero contado y el dinero depositado son datos diferentes. Marca el depósito solo si realmente se realizó.
             </div>
             <label className="block text-sm text-gray-300">
               <span className="mb-1 block">Dinero contado en caja</span>
@@ -572,36 +593,42 @@ export default function HistorialVentas() {
               />
             </label>
             {!summary?.cerrado && (
-              <button
-                type="button"
-                onClick={fillBankDepositNote}
-                className="btn-secondary w-full"
-              >
-                Marcar efectivo para deposito al banco
-              </button>
+              <div className="space-y-3 rounded-lg border border-gray-700 p-3">
+                <label className="flex items-center gap-2 text-sm text-gray-200">
+                  <input type="checkbox" checked={depositToBank} onChange={(event) => {
+                    setDepositToBank(event.target.checked);
+                    if (event.target.checked && !depositAmount) setDepositAmount(String(expectedCash));
+                  }} /> El efectivo fue depositado al banco
+                </label>
+                {depositToBank && <>
+                  <label className="block text-sm text-gray-300"><span className="mb-1 block">Monto depositado</span><input className="premium-input" inputMode="decimal" value={depositAmount} onChange={(event) => { if (moneyInputPattern.test(event.target.value)) setDepositAmount(event.target.value); }} /></label>
+                  <label className="block text-sm text-gray-300"><span className="mb-1 block">Referencia o comprobante</span><input className="premium-input" maxLength={120} value={depositReference} onChange={(event) => setDepositReference(event.target.value)} /></label>
+                  <button type="button" onClick={fillBankDepositNote} className="btn-secondary w-full">Usar todo el efectivo esperado</button>
+                </>}
+              </div>
             )}
             {summary?.cerrado ? (
               <>
                 <ClosedCashBox closing={summary.cierre} />
-                <button
+                {summary.cierre?.estado === "APROBADO" && <button
                   type="button"
                   onClick={printCashClosing}
                   className="btn-primary w-full flex items-center justify-center gap-2"
                 >
                   <Printer size={18} /> Imprimir cierre 80mm
-                </button>
+                </button>}
               </>
             ) : (
               <div className="grid gap-2">
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-                  Cierra caja para habilitar la impresion del reporte real de ese dia.
+                  Envía la caja para que el administrador pueda aprobarla o devolverla con una observación.
                 </div>
                 <button
                   onClick={handleCloseCash}
                   disabled={closingCash}
                   className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  <LockKeyhole size={18} /> {closingCash ? "Cerrando..." : "Cerrar caja por hoy"}
+                  <LockKeyhole size={18} /> {closingCash ? "Enviando..." : summary?.estadoCaja === "OBSERVADO" ? "Reenviar cierre corregido" : "Enviar cierre a revisión"}
                 </button>
               </div>
             )}
@@ -643,12 +670,16 @@ export default function HistorialVentas() {
 }
 
 function ClosedCashBox({ closing }: { closing?: CashClosing | null }) {
+  const state = closing?.estado || "PENDIENTE";
   return (
-    <div className="space-y-1 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-200">
-      <p>Cerrado con {money(closing?.montoDeclarado || 0)} en caja.</p>
+    <div className={`space-y-1 rounded-lg border p-3 text-sm ${state === "APROBADO" ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-blue-500/30 bg-blue-500/10 text-blue-200"}`}>
+      <p className="font-bold">Estado: {state}</p>
+      <p>Declarado con {money(closing?.montoDeclarado || 0)} en caja.</p>
       <p>Cobros de credito {money(closing?.totalCobrosCredito || 0)}.</p>
       <p>Efectivo neto esperado {money(closing?.netoEfectivo ?? closing?.totalEfectivo ?? 0)}.</p>
       <p>Gastos descontados {money(closing?.totalGastos || 0)}. Diferencia {money(closing?.diferencia || 0)}.</p>
+      {closing?.motivoObservacion && <p className="font-semibold text-amber-200">Observación: {closing.motivoObservacion}</p>}
+      {closing?.notaAdministrador && <p>Administrador: {closing.notaAdministrador}</p>}
     </div>
   );
 }

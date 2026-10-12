@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRightLeft, Box, Download, Eye, History, ImageIcon, Printer, Search, ShoppingCart, X } from "lucide-react";
-import { Product, ProductBranchStock, StockMovement } from "../types";
+import { ArrowRightLeft, Box, CalendarClock, Download, Eye, History, ImageIcon, LoaderCircle, MapPin, Printer, Search, ShoppingCart, UserRound, X } from "lucide-react";
+import { Product, ProductBranchStock, ProductHistory, ProductHistoryEvent, StockMovement } from "../types";
 import { useProducts } from "../hooks/useProducts";
-import { fetchStockMovements, transferStock } from "../services/inventory";
+import { fetchProductHistory, fetchStockMovements, transferStock } from "../services/inventory";
 import { getCurrentUser } from "../services/auth";
 import { fetchProductInventoryReport, ProductInventoryReport, ReportPeriod } from "../services/reports";
 import ImageLightbox from "../components/ImageLightbox";
@@ -880,6 +880,21 @@ function ProductDetailModal({
 }) {
   const stockMinimo = product.stockMinimo || 5;
   const lowStock = product.stock <= stockMinimo;
+  const [history, setHistory] = useState<ProductHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(!isSeller);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isSeller) return;
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    fetchProductHistory(product.id)
+      .then((data) => { if (active) setHistory(data); })
+      .catch((error: unknown) => { if (active) setHistoryError(getErrorMessage(error)); })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [isSeller, product.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -970,10 +985,13 @@ function ProductDetailModal({
               </div>
             )}
 
-            <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
-              <p className="mb-3 text-sm font-bold uppercase text-gray-400">Historial de inventario</p>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+            {!isSeller ? (
+              <ProductHistoryTimeline history={history} loading={historyLoading} error={historyError} unitLabel={unitLabel} />
+            ) : (
+              <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+                <p className="mb-3 text-sm font-bold uppercase text-gray-400">Historial de inventario</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="text-xs uppercase text-gray-500">
                     <tr>
                       <th className="p-2">Fecha</th>
@@ -1002,12 +1020,13 @@ function ProductDetailModal({
                       </tr>
                     ))}
                   </tbody>
-                </table>
-                {movements.length === 0 && (
-                  <div className="p-4 text-center text-sm text-gray-500">Sin movimientos registrados para este producto.</div>
-                )}
+                  </table>
+                  {movements.length === 0 && (
+                    <div className="p-4 text-center text-sm text-gray-500">Sin movimientos registrados para este producto.</div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {isSeller && (
               <div className="flex justify-end">
@@ -1020,6 +1039,137 @@ function ProductDetailModal({
         </div>
       </div>
     </div>
+  );
+}
+
+const historyValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return "Sin valor";
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+};
+
+const actionStyle = (action: string) => {
+  if (action === "VENTA") return "border-red-500/40 bg-red-500/10 text-red-200";
+  if (action === "COMPRA" || action === "STOCK_AGREGADO" || action === "RESTAURADO") return "border-green-500/40 bg-green-500/10 text-green-200";
+  if (action.includes("TRANSFERENCIA") || action === "TRANSFERIDO") return "border-blue-500/40 bg-blue-500/10 text-blue-200";
+  if (action === "ELIMINADO" || action === "DESCONTINUADO") return "border-red-500/40 bg-red-500/10 text-red-200";
+  if (action === "EDITADO" || action === "ESTADO_CAMBIADO") return "border-violet-500/40 bg-violet-500/10 text-violet-200";
+  return "border-amber-500/40 bg-amber-500/10 text-amber-100";
+};
+
+function ProductHistoryTimeline({
+  history,
+  loading,
+  error,
+  unitLabel,
+}: {
+  history: ProductHistory | null;
+  loading: boolean;
+  error: string | null;
+  unitLabel: string;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-700 bg-grafito-900/50 p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-bold uppercase text-gray-300"><History size={17} className="text-primary" /> Historial completo</p>
+          <p className="mt-1 text-xs text-gray-500">Ediciones, ventas, compras, transferencias, ajustes y cambios de estado.</p>
+        </div>
+        {history && <span className="rounded-full bg-primary/15 px-3 py-1 text-xs font-bold text-primary-light">{history.total} eventos</span>}
+      </div>
+
+      {loading && <div className="flex items-center justify-center gap-2 py-10 text-gray-400"><LoaderCircle className="animate-spin" size={20} /> Cargando historial...</div>}
+      {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
+      {!loading && !error && history?.items.length === 0 && <div className="py-8 text-center text-sm text-gray-500">No existen eventos registrados.</div>}
+
+      <div className="relative space-y-4 before:absolute before:bottom-2 before:left-[17px] before:top-2 before:w-px before:bg-gray-700">
+        {history?.items.map((event) => <ProductHistoryItem key={event.id} event={event} unitLabel={unitLabel} />)}
+      </div>
+    </div>
+  );
+}
+
+function ProductHistoryItem({ event, unitLabel }: { event: ProductHistoryEvent; unitLabel: string }) {
+  const changes = event.changes?.campos || [];
+  const reference = event.reference;
+  const quantity = event.cantidad == null ? null : `${event.cantidad > 0 ? "+" : ""}${formatInventoryQuantity(event.cantidad)} ${unitLabel}`;
+
+  return (
+    <article className="relative pl-11">
+      <div className="absolute left-2 top-4 z-10 h-[19px] w-[19px] rounded-full border-4 border-grafito-900 bg-primary" />
+      <div className="rounded-xl border border-gray-700 bg-black/20 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="font-black text-white">{event.title}</h4>
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${actionStyle(event.action)}`}>{event.action.replaceAll("_", " ")}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+              <span className="flex items-center gap-1"><CalendarClock size={14} /> {new Date(event.createdAt).toLocaleString("es-BO", { timeZone: "America/La_Paz" })}</span>
+              <span className="flex items-center gap-1"><UserRound size={14} /> {event.usuario?.nombre || "Sistema / dato historico"}{event.usuario?.email ? ` (${event.usuario.email})` : ""}</span>
+              <span className="flex items-center gap-1"><MapPin size={14} /> {event.sucursal?.nombre || "Sin sucursal"}</span>
+            </div>
+          </div>
+          {quantity && <span className={`whitespace-nowrap text-lg font-black ${event.cantidad! < 0 ? "text-red-300" : "text-green-300"}`}>{quantity}</span>}
+        </div>
+
+        {event.detail && <p className="mt-3 rounded-lg bg-white/[0.04] p-3 text-sm text-gray-200">{event.detail}</p>}
+
+        {(event.stockAnterior != null || event.stockNuevo != null || event.estadoAnterior || event.estadoNuevo) && (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {event.stockAnterior != null && event.stockNuevo != null && (
+              <div className="rounded-lg border border-gray-800 bg-grafito-900/60 p-3 text-sm text-gray-300">Stock: <strong className="text-white">{formatInventoryQuantity(event.stockAnterior)} → {formatInventoryQuantity(event.stockNuevo)} {unitLabel}</strong></div>
+            )}
+            {(event.estadoAnterior || event.estadoNuevo) && (
+              <div className="rounded-lg border border-gray-800 bg-grafito-900/60 p-3 text-sm text-gray-300">Estado: <strong className="text-white">{event.estadoAnterior || "-"} → {event.estadoNuevo || "-"}</strong></div>
+            )}
+          </div>
+        )}
+
+        {changes.length > 0 && (
+          <div className="mt-3 overflow-hidden rounded-lg border border-gray-800">
+            {changes.map((change, index) => (
+              <div key={`${change.campo || change.etiqueta}-${index}`} className="grid gap-1 border-b border-gray-800 p-3 text-sm last:border-b-0 sm:grid-cols-[150px_1fr]">
+                <span className="font-semibold text-gray-300">{change.etiqueta || change.campo || "Campo"}</span>
+                <span className="text-gray-400"><span className="text-red-200 line-through">{historyValue(change.anterior)}</span> <span className="px-2 text-gray-600">→</span> <span className="font-semibold text-green-200">{historyValue(change.nuevo)}</span></span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {reference && (
+          <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-gray-300">
+            <p className="font-bold text-primary-light">{reference.label}</p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {reference.cliente && <span>Cliente: {reference.cliente}</span>}
+              {reference.proveedor && <span>Proveedor: {reference.proveedor}</span>}
+              {reference.origen && <span>Origen: {reference.origen}</span>}
+              {reference.destino && <span>Destino: {reference.destino}</span>}
+              {reference.metodoPago && <span>Pago: {reference.metodoPago}</span>}
+              {reference.tipoVenta && <span>Venta: {reference.tipoVenta}</span>}
+              {reference.estadoPago && <span>Estado pago: {reference.estadoPago}</span>}
+              {reference.precioUnitario != null && <span>Precio unitario: {moneyLabel(reference.precioUnitario)}</span>}
+              {reference.subtotalLinea != null && <span>Subtotal del producto: {moneyLabel(reference.subtotalLinea)}</span>}
+              {reference.totalVenta != null && <span>Total venta: {moneyLabel(reference.totalVenta)}</span>}
+              {reference.totalCompra != null && <span>Total compra: {moneyLabel(reference.totalCompra)}</span>}
+              {reference.comprobante && <span>Comprobante: {reference.comprobante}</span>}
+            </div>
+          </div>
+        )}
+
+        {event.purchase && (
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+            {event.purchase.proveedor && <span>Proveedor: {event.purchase.proveedor}</span>}
+            {event.purchase.precioUnitario != null && <span>Compra unit.: {moneyLabel(event.purchase.precioUnitario)}</span>}
+            {event.purchase.precioUnitarioReales != null && <span>Compra unit.: {reaisLabel(event.purchase.precioUnitarioReales)}</span>}
+            {event.purchase.tipoCambio != null && <span>Cambio: {event.purchase.tipoCambio}</span>}
+            {event.purchase.costoTotal != null && <span>Total: {moneyLabel(event.purchase.costoTotal)}</span>}
+            {event.purchase.costoTotalReales != null && <span>Total: {reaisLabel(event.purchase.costoTotalReales)}</span>}
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 

@@ -1,4 +1,4 @@
-import { PaymentMethod, Prisma, RemachadoTrabajoTipo, SaleType } from '@prisma/client';
+import { CashClosingStatus, PaymentMethod, Prisma, RemachadoTrabajoTipo, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
@@ -326,6 +326,18 @@ export class RemachadoService {
       }
 
       const businessDay = getBusinessDay();
+      const previousObserved = await tx.cierreCaja.findFirst({
+        where: {
+          usuarioId: data.usuarioId,
+          sucursalId: data.sucursalId,
+          fecha: { lt: businessDay.start },
+          estado: CashClosingStatus.OBSERVADO,
+        },
+        select: { id: true },
+      });
+      if (previousObserved) {
+        throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar trabajos de hoy.'), { status: 409 });
+      }
       const cierre = await tx.cierreCaja.findUnique({
         where: {
           fecha_usuarioId_sucursalId: {
@@ -407,6 +419,10 @@ export class RemachadoService {
         };
       });
 
+      if ((data.descuento || 0) > total) {
+        throw Object.assign(new Error('El descuento no puede superar el total del trabajo.'), { status: 400 });
+      }
+
       const medidaDeductions = new Map<string, number>();
       for (const pt of processedTrabajos) {
         medidaDeductions.set(pt.medida.id, (medidaDeductions.get(pt.medida.id) || 0) + pt.config.cantidadJuegos);
@@ -486,7 +502,7 @@ export class RemachadoService {
             cantidadSeguros: pt.original.seguroProductoId ? (pt.original.cantidadSeguros ?? pt.config.seguros) : 0,
             precioUnitario: pt.precioUnitario,
             total: pt.totalTrabajo,
-            notas: pt.original.notas || null,
+            notas: pt.original.notas || data.notas || null,
           }
         });
         trabajosCreated.push(trabajo);
@@ -532,6 +548,7 @@ export class RemachadoService {
           subtotal: total,
           descuento: data.descuento || 0,
           total: total - (data.descuento || 0),
+          fechaNegocio: businessDay.start,
           detalles: {
             create: [...ventaDetalles, ...accessoryDetailLines]
           },
@@ -627,8 +644,8 @@ export class RemachadoService {
             clienteId: data.clienteId,
             ventaId: venta.id,
             sucursalId: data.sucursalId,
-            montoTotal: total,
-            saldo: total,
+            montoTotal: total - (data.descuento || 0),
+            saldo: total - (data.descuento || 0),
             fechaVencimiento: parseDueDate(data.fechaVencimiento),
             estado: 'PENDIENTE',
           },

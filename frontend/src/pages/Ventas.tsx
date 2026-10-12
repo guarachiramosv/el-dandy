@@ -54,6 +54,11 @@ const productConditionClass = (condition?: string | null) =>
 export default function Ventas() {
   const location = useLocation();
   const navigate = useNavigate();
+  const correctionParams = new URLSearchParams(location.search);
+  const correctionDate = correctionParams.get("fechaNegocio");
+  const correctionClosingId = correctionParams.get("cierre");
+  const correctionReasonFromAdmin = correctionParams.get("motivo") || "";
+  const isCorrectionMode = Boolean(correctionDate && correctionClosingId);
   const productToAddFromInventory = (location.state as { addProductId?: string } | null)?.addProductId;
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySalesSummary | null>(null);
@@ -74,15 +79,16 @@ export default function Ventas() {
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
   const [invoiceCustomerNit, setInvoiceCustomerNit] = useState("");
   const [invoiceCustomerPhone, setInvoiceCustomerPhone] = useState("");
+  const [correctionReason, setCorrectionReason] = useState(correctionReasonFromAdmin);
   const user = getCurrentUser();
 
   const loadDailySummary = useCallback(async () => {
     try {
-      setDailySummary(await fetchDailySalesSummary());
+      setDailySummary(await fetchDailySalesSummary(correctionDate || undefined));
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
     }
-  }, []);
+  }, [correctionDate]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -262,6 +268,7 @@ export default function Ventas() {
     if (!user) return setMessage("Debes iniciar sesion nuevamente.");
     if (cart.length === 0) return setMessage("Agrega al menos un producto.");
     if (dailySummary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
+    if (isCorrectionMode && correctionReason.trim().length < 5) return setMessage("Explica el motivo de la correccion del cierre.");
     if (tipoVenta === "CREDITO" && !fechaVencimiento) return setMessage("Indica la fecha en que el cliente pagara el credito.");
     if (metodoPago === "MIXTO" && (mixedCashAmount <= 0 || mixedCashAmount >= total)) {
       return setMessage("En pago mixto, el monto en efectivo debe ser mayor a cero y menor al total.");
@@ -325,6 +332,9 @@ export default function Ventas() {
         metodoPago,
         tipoVenta,
         fechaVencimiento: tipoVenta === "CREDITO" && fechaVencimiento ? fechaVencimiento : null,
+        fechaNegocio: correctionDate,
+        cierreCorregidoId: correctionClosingId,
+        motivoCorreccion: isCorrectionMode ? correctionReason.trim() : null,
         pagos: metodoPago === "MIXTO" ? [
           { metodoPago: "EFECTIVO", monto: mixedCashAmount },
           { metodoPago: "QR", monto: mixedQrAmount },
@@ -347,7 +357,7 @@ export default function Ventas() {
       setInvoiceCustomerNit("");
       setInvoiceCustomerPhone("");
       setLastSale(sale);
-      setMessage("Venta registrada correctamente. Ya paso a historial.");
+      setMessage(isCorrectionMode ? "Correccion registrada. Revisa y reenvia el cierre de caja." : "Venta registrada correctamente. Ya paso a historial.");
       await loadDailySummary();
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
@@ -374,6 +384,19 @@ export default function Ventas() {
         </div>
 
         {message && <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-primary-light">{message}</div>}
+        {isCorrectionMode && (
+          <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+            <div className="flex items-center gap-2 font-black uppercase"><LockKeyhole size={18} /> Corrigiendo caja del {formatInputDate(correctionDate || "")}</div>
+            <p className="text-sm">Esta venta quedará registrada en la jornada observada y conservará la fecha real en que hiciste la corrección.</p>
+            <label className="block text-sm">
+              <span className="mb-1 block font-semibold">Motivo de la corrección</span>
+              <textarea className="premium-input min-h-20" maxLength={300} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} />
+            </label>
+            {cart.length === 0 && dailySummary?.ventas.length ? (
+              <button type="button" className="btn-secondary" onClick={() => navigate(`/seller/historial?fecha=${correctionDate}`)}>Volver al cierre observado</button>
+            ) : null}
+          </div>
+        )}
         {dailySummary?.cerrado && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 flex items-center gap-2">
             <LockKeyhole size={18} /> Caja cerrada por hoy. No se pueden registrar mas ventas en esta jornada.

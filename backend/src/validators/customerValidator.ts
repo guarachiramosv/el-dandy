@@ -17,6 +17,6 @@ export const updateCustomerSchema = createCustomerSchema.partial();
 export const createPaymentSchema = z.object({
   monto: z.number().positive('Monto debe ser mayor a cero'),
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA']),
-  usuarioId: z.string().uuid('Usuario invalido'),
+  usuarioId: z.string().uuid('Usuario invalido').optional(),
   notas: z.string().optional().nullable(),
 });

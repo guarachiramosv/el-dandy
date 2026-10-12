@@ -12,7 +12,7 @@ const purchaseInfoSchema = z.object({
   precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo').optional().default(0),
   precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
   tipoCambio: finiteNumber.positive('Tipo de cambio debe ser mayor a cero'),
-  cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero').optional(),
+  cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero'),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
 });

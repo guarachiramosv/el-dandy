@@ -4,7 +4,7 @@ import { Product, Provider, Purchase, Sucursal } from "../types";
 import { fetchProviders } from "../services/providers";
 import { fetchProducts } from "../services/products";
 import { fetchSucursales } from "../services/catalog";
-import { createPurchase, fetchPurchases } from "../services/purchases";
+import { addPurchasePayment, createPurchase, fetchPurchases } from "../services/purchases";
 import { getCurrentUser } from "../services/auth";
 import { getErrorMessage } from "../utils/errors";
 
@@ -18,6 +18,10 @@ export default function Compras() {
   const [proveedorId, setProveedorId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
   const [items, setItems] = useState<Row[]>([{ productoId: "", cantidad: 1, precioUnitario: 1 }]);
+  const [metodoPago, setMetodoPago] = useState<"EFECTIVO" | "TRANSFERENCIA" | "QR" | "TARJETA">("EFECTIVO");
+  const [montoPagado, setMontoPagado] = useState("");
+  const [fechaVencimiento, setFechaVencimiento] = useState("");
+  const [comprobante, setComprobante] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const user = getCurrentUser();
 
@@ -34,9 +38,19 @@ export default function Compras() {
     if (!user) return setMessage("Sesion requerida");
     if (!proveedorId || !sucursalId || items.some(i => !i.productoId)) return setMessage("Completa proveedor, sucursal y productos.");
     try {
-      const purchase = await createPurchase({ proveedorId, sucursalId, usuarioId: user.id, items });
+      const paid = montoPagado.trim() === "" ? total : Number(montoPagado.replace(",", "."));
+      if (!Number.isFinite(paid) || paid < 0 || paid > total) return setMessage("El monto pagado debe estar entre cero y el total.");
+      if (paid < total && !fechaVencimiento) return setMessage("Indica la fecha de vencimiento del saldo pendiente.");
+      const purchase = await createPurchase({
+        proveedorId, sucursalId, usuarioId: user.id, items,
+        metodoPago,
+        montoPagado: paid,
+        fechaVencimiento: paid < total ? fechaVencimiento : null,
+        comprobante: comprobante.trim() || null,
+      });
       setPurchases(prev => [purchase, ...prev]);
       setItems([{ productoId: "", cantidad: 1, precioUnitario: 1 }]);
+      setMontoPagado(""); setFechaVencimiento(""); setComprobante("");
       setMessage("Compra registrada. Stock, costos y kardex actualizados.");
     } catch (err: unknown) { setMessage(getErrorMessage(err)); }
   };
@@ -57,9 +71,21 @@ export default function Compras() {
           <button onClick={() => setItems(rows => rows.filter((_, i) => i !== idx))} className="btn-secondary"><Trash2 size={16}/></button>
         </div>)}
       </div>
+      <div className="grid grid-cols-1 gap-4 border-t border-gray-700 pt-4 md:grid-cols-2 lg:grid-cols-4">
+        <label><span className="mb-1 block text-sm text-gray-300">Método de pago</span><select className="premium-input" value={metodoPago} onChange={e => setMetodoPago(e.target.value as typeof metodoPago)}><option>EFECTIVO</option><option>TRANSFERENCIA</option><option>QR</option><option>TARJETA</option></select></label>
+        <label><span className="mb-1 block text-sm text-gray-300">Monto pagado</span><input className="premium-input" inputMode="decimal" placeholder={`Total: ${total}`} value={montoPagado} onChange={e => setMontoPagado(e.target.value)} /></label>
+        <label><span className="mb-1 block text-sm text-gray-300">Vencimiento si queda saldo</span><input type="date" className="premium-input" value={fechaVencimiento} onChange={e => setFechaVencimiento(e.target.value)} /></label>
+        <label><span className="mb-1 block text-sm text-gray-300">Comprobante</span><input className="premium-input" maxLength={160} value={comprobante} onChange={e => setComprobante(e.target.value)} /></label>
+      </div>
       <div className="flex justify-between items-center border-t border-gray-700 pt-4"><button onClick={() => setItems(rows => [...rows, { productoId: "", cantidad: 1, precioUnitario: 1 }])} className="btn-secondary flex gap-2"><Plus size={18}/>Agregar item</button><div className="text-right"><p className="text-gray-400">Total compra</p><p className="text-3xl font-bold text-primary-light">Bs {total.toLocaleString()}</p></div></div>
       <button onClick={submit} className="btn-primary">Registrar compra</button>
     </div>
-    <div className="glass-panel overflow-hidden"><table className="w-full text-left"><thead className="bg-grafito-800/80 text-sm uppercase text-gray-400"><tr><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Sucursal</th><th className="p-4 text-right">Total</th></tr></thead><tbody className="divide-y divide-gray-800">{purchases.map(p => <tr key={p.id}><td className="p-4 text-gray-300">{new Date(p.createdAt).toLocaleString()}</td><td className="p-4 text-white">{p.proveedor?.nombre}</td><td className="p-4 text-gray-300">{p.sucursal?.nombre}</td><td className="p-4 text-right text-primary-light font-semibold">Bs {p.total.toLocaleString()}</td></tr>)}</tbody></table></div>
+    <div className="glass-panel overflow-x-auto"><table className="w-full text-left"><thead className="bg-grafito-800/80 text-sm uppercase text-gray-400"><tr><th className="p-4">Fecha</th><th className="p-4">Proveedor</th><th className="p-4">Sucursal</th><th className="p-4 text-right">Total</th><th className="p-4 text-right">Saldo</th><th className="p-4">Estado</th><th className="p-4"></th></tr></thead><tbody className="divide-y divide-gray-800">{purchases.map(p => <tr key={p.id}><td className="p-4 text-gray-300">{new Date(p.createdAt).toLocaleString()}</td><td className="p-4 text-white">{p.proveedor?.nombre}</td><td className="p-4 text-gray-300">{p.sucursal?.nombre}</td><td className="p-4 text-right text-primary-light font-semibold">Bs {p.total.toLocaleString()}</td><td className="p-4 text-right text-amber-300">Bs {(p.saldoPendiente || 0).toLocaleString()}</td><td className="p-4 text-gray-300">{p.estadoPago || "PAGADA"}</td><td className="p-4">{(p.saldoPendiente || 0) > 0 && <button className="btn-secondary whitespace-nowrap" onClick={async () => {
+      const raw = window.prompt(`Monto a pagar (saldo Bs ${p.saldoPendiente})`, String(p.saldoPendiente));
+      if (raw == null) return;
+      const amount = Number(raw.replace(",", "."));
+      if (!Number.isFinite(amount) || amount <= 0) return setMessage("Monto de pago inválido.");
+      try { const updated = await addPurchasePayment(p.id, { monto: amount, metodoPago }); setPurchases(current => current.map(item => item.id === p.id ? updated : item)); setMessage("Pago a proveedor registrado."); } catch (error: unknown) { setMessage(getErrorMessage(error)); }
+    }}>Registrar pago</button>}</td></tr>)}</tbody></table></div>
   </div>;
 }

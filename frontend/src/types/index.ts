@@ -104,9 +104,29 @@ export interface Purchase {
   usuarioId: string;
   subtotal: number;
   total: number;
+  totalReales?: number;
+  tipoCambio?: number;
   estado: 'BORRADOR' | 'RECIBIDA' | 'ANULADA';
+  estadoPago?: 'PENDIENTE' | 'PARCIAL' | 'PAGADA';
+  montoPagado?: number;
+  saldoPendiente?: number;
+  metodoPago?: PaymentMethod | null;
+  fechaVencimiento?: string | null;
+  comprobante?: string | null;
+  origen?: 'COMPRA_DIRECTA' | 'COMPRA_INICIAL_PRODUCTO' | 'AGREGAR_STOCK' | 'MIGRACION_HISTORICA';
+  pagos?: PurchasePayment[];
   notas?: string | null;
   detalles?: PurchaseDetail[];
+  createdAt: string;
+}
+
+export interface PurchasePayment {
+  id: string;
+  compraId: string;
+  monto: number;
+  metodoPago?: PaymentMethod | null;
+  usuarioId: string;
+  notas?: string | null;
   createdAt: string;
 }
 
@@ -145,6 +165,66 @@ export interface StockMovement {
   referenciaTipo?: string | null;
   notas?: string | null;
   createdAt: string;
+}
+
+export interface ProductHistoryChange {
+  campo?: string;
+  etiqueta?: string;
+  anterior?: unknown;
+  nuevo?: unknown;
+}
+
+export interface ProductHistoryEvent {
+  id: string;
+  source: 'AUDITORIA' | 'MOVIMIENTO';
+  action: string;
+  title: string;
+  detail?: string | null;
+  createdAt: string;
+  usuario?: Pick<User, 'id' | 'nombre' | 'email'> | null;
+  sucursal?: Pick<Sucursal, 'id' | 'nombre'> | null;
+  stockAnterior?: number | null;
+  stockNuevo?: number | null;
+  cantidad?: number | null;
+  estadoAnterior?: string | null;
+  estadoNuevo?: string | null;
+  changes?: { campos?: ProductHistoryChange[]; [key: string]: unknown } | null;
+  reference?: {
+    type: string;
+    id: string;
+    label: string;
+    metodoPago?: string | null;
+    tipoVenta?: string | null;
+    cliente?: string | null;
+    proveedor?: string | null;
+    comprobante?: string | null;
+    origen?: string | null;
+    destino?: string | null;
+    estadoPago?: string | null;
+    cantidad?: number | null;
+    precioUnitario?: number | null;
+    subtotalLinea?: number | null;
+    descuentoVenta?: number | null;
+    totalVenta?: number | null;
+    totalCompra?: number | null;
+    totalCompraReales?: number | null;
+    notas?: string | null;
+  } | null;
+  purchase?: {
+    proveedor?: string | null;
+    precioUnitario?: number | null;
+    precioUnitarioReales?: number | null;
+    tipoCambio?: number | null;
+    costoTotal?: number | null;
+    costoTotalReales?: number | null;
+    comprobante?: string | null;
+  } | null;
+}
+
+export interface ProductHistory {
+  product: Pick<Product, 'id' | 'codigo' | 'descripcion'>;
+  total: number;
+  items: ProductHistoryEvent[];
 }
 
 export interface StockAlert {
@@ -261,6 +341,10 @@ export interface Sale {
   cuenta?: CreditAccount | null;
   solicitudAnulacion?: SaleVoidRequest | null;
   pagos?: SalePayment[];
+  fechaNegocio?: string;
+  esCorreccionCierre?: boolean;
+  motivoCorreccion?: string | null;
+  cierreCorregidoId?: string | null;
   detalles?: Array<{
     id: string;
     tipoLinea?: 'PRODUCTO' | 'REMACHADO';
@@ -292,6 +376,7 @@ export interface SaleVoidRequest {
 export interface DailySalesSummary {
   fecha: string;
   cerrado: boolean;
+  estadoCaja: 'ABIERTA' | 'PENDIENTE' | 'OBSERVADO' | 'APROBADO';
   cierre?: CashClosing | null;
   totals: {
     cantidadVentas: number;
@@ -333,6 +418,8 @@ export interface CashClosing {
   fecha: string;
   usuarioId: string;
   sucursalId: string;
+  usuario?: Pick<User, 'id' | 'nombre' | 'email'>;
+  sucursal?: Sucursal;
   cantidadVentas: number;
   totalVentas: number;
   totalEfectivo: number;
@@ -353,6 +440,31 @@ export interface CashClosing {
   montoDeclarado: number;
   diferencia: number;
   notas?: string | null;
+  estado: 'PENDIENTE' | 'OBSERVADO' | 'APROBADO';
+  administradorId?: string | null;
+  administrador?: Pick<User, 'id' | 'nombre' | 'email'> | null;
+  motivoObservacion?: string | null;
+  notaAdministrador?: string | null;
+  depositadoBanco?: boolean;
+  montoDepositado?: number | null;
+  fechaDeposito?: string | null;
+  referenciaDeposito?: string | null;
+  enviadoAt?: string;
+  revisadoAt?: string | null;
+  version?: number;
+  historial?: CashClosingHistory[];
+  createdAt: string;
+}
+
+export interface CashClosingHistory {
+  id: string;
+  accion: 'ENVIADO' | 'OBSERVADO' | 'REENVIADO' | 'APROBADO';
+  comentario?: string | null;
+  montoDeclarado: number;
+  efectivoEsperado: number;
+  diferencia: number;
+  version: number;
+  actor?: Pick<User, 'id' | 'nombre'>;
   createdAt: string;
 }
 
@@ -361,6 +473,11 @@ export interface PendingCashClosing {
   cantidadVentas: number;
   totalVentas: number;
   totalGastos: number;
+  cierreId?: string;
+  estado: 'SIN_ENVIAR' | 'PENDIENTE' | 'OBSERVADO' | 'APROBADO';
+  diferencia?: number;
+  motivoObservacion?: string | null;
+  version?: number;
 }
 
 export interface PaginatedProducts {
@@ -397,6 +514,9 @@ export interface SaleInput {
   tipoVenta: 'CONTADO' | 'CREDITO';
   descuento: number;
   fechaVencimiento?: string | null;
+  fechaNegocio?: string | null;
+  cierreCorregidoId?: string | null;
+  motivoCorreccion?: string | null;
   pagos?: Array<Pick<SalePayment, 'metodoPago' | 'monto'>>;
   items: SaleItemInput[];
 }

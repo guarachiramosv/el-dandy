@@ -25,19 +25,26 @@ export default function SellerLayout() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [pendingClosings, setPendingClosings] = useState<PendingCashClosing[]>([]);
   const user = getCurrentUser();
+  const priorityClosing = [...pendingClosings].sort((a, b) => {
+    if (a.estado === "OBSERVADO" && b.estado !== "OBSERVADO") return -1;
+    if (b.estado === "OBSERVADO" && a.estado !== "OBSERVADO") return 1;
+    return b.fecha.localeCompare(a.fecha);
+  })[0];
 
   useEffect(() => {
     if (user?.role !== "SELLER") return;
     let mounted = true;
-    fetchPendingCashClosings()
-      .then((items) => {
-        if (mounted) setPendingClosings(items);
-      })
-      .catch(() => {
-        if (mounted) setPendingClosings([]);
-      });
+    const loadPendingClosings = () => fetchPendingCashClosings()
+      .then((items) => { if (mounted) setPendingClosings(items); })
+      .catch(() => { if (mounted) setPendingClosings([]); });
+    void loadPendingClosings();
+    const interval = window.setInterval(() => void loadPendingClosings(), 45000);
+    const refreshOnFocus = () => void loadPendingClosings();
+    window.addEventListener("focus", refreshOnFocus);
     return () => {
       mounted = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
     };
   }, [user?.role]);
 
@@ -140,28 +147,31 @@ export default function SellerLayout() {
 
         {/* Page Content */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#0b0c0e] p-4 lg:p-5">
-          {pendingClosings.length > 0 && (
+          {priorityClosing && (
             <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 p-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex gap-3">
                   <AlertTriangle className="mt-0.5 shrink-0 text-red-300" size={24} />
                   <div>
-                    <p className="font-black uppercase tracking-wide text-red-100">Caja pendiente de cierre</p>
+                    <p className="font-black uppercase tracking-wide text-red-100">{priorityClosing.estado === "OBSERVADO" ? "Caja observada: requiere corrección" : "Caja pendiente de cierre"}</p>
                     <p className="mt-1 text-sm text-red-100/90">
-                      Tienes una caja sin cerrar del {pendingClosings[0].fecha}.
+                      Tienes una caja {priorityClosing.estado === "OBSERVADO" ? "devuelta" : "sin terminar"} del {priorityClosing.fecha}.
                       {pendingClosings.length > 1 ? ` Hay ${pendingClosings.length} dias pendientes.` : ""}
                     </p>
+                    {priorityClosing.motivoObservacion && <p className="mt-1 text-sm font-semibold text-amber-200">Motivo: {priorityClosing.motivoObservacion}</p>}
                     <p className="mt-1 text-xs text-red-200/80">
-                      Ventas: {pendingClosings[0].cantidadVentas} - Total vendido: {money(pendingClosings[0].totalVentas)} - Gastos: {money(pendingClosings[0].totalGastos)}
+                      Ventas: {priorityClosing.cantidadVentas} - Total vendido: {money(priorityClosing.totalVentas)} - Gastos: {money(priorityClosing.totalGastos)}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => navigate(`/seller/historial?fecha=${pendingClosings[0].fecha}`)}
+                  onClick={() => priorityClosing.estado === "OBSERVADO"
+                    ? navigate(`/seller/ventas?fechaNegocio=${priorityClosing.fecha}&cierre=${priorityClosing.cierreId}&motivo=${encodeURIComponent(priorityClosing.motivoObservacion || "Correccion solicitada por el administrador")}`)
+                    : navigate(`/seller/historial?fecha=${priorityClosing.fecha}`)}
                   className="btn-primary whitespace-nowrap"
                 >
-                  Cerrar caja pendiente
+                  {priorityClosing.estado === "OBSERVADO" ? "Registrar corrección" : priorityClosing.estado === "PENDIENTE" ? "Ver cierre enviado" : "Cerrar caja pendiente"}
                 </button>
               </div>
             </div>

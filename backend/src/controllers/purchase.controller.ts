@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
 import { PurchaseService } from '../services/purchase.service';
-import { createPurchaseSchema } from '../validators/purchaseValidator';
+import { createPurchasePaymentSchema, createPurchaseSchema } from '../validators/purchaseValidator';
 
 const service = new PurchaseService();
 
@@ -14,4 +14,11 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
   const usuarioId = req.user?.id || parsed.usuarioId;
   if (!usuarioId) return res.status(401).json({ success: false, error: 'Sesion requerida' });
   res.status(201).json({ success: true, data: await service.create({ ...parsed, usuarioId }) });
+});
+
+export const addPurchasePayment = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = createPurchasePaymentSchema.parse(req.body);
+  if (!req.user?.id) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+  const data = await service.addPayment(String(req.params.id), { ...parsed, usuarioId: req.user.id });
+  res.status(201).json({ success: true, data });
 });

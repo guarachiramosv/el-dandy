@@ -1,8 +1,13 @@
 import api from './api';
-import { StockAlert, StockMovement } from '../types';
+import { ProductHistory, StockAlert, StockMovement } from '../types';
 
 export const fetchStockMovements = async (params?: { productoId?: string; sucursalId?: string; from?: string; to?: string }): Promise<StockMovement[]> => {
   const response = await api.get('/inventory/movements', { params });
+  return response.data.data;
+};
+
+export const fetchProductHistory = async (productoId: string): Promise<ProductHistory> => {
+  const response = await api.get(`/inventory/products/${productoId}/history`);
   return response.data.data;
 };
 

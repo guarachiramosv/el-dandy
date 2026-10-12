@@ -1,24 +1,21 @@
-import { PaymentMethod } from '@prisma/client';
 import { Request, Response } from 'express';
 import { asyncHandler } from '../middlewares/asyncHandler';
 import { SaleService } from '../services/sale.service';
-import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema, saleVoidRequestSchema } from '../validators/saleValidator';
+import { closeCashRegisterSchema, createCashExpenseSchema, createSaleSchema, reviewCashClosingSchema, saleVoidRequestSchema, updateSalePaymentMethodSchema } from '../validators/saleValidator';
 
 const service = new SaleService();
 
 export const updatePaymentMethod = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { metodoPago, pagos } = req.body;
+  const parsed = updateSalePaymentMethodSchema.parse(req.body);
   
-  if (!id || !metodoPago) {
-    return res.status(400).json({ success: false, error: 'ID y metodo de pago requeridos' });
-  }
+  if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
 
-  const data = await service.updatePaymentMethod(String(id), metodoPago as PaymentMethod, {
+  const data = await service.updatePaymentMethod(String(id), parsed.metodoPago, {
     id: req.user?.id,
     sucursalId: req.user?.sucursalId,
     role: req.user?.role,
-  }, Array.isArray(pagos) ? pagos : undefined);
+  }, parsed.pagos);
   res.json({ success: true, data });
 });
 
@@ -76,13 +73,39 @@ export const getPendingCashClosings = asyncHandler(async (req: Request, res: Res
   res.json({ success: true, data });
 });
 
+export const getCashClosingsForReview = asyncHandler(async (_req: Request, res: Response) => {
+  res.json({ success: true, data: await service.getCashClosingsForReview() });
+});
+
+export const approveCashClosing = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = reviewCashClosingSchema.parse(req.body);
+  if (!req.user?.id) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+  const data = await service.approveCashClosing({
+    cierreId: String(req.params.id),
+    administradorId: req.user.id,
+    comentario: parsed.comentario,
+  });
+  res.json({ success: true, data, message: 'Cierre aprobado correctamente' });
+});
+
+export const observeCashClosing = asyncHandler(async (req: Request, res: Response) => {
+  const parsed = reviewCashClosingSchema.parse(req.body);
+  if (!req.user?.id) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+  const data = await service.observeCashClosing({
+    cierreId: String(req.params.id),
+    administradorId: req.user.id,
+    comentario: parsed.comentario,
+  });
+  res.json({ success: true, data, message: 'Cierre observado y devuelto al vendedor' });
+});
+
 export const deleteSale = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const { motivo } = req.body;
   if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
   if (!motivo || !motivo.trim()) return res.status(400).json({ success: false, error: 'El motivo es requerido para anular' });
   
-  await service.deleteSale(String(id), String(motivo));
+  await service.deleteSale(String(id), String(motivo), req.user?.id);
   res.json({ success: true, message: 'Venta anulada correctamente' });
 });
 

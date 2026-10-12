@@ -22,6 +22,7 @@ const AdminCategorias = lazy(() => import("./pages/admin/Categorias"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Ganancias = lazy(() => import("./pages/Ganancias"));
 const Finanzas = lazy(() => import("./pages/Finanzas"));
+const CierresCaja = lazy(() => import("./pages/CierresCaja"));
 
 const routeFallback = <div className="p-6 text-gray-400">Cargando...</div>;
 
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="remachado" element={<Remachado />} />
           <Route path="alertas" element={<Alertas />} />
           <Route path="historial" element={<HistorialVentas />} />
+          <Route path="cierres-caja" element={<CierresCaja />} />
           <Route path="reportes" element={<Reportes />} />
           <Route path="usuarios" element={<Usuarios />} />
           <Route path="ganancias" element={<Ganancias />} />

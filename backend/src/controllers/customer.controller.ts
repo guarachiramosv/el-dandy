@@ -37,6 +37,7 @@ export const deleteCustomer = asyncHandler(async (req: Request, res: Response) =
 
 export const addCreditPayment = asyncHandler(async (req: Request, res: Response) => {
   const parsed = createPaymentSchema.parse(req.body);
-  const data = await service.addPayment(String(req.params.cuentaId), parsed);
+  if (!req.user?.id) return res.status(401).json({ success: false, error: 'Sesion requerida' });
+  const data = await service.addPayment(String(req.params.cuentaId), { ...parsed, usuarioId: req.user.id });
   res.status(201).json({ success: true, data });
 });

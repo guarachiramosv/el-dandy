@@ -2,12 +2,14 @@
 import { prisma } from '../lib/prisma';
 
 const LOW_STOCK_THRESHOLD = 5;
+const BOLIVIA_UTC_OFFSET_HOURS = 4;
 
 export class DashboardService {
   async getSummary() {
     const today = new Date();
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const boliviaTime = new Date(today.getTime() - BOLIVIA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+    const startOfDay = new Date(Date.UTC(boliviaTime.getUTCFullYear(), boliviaTime.getUTCMonth(), boliviaTime.getUTCDate(), BOLIVIA_UTC_OFFSET_HOURS));
+    const startOfMonth = new Date(Date.UTC(boliviaTime.getUTCFullYear(), boliviaTime.getUTCMonth(), 1, BOLIVIA_UTC_OFFSET_HOURS));
 
     const [
       ventasHoy,
@@ -28,13 +30,13 @@ export class DashboardService {
       productosMasMovidos,
     ] = await Promise.all([
       // Count ventas today
-      prisma.venta.count({ where: { createdAt: { gte: startOfDay } } }),
+      prisma.venta.count({ where: { fechaNegocio: { gte: startOfDay } } }),
       // Sum total ventas today
-      prisma.venta.aggregate({ _sum: { total: true }, where: { createdAt: { gte: startOfDay } } }),
+      prisma.venta.aggregate({ _sum: { total: true }, where: { fechaNegocio: { gte: startOfDay } } }),
       // Count ventas this month
-      prisma.venta.count({ where: { createdAt: { gte: startOfMonth } } }),
+      prisma.venta.count({ where: { fechaNegocio: { gte: startOfMonth } } }),
       // Sum total ventas this month
-      prisma.venta.aggregate({ _sum: { total: true }, where: { createdAt: { gte: startOfMonth } } }),
+      prisma.venta.aggregate({ _sum: { total: true }, where: { fechaNegocio: { gte: startOfMonth } } }),
       // Low stock products
       prisma.producto.findMany({
         where: { stock: { lte: LOW_STOCK_THRESHOLD } },
@@ -56,10 +58,10 @@ export class DashboardService {
       }),
       // Ventas por día (last 7 days)
       prisma.$queryRaw<{ dia: string; total: number }[]>`
-        SELECT DATE("createdAt")::text AS dia, SUM(total)::float AS total
+        SELECT DATE("fechaNegocio" - INTERVAL '4 hours')::text AS dia, SUM(total)::float AS total
         FROM "Venta"
-        WHERE "createdAt" >= NOW() - INTERVAL '7 days'
-        GROUP BY DATE("createdAt")
+        WHERE "fechaNegocio" >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE("fechaNegocio" - INTERVAL '4 hours')
         ORDER BY dia ASC
       `,
       prisma.cliente.count({ where: { createdAt: { gte: startOfMonth } } }),

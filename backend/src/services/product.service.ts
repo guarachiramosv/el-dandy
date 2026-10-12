@@ -1,12 +1,14 @@
 // src/services/product.service.ts
 import { prisma } from '../lib/prisma';
-import { Prisma, ProductStatus } from '@prisma/client';
+import { Prisma, ProductStatus, PurchaseOrigin } from '@prisma/client';
 import { StockService } from './stock.service';
 import { ProductAuditService } from './productAudit.service';
 import { filterAndSortBySearch, getSearchTerms } from '../utils/fuzzySearch';
+import { PurchaseRecordService } from './purchase-record.service';
 
 const stockService = new StockService();
 const productAuditService = new ProductAuditService();
+const purchaseRecordService = new PurchaseRecordService();
 const DEFAULT_PRODUCT_BRAND = 'Sin marca';
 const SEARCH_CANDIDATE_LIMIT = 1000;
 const DEFAULT_PRODUCT_LIMIT = 50;
@@ -399,6 +401,7 @@ export class ProductService {
 
     return prisma.$transaction(async (tx) => {
       if (initialPurchase) {
+        if (!usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra inicial'), { status: 401 });
         const provider = await tx.proveedor.findFirst({
           where: { id: initialPurchase.proveedorId, activo: true },
           select: { id: true },
@@ -418,6 +421,23 @@ export class ProductService {
           ubicacion: product.ubicacion,
         },
       });
+      const initialPurchaseRecord = initialPurchase && usuarioId
+        ? await purchaseRecordService.create(tx, {
+            proveedorId: initialPurchase.proveedorId,
+            sucursalId: data.sucursalId,
+            usuarioId,
+            items: [{
+              productoId: product.id,
+              cantidad: initialStock,
+              precioUnitario: initialUnitCostBs,
+              precioUnitarioReales: initialPurchase.precioCompraUnitarioReales,
+            }],
+            origen: PurchaseOrigin.COMPRA_INICIAL_PRODUCTO,
+            tipoCambio: initialPurchase.tipoCambio,
+            comprobante: initialPurchase.comprobante,
+            notas: initialPurchase.notas,
+          })
+        : null;
       if (initialStock > 0) {
         await stockService.recordMovement(tx, {
           tipoMovimiento: initialPurchase ? 'COMPRA' : 'AJUSTE',
@@ -435,7 +455,8 @@ export class ProductService {
           estante: product.ubicacion,
           comprobante: initialPurchase?.comprobante?.trim() || null,
           usuarioId,
-          referenciaTipo: initialPurchase ? 'COMPRA_INICIAL_PRODUCTO' : 'ALTA_PRODUCTO',
+          referenciaId: initialPurchaseRecord?.id,
+          referenciaTipo: initialPurchase ? 'COMPRA' : 'ALTA_PRODUCTO',
           notas: initialPurchase?.notas?.trim() || 'Stock inicial al crear producto',
         });
       }
@@ -633,6 +654,7 @@ export class ProductService {
       });
       if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
       if (data.cantidad > 0) {
+        if (!data.usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra'), { status: 401 });
         if (!data.proveedorId) throw Object.assign(new Error('Proveedor es requerido para registrar una compra'), { status: 400 });
         const provider = await tx.proveedor.findFirst({
           where: { id: data.proveedorId, activo: true },
@@ -675,6 +697,21 @@ export class ProductService {
       }
 
       if (data.cantidad > 0) {
+        const purchase = await purchaseRecordService.create(tx, {
+          proveedorId: data.proveedorId!,
+          sucursalId: data.sucursalId,
+          usuarioId: data.usuarioId!,
+          items: [{
+            productoId: id,
+            cantidad: data.cantidad,
+            precioUnitario: precioCompraUnitarioBs,
+            precioUnitarioReales: data.precioCompraUnitarioReales,
+          }],
+          origen: PurchaseOrigin.AGREGAR_STOCK,
+          tipoCambio: data.tipoCambio,
+          comprobante: data.comprobante,
+          notas: data.notas,
+        });
         await stockService.recordMovement(tx, {
           tipoMovimiento: 'COMPRA',
           productoId: id,
@@ -691,7 +728,8 @@ export class ProductService {
           estante: ubicacion,
           comprobante: data.comprobante?.trim() || null,
           usuarioId: data.usuarioId,
-          referenciaTipo: 'AGREGAR_STOCK',
+          referenciaId: purchase.id,
+          referenciaTipo: 'COMPRA',
           notas: data.notas,
         });
       }

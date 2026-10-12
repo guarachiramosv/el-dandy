@@ -1,4 +1,4 @@
-import { CategoriaMovimientoFinanciero, PaymentMethod, PurchaseStatus, SaleType } from '@prisma/client';
+import { CashClosingStatus, CategoriaMovimientoFinanciero, PaymentMethod, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ReportService } from './report.service';
 
@@ -26,25 +26,28 @@ export class FinanceService {
 
     const [profitReport, cierres, ventasDigitales, cobrosDigitales, gastosQr, compras, movimientos, balance] = await Promise.all([
       reportService.getMonthlyProfitReport({ month }),
-      prisma.cierreCaja.findMany({ where: { fecha: dateFilter }, select: { montoDeclarado: true } }),
+      prisma.cierreCaja.findMany({
+        where: { fecha: dateFilter, estado: CashClosingStatus.APROBADO, depositadoBanco: true },
+        select: { montoDepositado: true },
+      }),
       prisma.pagoVenta.findMany({
         where: {
           metodoPago: { in: digitalMethods },
-          venta: { tipoVenta: SaleType.CONTADO, createdAt: dateFilter },
+          venta: { tipoVenta: SaleType.CONTADO, fechaNegocio: dateFilter },
         },
         select: { monto: true, metodoPago: true },
       }),
       prisma.pagoCredito.findMany({
-        where: { createdAt: dateFilter, metodoPago: { in: digitalMethods } },
+        where: { fechaNegocio: dateFilter, metodoPago: { in: digitalMethods } },
         select: { monto: true, metodoPago: true },
       }),
       prisma.gastoCaja.findMany({
-        where: { createdAt: dateFilter, metodoPago: PaymentMethod.QR },
+        where: { fechaNegocio: dateFilter, metodoPago: PaymentMethod.QR },
         select: { monto: true },
       }),
-      prisma.compra.findMany({
-        where: { createdAt: dateFilter, estado: PurchaseStatus.RECIBIDA },
-        select: { total: true },
+      prisma.pagoCompra.findMany({
+        where: { fechaNegocio: dateFilter },
+        select: { monto: true },
       }),
       prisma.movimientoFinanciero.findMany({
         where: { fecha: dateFilter },
@@ -57,7 +60,7 @@ export class FinanceService {
       prisma.balanceMensual.findUnique({ where: { mes: month } }),
     ]);
 
-    const depositosEfectivo = sum(cierres, (item) => item.montoDeclarado);
+    const depositosEfectivo = sum(cierres, (item) => item.montoDepositado || 0);
     const ventasQr = sum(ventasDigitales.filter((item) => item.metodoPago === 'QR'), (item) => item.monto);
     const ventasTransferencia = sum(ventasDigitales.filter((item) => item.metodoPago === 'TRANSFERENCIA'), (item) => item.monto);
     const ventasTarjeta = sum(ventasDigitales.filter((item) => item.metodoPago === 'TARJETA'), (item) => item.monto);
@@ -65,7 +68,7 @@ export class FinanceService {
     const cobrosTransferencia = sum(cobrosDigitales.filter((item) => item.metodoPago === 'TRANSFERENCIA'), (item) => item.monto);
     const cobrosTarjeta = sum(cobrosDigitales.filter((item) => item.metodoPago === 'TARJETA'), (item) => item.monto);
     const gastosCajaQr = sum(gastosQr, (item) => item.monto);
-    const comprasMercaderia = sum(compras, (item) => item.total);
+    const comprasMercaderia = sum(compras, (item) => item.monto);
     const gastosAdministrador = sum(movimientos.filter((item) => item.categoria === 'GASTO_NEGOCIO'), (item) => item.monto);
     const retirosPersonales = sum(movimientos.filter((item) => item.categoria === 'RETIRO_PERSONAL'), (item) => item.monto);
     const aportesPropietario = sum(movimientos.filter((item) => item.categoria === 'APORTE_PROPIETARIO'), (item) => item.monto);

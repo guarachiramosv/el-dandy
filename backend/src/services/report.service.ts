@@ -1,4 +1,4 @@
-import { PaymentMethod, Prisma } from '@prisma/client';
+import { CashClosingStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ProductAuditService } from './productAudit.service';
 
@@ -153,15 +153,15 @@ export class ReportService {
   async getMonthlyProfitReport(params: { month?: string | null; sucursalId?: string | null }) {
     const range = parsePeriod('month', params.month);
     const saleWhere: Prisma.VentaWhereInput = {
-      createdAt: { gte: range.start, lt: range.end },
+      fechaNegocio: { gte: range.start, lt: range.end },
       ...(params.sucursalId ? { sucursalId: params.sucursalId } : {}),
     };
     const expenseWhere: Prisma.GastoCajaWhereInput = {
-      createdAt: { gte: range.start, lt: range.end },
+      fechaNegocio: { gte: range.start, lt: range.end },
       ...(params.sucursalId ? { sucursalId: params.sucursalId } : {}),
     };
     const paymentWhere: Prisma.PagoCreditoWhereInput = {
-      createdAt: { gte: range.start, lt: range.end },
+      fechaNegocio: { gte: range.start, lt: range.end },
       ...(params.sucursalId ? { cuenta: { sucursalId: params.sucursalId } } : {}),
     };
     const adminExpenseWhere: Prisma.MovimientoFinancieroWhereInput = {
@@ -364,13 +364,14 @@ export class ReportService {
   }) {
     const range = parsePeriod(params.period, params.value);
     const where: Prisma.VentaWhereInput = {
-      createdAt: { gte: range.start, lt: range.end },
+      fechaNegocio: { gte: range.start, lt: range.end },
     };
     const gastosWhere: Prisma.GastoCajaWhereInput = {
-      createdAt: { gte: range.start, lt: range.end },
+      fechaNegocio: { gte: range.start, lt: range.end },
     };
     const cierresWhere: Prisma.CierreCajaWhereInput = {
       fecha: { gte: range.start, lt: range.end },
+      estado: CashClosingStatus.APROBADO,
     };
     if (params.sucursalId) {
       where.usuario = { sucursalId: params.sucursalId };
@@ -537,6 +538,7 @@ export class ReportService {
     const range = parsePeriod(params.period, params.value);
     const where: Prisma.CierreCajaWhereInput = {
       fecha: { gte: range.start, lt: range.end },
+      estado: CashClosingStatus.APROBADO,
     };
     if (params.sucursalId) where.sucursalId = params.sucursalId;
     if (params.usuarioId) where.usuarioId = params.usuarioId;
@@ -644,7 +646,7 @@ export class ReportService {
           prisma.detalleVenta.findMany({
             where: {
               productoId: { in: productIds },
-              venta: { createdAt: { gte: range.start, lt: range.end } },
+              venta: { fechaNegocio: { gte: range.start, lt: range.end } },
             },
             select: {
               productoId: true,

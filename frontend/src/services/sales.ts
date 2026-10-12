@@ -26,8 +26,30 @@ export const fetchPendingCashClosings = async (): Promise<PendingCashClosing[]> 
   return response.data.data;
 };
 
-export const closeCashRegister = async (input: { fecha?: string; montoDeclarado: number; notas?: string | null }): Promise<CashClosing> => {
+export const closeCashRegister = async (input: {
+  fecha?: string;
+  montoDeclarado: number;
+  notas?: string | null;
+  depositadoBanco?: boolean;
+  montoDepositado?: number | null;
+  referenciaDeposito?: string | null;
+}): Promise<CashClosing> => {
   const response = await api.post<{ success: boolean; data: CashClosing }>('/sales/close-cash', input);
+  return response.data.data;
+};
+
+export const fetchCashClosingsForReview = async (): Promise<CashClosing[]> => {
+  const response = await api.get<{ success: boolean; data: CashClosing[] }>('/sales/cash-closings/review');
+  return response.data.data;
+};
+
+export const approveCashClosing = async (id: string, comentario: string): Promise<CashClosing> => {
+  const response = await api.post<{ success: boolean; data: CashClosing }>(`/sales/cash-closings/${id}/approve`, { comentario });
+  return response.data.data;
+};
+
+export const observeCashClosing = async (id: string, comentario: string): Promise<CashClosing> => {
+  const response = await api.post<{ success: boolean; data: CashClosing }>(`/sales/cash-closings/${id}/observe`, { comentario });
   return response.data.data;
 };
 

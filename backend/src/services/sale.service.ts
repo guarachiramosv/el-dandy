@@ -1,4 +1,4 @@
-import { PaymentMethod, Prisma, SaleType } from '@prisma/client';
+import { CashClosingAction, CashClosingStatus, PaymentMethod, Prisma, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { StockService } from './stock.service';
 
@@ -18,6 +18,9 @@ type CreateSaleInput = {
   tipoVenta: SaleType;
   descuento: number;
   fechaVencimiento?: string | null;
+  fechaNegocio?: string | null;
+  cierreCorregidoId?: string | null;
+  motivoCorreccion?: string | null;
   pagos?: SalePaymentInput[];
   items: SaleItemInput[];
 };
@@ -33,6 +36,15 @@ type CloseCashRegisterInput = {
   fecha?: string | null;
   montoDeclarado: number;
   notas?: string | null;
+  depositadoBanco?: boolean;
+  montoDepositado?: number | null;
+  referenciaDeposito?: string | null;
+};
+
+type ReviewCashClosingInput = {
+  cierreId: string;
+  administradorId: string;
+  comentario: string;
 };
 
 type CreateCashExpenseInput = {
@@ -255,7 +267,7 @@ export class SaleService {
 
     const venta = await prisma.venta.findUnique({
       where: { id },
-      select: { usuarioId: true, sucursalId: true, total: true, tipoVenta: true },
+      select: { usuarioId: true, sucursalId: true, total: true, tipoVenta: true, fechaNegocio: true },
     });
 
     if (!venta) {
@@ -269,6 +281,16 @@ export class SaleService {
     const paymentRows = buildSalePayments(venta.total, venta.tipoVenta, metodoPago, pagos);
 
     return prisma.$transaction(async (tx) => {
+      const cierre = await tx.cierreCaja.findFirst({
+        where: {
+          fecha: getBusinessDay(venta.fechaNegocio.toISOString()).start,
+          usuarioId: venta.usuarioId,
+          sucursalId: venta.sucursalId,
+        },
+      });
+      if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
+        throw Object.assign(new Error('No se puede modificar el pago porque la caja esta enviada o aprobada.'), { status: 409 });
+      }
       await tx.pagoVenta.deleteMany({ where: { ventaId: id } });
       if (paymentRows.length) {
         await tx.pagoVenta.createMany({ data: paymentRows.map((pago) => ({ ...pago, ventaId: id })) });
@@ -318,15 +340,54 @@ export class SaleService {
         }
       }
 
-      const businessDay = getBusinessDay();
+      const today = getBusinessDay();
+      const businessDay = getBusinessDay(data.fechaNegocio);
+      const isHistoricalCorrection = businessDay.label !== today.label;
+      let correctionClosing: { id: string } | null = null;
+
+      if (isHistoricalCorrection || data.cierreCorregidoId) {
+        if (!data.cierreCorregidoId || !data.motivoCorreccion?.trim()) {
+          throw Object.assign(new Error('Selecciona el cierre observado y explica la correccion.'), { status: 400 });
+        }
+        correctionClosing = await tx.cierreCaja.findFirst({
+          where: {
+            id: data.cierreCorregidoId,
+            fecha: businessDay.start,
+            usuarioId: data.usuarioId,
+            sucursalId: data.sucursalId,
+            estado: CashClosingStatus.OBSERVADO,
+          },
+          select: { id: true },
+        });
+        if (!correctionClosing) {
+          throw Object.assign(new Error('El cierre seleccionado no esta observado o no pertenece a esta jornada.'), { status: 409 });
+        }
+      } else {
+        const previousObserved = await tx.cierreCaja.findFirst({
+          where: {
+            usuarioId: data.usuarioId,
+            sucursalId: data.sucursalId,
+            fecha: { lt: today.start },
+            estado: CashClosingStatus.OBSERVADO,
+          },
+          select: { fecha: true },
+        });
+        if (previousObserved) {
+          throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar ventas de hoy.'), { status: 409 });
+        }
+      }
+
       const cierre = await tx.cierreCaja.findFirst({
         where: {
           fecha: businessDay.start,
           ...sellerBusinessDayScope(data.usuarioId, data.sucursalId),
         },
       });
-      if (cierre) {
+      if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
         throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar mas ventas.'), { status: 409 });
+      }
+      if (cierre?.estado === CashClosingStatus.OBSERVADO && !correctionClosing) {
+        throw Object.assign(new Error('Esta caja esta observada. Registra la venta desde el modo de correccion.'), { status: 409 });
       }
 
       const productos = await tx.producto.findMany({
@@ -354,7 +415,11 @@ export class SaleService {
 
       const detalles = data.items.map((item) => {
         const producto = productMap.get(item.productoId)!;
-        const lineSubtotal = producto.precioVenta * item.cantidad - item.descuentoItem;
+        const grossLineTotal = producto.precioVenta * item.cantidad;
+        if (item.descuentoItem > grossLineTotal) {
+          throw Object.assign(new Error(`El descuento de ${producto.descripcion} no puede superar Bs ${grossLineTotal}.`), { status: 400 });
+        }
+        const lineSubtotal = grossLineTotal - item.descuentoItem;
         return {
           tipoLinea: 'PRODUCTO' as const,
           productoId: item.productoId,
@@ -368,6 +433,9 @@ export class SaleService {
       });
 
       const subtotal = detalles.reduce((sum, item) => sum + item.subtotal, 0);
+      if (data.descuento > subtotal) {
+        throw Object.assign(new Error('El descuento no puede superar el subtotal de la venta.'), { status: 400 });
+      }
       const total = Math.max(subtotal - data.descuento, 0);
       const pagos = buildSalePayments(total, data.tipoVenta, data.metodoPago, data.pagos);
 
@@ -381,6 +449,10 @@ export class SaleService {
           subtotal,
           descuento: data.descuento,
           total,
+          fechaNegocio: businessDay.start,
+          esCorreccionCierre: Boolean(correctionClosing),
+          motivoCorreccion: correctionClosing ? data.motivoCorreccion?.trim() : null,
+          cierreCorregido: correctionClosing ? { connect: { id: correctionClosing.id } } : undefined,
           detalles: { create: detalles },
           pagos: pagos.length ? { create: pagos } : undefined,
         },
@@ -455,11 +527,11 @@ export class SaleService {
       : sellerBusinessDayScope(String(params.usuarioId || ''), params.sucursalId);
     const where: Prisma.VentaWhereInput = {
       ...scopedWhere,
-      createdAt: { gte: businessDay.start, lt: businessDay.end },
+      fechaNegocio: { gte: businessDay.start, lt: businessDay.end },
     };
     const expenseWhere: Prisma.GastoCajaWhereInput = {
       ...scopedWhere,
-      createdAt: { gte: businessDay.start, lt: businessDay.end },
+      fechaNegocio: { gte: businessDay.start, lt: businessDay.end },
     };
     const closingWhere: Prisma.CierreCajaWhereInput = {
       fecha: businessDay.start,
@@ -484,7 +556,7 @@ export class SaleService {
       prisma.pagoCredito.findMany({
         where: {
           ...(params.includeAllSellers ? {} : { usuarioId: String(params.usuarioId || '') }),
-          createdAt: { gte: businessDay.start, lt: businessDay.end },
+          fechaNegocio: { gte: businessDay.start, lt: businessDay.end },
           cuenta: { sucursalId: params.sucursalId },
         },
         include: {
@@ -522,7 +594,8 @@ export class SaleService {
       fecha: businessDay.label,
       desde: businessDay.start,
       hasta: businessDay.end,
-      cerrado: Boolean(cierre),
+      cerrado: Boolean(cierre && cierre.estado !== CashClosingStatus.OBSERVADO),
+      estadoCaja: cierre?.estado || 'ABIERTA',
       cierre,
       totals,
       gastos: {
@@ -545,62 +618,102 @@ export class SaleService {
       prisma.venta.findMany({
         where: {
           ...scope,
-          createdAt: { lt: today.start },
+          fechaNegocio: { lt: today.start },
         },
-        select: { createdAt: true, total: true },
+        select: { fechaNegocio: true, total: true },
       }),
       prisma.gastoCaja.findMany({
         where: {
           ...scope,
-          createdAt: { lt: today.start },
+          fechaNegocio: { lt: today.start },
         },
-        select: { createdAt: true, monto: true },
+        select: { fechaNegocio: true, monto: true },
       }),
       prisma.pagoCredito.findMany({
         where: {
           usuarioId: params.usuarioId,
-          createdAt: { lt: today.start },
+          fechaNegocio: { lt: today.start },
           cuenta: { sucursalId: params.sucursalId },
         },
-        select: { createdAt: true, monto: true },
+        select: { fechaNegocio: true, monto: true },
       }),
       prisma.cierreCaja.findMany({
         where: {
-          ...scope,
-          fecha: { lt: today.start },
+          AND: [
+            scope,
+            {
+              OR: [
+                { fecha: { lt: today.start } },
+                { estado: CashClosingStatus.OBSERVADO },
+              ],
+            },
+          ],
         },
-        select: { fecha: true },
+        select: {
+          id: true,
+          fecha: true,
+          estado: true,
+          diferencia: true,
+          motivoObservacion: true,
+          version: true,
+          cantidadVentas: true,
+          totalVentas: true,
+          totalGastos: true,
+        },
       }),
     ]);
 
-    const closedDays = new Set(cierres.map((cierre) => getBusinessDayLabel(cierre.fecha)));
+    const closingsByDay = new Map(cierres.map((cierre) => [getBusinessDayLabel(cierre.fecha), cierre]));
     const pendingByDay = new Map<string, {
       fecha: string;
       cantidadVentas: number;
       totalVentas: number;
       totalGastos: number;
+      cierreId?: string;
+      estado: 'SIN_ENVIAR' | CashClosingStatus;
+      diferencia?: number;
+      motivoObservacion?: string | null;
+      version?: number;
     }>();
 
+    cierres
+      .filter((cierre) => cierre.estado !== CashClosingStatus.APROBADO)
+      .forEach((cierre) => {
+        const fecha = getBusinessDayLabel(cierre.fecha);
+        const isCurrentDay = cierre.fecha >= today.start;
+        pendingByDay.set(fecha, {
+          fecha,
+          cantidadVentas: isCurrentDay ? cierre.cantidadVentas : 0,
+          totalVentas: isCurrentDay ? cierre.totalVentas : 0,
+          totalGastos: isCurrentDay ? cierre.totalGastos : 0,
+          cierreId: cierre.id,
+          estado: cierre.estado,
+          diferencia: cierre.diferencia,
+          motivoObservacion: cierre.motivoObservacion,
+          version: cierre.version,
+        });
+      });
+
     ventas.forEach((venta) => {
-      const fecha = getBusinessDayLabel(venta.createdAt);
-      if (closedDays.has(fecha)) return;
-      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
+      const fecha = getBusinessDayLabel(venta.fechaNegocio);
+      if (closingsByDay.get(fecha)?.estado === CashClosingStatus.APROBADO) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0, estado: 'SIN_ENVIAR' as const };
       current.cantidadVentas += 1;
       current.totalVentas += venta.total;
       pendingByDay.set(fecha, current);
     });
 
     gastos.forEach((gasto) => {
-      const fecha = getBusinessDayLabel(gasto.createdAt);
-      if (closedDays.has(fecha)) return;
-      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
+      const fecha = getBusinessDayLabel(gasto.fechaNegocio);
+      if (closingsByDay.get(fecha)?.estado === CashClosingStatus.APROBADO) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0, estado: 'SIN_ENVIAR' as const };
       current.totalGastos += gasto.monto;
       pendingByDay.set(fecha, current);
     });
     pagosCredito.forEach((pago) => {
-      const fecha = getBusinessDayLabel(pago.createdAt);
-      if (closedDays.has(fecha)) return;
-      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0 };
+      const fecha = getBusinessDayLabel(pago.fechaNegocio);
+      if (closingsByDay.get(fecha)?.estado === CashClosingStatus.APROBADO) return;
+      const current = pendingByDay.get(fecha) || { fecha, cantidadVentas: 0, totalVentas: 0, totalGastos: 0, estado: 'SIN_ENVIAR' as const };
       pendingByDay.set(fecha, current);
     });
 
@@ -609,14 +722,29 @@ export class SaleService {
 
   async createCashExpense(data: CreateCashExpenseInput) {
     const businessDay = getBusinessDay();
-    const cierre = await prisma.cierreCaja.findFirst({
-      where: {
-        fecha: businessDay.start,
-        ...sellerBusinessDayScope(data.usuarioId, data.sucursalId),
-      },
-    });
+    const [cierre, previousObserved] = await Promise.all([
+      prisma.cierreCaja.findFirst({
+        where: {
+          fecha: businessDay.start,
+          ...sellerBusinessDayScope(data.usuarioId, data.sucursalId),
+        },
+      }),
+      prisma.cierreCaja.findFirst({
+        where: {
+          usuarioId: data.usuarioId,
+          sucursalId: data.sucursalId,
+          fecha: { lt: businessDay.start },
+          estado: CashClosingStatus.OBSERVADO,
+        },
+        select: { id: true },
+      }),
+    ]);
 
-    if (cierre) {
+    if (previousObserved) {
+      throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar gastos de hoy.'), { status: 409 });
+    }
+
+    if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
       throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar mas gastos.'), { status: 409 });
     }
 
@@ -628,6 +756,7 @@ export class SaleService {
         monto: data.monto,
         metodoPago: data.metodoPago,
         notas: data.notas || null,
+        fechaNegocio: businessDay.start,
       },
       include: {
         usuario: { select: { id: true, nombre: true, email: true } },
@@ -651,7 +780,7 @@ export class SaleService {
         throw Object.assign(new Error('No puedes anular gastos de otro vendedor.'), { status: 403 });
       }
 
-      const businessDay = getBusinessDay(gasto.createdAt.toISOString());
+      const businessDay = getBusinessDay(gasto.fechaNegocio.toISOString());
       const cierre = await tx.cierreCaja.findFirst({
         where: {
           fecha: businessDay.start,
@@ -659,7 +788,7 @@ export class SaleService {
         },
       });
 
-      if (cierre) {
+      if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
         throw Object.assign(new Error('No se puede anular el gasto porque la caja de ese dia ya fue cerrada.'), { status: 409 });
       }
 
@@ -683,14 +812,14 @@ export class SaleService {
         throw Object.assign(new Error('No puedes solicitar anulacion de una venta de otro vendedor.'), { status: 403 });
       }
 
-      const businessDay = getBusinessDay(venta.createdAt.toISOString());
+      const businessDay = getBusinessDay(venta.fechaNegocio.toISOString());
       const cierre = await tx.cierreCaja.findFirst({
         where: {
           fecha: businessDay.start,
           ...sellerBusinessDayScope(venta.usuarioId, venta.sucursalId),
         },
       });
-      if (cierre) {
+      if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
         throw Object.assign(new Error('No se puede solicitar anulacion porque la caja de ese dia ya fue cerrada.'), { status: 409 });
       }
 
@@ -729,29 +858,29 @@ export class SaleService {
         },
       });
 
-      return this.deleteSaleWithTransaction(tx, request.ventaId, request.motivo);
+      return this.deleteSaleWithTransaction(tx, request.ventaId, request.motivo, adminId);
     });
   }
 
-  async deleteSale(id: string, motivo: string = 'Anulación de venta') {
-    return prisma.$transaction((tx) => this.deleteSaleWithTransaction(tx, id, motivo));
+  async deleteSale(id: string, motivo: string = 'Anulación de venta', actorId?: string | null) {
+    return prisma.$transaction((tx) => this.deleteSaleWithTransaction(tx, id, motivo, actorId));
   }
 
-  private async deleteSaleWithTransaction(tx: Prisma.TransactionClient, id: string, motivo: string) {
+  private async deleteSaleWithTransaction(tx: Prisma.TransactionClient, id: string, motivo: string, actorId?: string | null) {
     const venta = await tx.venta.findUnique({
       where: { id },
       include: { detalles: true, remachadoTrabajos: true }
     });
     if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
 
-    const businessDay = getBusinessDay(venta.createdAt.toISOString());
+    const businessDay = getBusinessDay(venta.fechaNegocio.toISOString());
     const cierre = await tx.cierreCaja.findFirst({
       where: {
         fecha: businessDay.start,
         ...sellerBusinessDayScope(venta.usuarioId, venta.sucursalId),
       }
     });
-    if (cierre) {
+    if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
       throw Object.assign(new Error('No se puede anular la venta porque la caja de ese dia ya fue cerrada.'), { status: 409 });
     }
 
@@ -796,7 +925,7 @@ export class SaleService {
                 stockAnterior,
                 stockNuevo,
                 cantidad: detalle.cantidad,
-                usuarioId: venta.usuarioId,
+                usuarioId: actorId || venta.usuarioId,
                 referenciaId: venta.id,
                 referenciaTipo: 'ANULACION',
                 notas: `Venta anulada - Motivo: ${motivo}`
@@ -819,7 +948,7 @@ export class SaleService {
           data: {
             tipo: 'AJUSTE',
             medidaId: trabajo.medidaId,
-            usuarioId: venta.usuarioId,
+            usuarioId: actorId || venta.usuarioId,
             stockAnterior: medida.stockJuegos,
             stockNuevo,
             cantidad: trabajo.cantidadJuegos,
@@ -840,7 +969,7 @@ export class SaleService {
             data: {
               tipo: 'AJUSTE',
               remacheId: trabajo.remacheId,
-              usuarioId: venta.usuarioId,
+              usuarioId: actorId || venta.usuarioId,
               stockAnterior: remache.stock,
               stockNuevo,
               cantidad: trabajo.cantidadRemaches,
@@ -867,13 +996,18 @@ export class SaleService {
 
   async closeCashRegister(data: CloseCashRegisterInput) {
     const summary = await this.getDailySummary(data);
-    if (summary.cierre) {
-      throw Object.assign(new Error('La caja de hoy ya fue cerrada'), { status: 409 });
+    if (summary.cierre && summary.cierre.estado !== CashClosingStatus.OBSERVADO) {
+      throw Object.assign(new Error('La caja ya fue enviada o aprobada'), { status: 409 });
     }
 
     const diferencia = data.montoDeclarado - summary.netos.totalEfectivo;
-    return prisma.cierreCaja.create({
-      data: {
+    const snapshot = {
+      totals: summary.totals,
+      cobrosCredito: summary.cobrosCredito.totals,
+      gastos: summary.gastos.totals,
+      netos: summary.netos,
+    } as Prisma.InputJsonValue;
+    const closingData = {
         fecha: new Date(summary.desde),
         usuarioId: data.usuarioId,
         sucursalId: data.sucursalId,
@@ -896,12 +1030,152 @@ export class SaleService {
         netoQr: summary.netos.totalQr,
         montoDeclarado: data.montoDeclarado,
         diferencia,
-        notas: data.notas,
-      },
+        notas: data.notas || null,
+        estado: CashClosingStatus.PENDIENTE,
+        motivoObservacion: null,
+        notaAdministrador: null,
+        administradorId: null,
+        revisadoAt: null,
+        enviadoAt: new Date(),
+        depositadoBanco: Boolean(data.depositadoBanco),
+        montoDepositado: data.depositadoBanco ? data.montoDepositado : null,
+        fechaDeposito: data.depositadoBanco ? new Date() : null,
+        referenciaDeposito: data.depositadoBanco ? data.referenciaDeposito?.trim() || null : null,
+      } satisfies Prisma.CierreCajaUncheckedCreateInput;
+
+    return prisma.$transaction(async (tx) => {
+      const previous = await tx.cierreCaja.findUnique({
+        where: {
+          fecha_usuarioId_sucursalId: {
+            fecha: new Date(summary.desde),
+            usuarioId: data.usuarioId,
+            sucursalId: data.sucursalId,
+          },
+        },
+      });
+      if (previous && previous.estado !== CashClosingStatus.OBSERVADO) {
+        throw Object.assign(new Error('La caja ya fue enviada o aprobada'), { status: 409 });
+      }
+
+      let closing;
+      if (previous) {
+        const transition = await tx.cierreCaja.updateMany({
+          where: { id: previous.id, estado: CashClosingStatus.OBSERVADO },
+          data: { ...closingData, version: { increment: 1 } },
+        });
+        if (transition.count !== 1) {
+          throw Object.assign(new Error('El cierre ya fue reenviado o procesado en otra sesion'), { status: 409 });
+        }
+        closing = await tx.cierreCaja.findUniqueOrThrow({ where: { id: previous.id } });
+      } else {
+        closing = await tx.cierreCaja.create({ data: closingData });
+      }
+
+      await tx.historialCierreCaja.create({
+        data: {
+          cierreId: closing.id,
+          accion: previous ? CashClosingAction.REENVIADO : CashClosingAction.ENVIADO,
+          actorId: data.usuarioId,
+          comentario: data.notas || null,
+          montoDeclarado: data.montoDeclarado,
+          efectivoEsperado: summary.netos.totalEfectivo,
+          diferencia,
+          version: closing.version,
+          snapshot,
+        },
+      });
+
+      return tx.cierreCaja.findUnique({
+        where: { id: closing.id },
+        include: {
+          usuario: { select: { id: true, nombre: true, email: true } },
+          sucursal: true,
+          administrador: { select: { id: true, nombre: true, email: true } },
+          historial: { include: { actor: { select: { id: true, nombre: true } } }, orderBy: { createdAt: 'asc' } },
+        },
+      });
+    });
+  }
+
+  async getCashClosingsForReview() {
+    return prisma.cierreCaja.findMany({
+      where: { estado: { in: [CashClosingStatus.PENDIENTE, CashClosingStatus.OBSERVADO] } },
       include: {
         usuario: { select: { id: true, nombre: true, email: true } },
         sucursal: true,
+        administrador: { select: { id: true, nombre: true, email: true } },
+        historial: {
+          include: { actor: { select: { id: true, nombre: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
       },
+      orderBy: [{ estado: 'asc' }, { fecha: 'asc' }],
+    });
+  }
+
+  async approveCashClosing(data: ReviewCashClosingInput) {
+    return prisma.$transaction(async (tx) => {
+      const closing = await tx.cierreCaja.findUnique({ where: { id: data.cierreId } });
+      if (!closing) throw Object.assign(new Error('Cierre de caja no encontrado'), { status: 404 });
+      const transition = await tx.cierreCaja.updateMany({
+        where: { id: closing.id, estado: CashClosingStatus.PENDIENTE },
+        data: {
+          estado: CashClosingStatus.APROBADO,
+          administradorId: data.administradorId,
+          notaAdministrador: data.comentario.trim(),
+          motivoObservacion: null,
+          revisadoAt: new Date(),
+        },
+      });
+      if (transition.count !== 1) {
+        throw Object.assign(new Error('El cierre ya fue procesado por otro administrador'), { status: 409 });
+      }
+      await tx.historialCierreCaja.create({
+        data: {
+          cierreId: closing.id,
+          accion: CashClosingAction.APROBADO,
+          actorId: data.administradorId,
+          comentario: data.comentario.trim(),
+          montoDeclarado: closing.montoDeclarado,
+          efectivoEsperado: closing.netoEfectivo,
+          diferencia: closing.diferencia,
+          version: closing.version,
+        },
+      });
+      return tx.cierreCaja.findUniqueOrThrow({ where: { id: closing.id } });
+    });
+  }
+
+  async observeCashClosing(data: ReviewCashClosingInput) {
+    return prisma.$transaction(async (tx) => {
+      const closing = await tx.cierreCaja.findUnique({ where: { id: data.cierreId } });
+      if (!closing) throw Object.assign(new Error('Cierre de caja no encontrado'), { status: 404 });
+      const transition = await tx.cierreCaja.updateMany({
+        where: { id: closing.id, estado: CashClosingStatus.PENDIENTE },
+        data: {
+          estado: CashClosingStatus.OBSERVADO,
+          administradorId: data.administradorId,
+          motivoObservacion: data.comentario.trim(),
+          notaAdministrador: null,
+          revisadoAt: new Date(),
+        },
+      });
+      if (transition.count !== 1) {
+        throw Object.assign(new Error('El cierre ya fue procesado por otro administrador'), { status: 409 });
+      }
+      await tx.historialCierreCaja.create({
+        data: {
+          cierreId: closing.id,
+          accion: CashClosingAction.OBSERVADO,
+          actorId: data.administradorId,
+          comentario: data.comentario.trim(),
+          montoDeclarado: closing.montoDeclarado,
+          efectivoEsperado: closing.netoEfectivo,
+          diferencia: closing.diferencia,
+          version: closing.version,
+        },
+      });
+      return tx.cierreCaja.findUniqueOrThrow({ where: { id: closing.id } });
     });
   }
 }

@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { DebtStatus, Prisma } from '@prisma/client';
+import { CashClosingStatus, DebtStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
 type CustomerInput = {
@@ -44,6 +44,17 @@ function getBusinessDay(dateValue?: string | null) {
 }
 
 export class CustomerService {
+  private async refreshOverdueAccounts() {
+    await prisma.cuentaCobrar.updateMany({
+      where: {
+        saldo: { gt: 0 },
+        fechaVencimiento: { lt: new Date() },
+        estado: { in: [DebtStatus.PENDIENTE, DebtStatus.PARCIAL] },
+      },
+      data: { estado: DebtStatus.VENCIDA },
+    });
+  }
+
   private includeSummary = {
     ventas: {
       orderBy: { createdAt: 'desc' },
@@ -59,6 +70,7 @@ export class CustomerService {
   } satisfies Prisma.ClienteInclude;
 
   async getAll(params: { search?: string; activo?: boolean }) {
+    await this.refreshOverdueAccounts();
     const where: Prisma.ClienteWhereInput = {};
     if (params.activo !== undefined) where.activo = params.activo;
     if (params.search) {
@@ -82,6 +94,7 @@ export class CustomerService {
   }
 
   async getById(id: string) {
+    await this.refreshOverdueAccounts();
     const cliente = await prisma.cliente.findUnique({
       where: { id },
       include: {
@@ -203,14 +216,28 @@ export class CustomerService {
       const cuenta = await tx.cuentaCobrar.findUnique({ where: { id: cuentaId } });
       if (!cuenta) throw Object.assign(new Error('Cuenta por cobrar no encontrada'), { status: 404 });
       const businessDay = getBusinessDay();
-      const cierre = await tx.cierreCaja.findFirst({
-        where: {
-          fecha: businessDay.start,
-          usuarioId: data.usuarioId,
-          sucursalId: cuenta.sucursalId,
-        },
-      });
-      if (cierre) {
+      const [cierre, previousObserved] = await Promise.all([
+        tx.cierreCaja.findFirst({
+          where: {
+            fecha: businessDay.start,
+            usuarioId: data.usuarioId,
+            sucursalId: cuenta.sucursalId,
+          },
+        }),
+        tx.cierreCaja.findFirst({
+          where: {
+            usuarioId: data.usuarioId,
+            sucursalId: cuenta.sucursalId,
+            fecha: { lt: businessDay.start },
+            estado: CashClosingStatus.OBSERVADO,
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (previousObserved) {
+        throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar cobros de hoy.'), { status: 409 });
+      }
+      if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
         throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar cobros de credito.'), { status: 409 });
       }
       if (data.monto > cuenta.saldo) {
@@ -227,6 +254,7 @@ export class CustomerService {
           monto: data.monto,
           metodoPago: data.metodoPago,
           usuarioId: data.usuarioId,
+          fechaNegocio: businessDay.start,
           notas: data.notas,
         },
       });
