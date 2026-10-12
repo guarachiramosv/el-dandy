@@ -51,6 +51,7 @@ const formatInventoryQuantity = (value: number) => {
   if (!Number.isFinite(value)) return "0";
   return Number.isInteger(value) ? value.toLocaleString("es-BO") : value.toLocaleString("es-BO", { maximumFractionDigits: 2 });
 };
+const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
 
 const getBranchStocks = (item: ProductInventoryReport["items"][number]) => {
   const branches = item.stockSucursales?.length
@@ -69,58 +70,6 @@ const getBranchStockValue = (item: ProductInventoryReport["items"][number], bran
   const target = branchName.trim().toLowerCase();
   const branch = getBranchStocks(item).find((itemBranch) => itemBranch.name.trim().toLowerCase() === target);
   return branch?.stock ?? 0;
-};
-
-const currentInventoryReportFromProducts = (products: Product[]): ProductInventoryReport => {
-  const now = new Date().toISOString();
-  const items = products.map((product) => ({
-    productoId: product.id,
-    codigo: product.codigo,
-    codigoRepuesto: product.codigoRepuesto,
-    descripcion: product.descripcion,
-    marca: product.marca,
-    condicion: product.condicion,
-    categoria: product.categoria?.nombre || "Sin categoria",
-    sucursal: product.sucursal?.nombre || "Sin sucursal",
-    sucursalId: product.sucursalId,
-    ubicacion: product.ubicacion,
-    precioVenta: salePriceValue(product),
-    fechaAgregado: product.createdAt,
-    agregadoEnPeriodo: false,
-    stockAlAgregar: null,
-    stockInicial: product.stock,
-    ingresados: 0,
-    vendidos: 0,
-    editados: 0,
-    otrosMovimientos: 0,
-    stockActual: product.stock,
-    stockMinimo: product.stockMinimo || 0,
-    stockSucursales: product.stockSucursales?.map((stock) => ({
-      sucursalId: stock.sucursalId,
-      sucursal: stock.sucursal?.nombre || "Sucursal",
-      stock: stock.stock,
-      fechaAgregado: stock.createdAt || product.createdAt,
-    })) || [],
-    movimientos: [],
-  }));
-  const stockActual = items.reduce((sum, item) => sum + item.stockActual, 0);
-
-  return {
-    period: "all",
-    label: "Inventario actual",
-    desde: now,
-    hasta: now,
-    totals: {
-      productos: items.length,
-      stockInicial: stockActual,
-      ingresados: 0,
-      vendidos: 0,
-      editados: 0,
-      otrosMovimientos: 0,
-      stockActual,
-    },
-    items,
-  };
 };
 
 const sanitizePdfText = (value: string) =>
@@ -411,11 +360,14 @@ export default function Inventario() {
   useEffect(() => {
     if (!selectedOrigin || !destino) return;
     const stillValid = destinationOptions.some((branch) => branch.sucursalId === destino);
-    if (!stillValid) setDestino("");
+    if (stillValid) return;
+    const clearDestination = window.setTimeout(() => setDestino(""), 0);
+    return () => window.clearTimeout(clearDestination);
   }, [destinationOptions, destino, selectedOrigin]);
 
   useEffect(() => {
-    setDestinationSearch("");
+    const clearSearch = window.setTimeout(() => setDestinationSearch(""), 0);
+    return () => window.clearTimeout(clearSearch);
   }, [origen]);
 
   const getCoverImage = (product: Product) => product.imagenes?.[0]?.url || product.imagen;
@@ -426,10 +378,6 @@ export default function Inventario() {
     ].filter((url): url is string => Boolean(url));
     return Array.from(new Set(urls)).map((url) => productImageUrl(url)).filter((url): url is string => Boolean(url));
   };
-  const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
-  const productTransferLabel = (product: Product) =>
-    `${product.codigo} - ${product.descripcion} - ${product.sucursal?.nombre || "Sucursal"} - Estante ${inventoryShelf(product.ubicacion)} - Stock ${product.stock} ${getUnitLabel(product)}`;
-
   const sendToPointOfSale = (product: Product) => {
     if (!isSeller) return;
     if (product.stock <= 0) {
@@ -887,8 +835,6 @@ function ProductDetailModal({
   useEffect(() => {
     if (isSeller) return;
     let active = true;
-    setHistoryLoading(true);
-    setHistoryError(null);
     fetchProductHistory(product.id)
       .then((data) => { if (active) setHistory(data); })
       .catch((error: unknown) => { if (active) setHistoryError(getErrorMessage(error)); })

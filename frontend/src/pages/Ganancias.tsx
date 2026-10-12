@@ -41,7 +41,8 @@ export default function Ganancias() {
   }, [month, sucursalId]);
 
   useEffect(() => {
-    void loadReport();
+    const initialLoad = window.setTimeout(() => void loadReport(), 0);
+    return () => window.clearTimeout(initialLoad);
   }, [loadReport]);
 
   const selectedBranch = sucursales.find((branch) => branch.id === sucursalId)?.nombre || "Todas las sucursales";

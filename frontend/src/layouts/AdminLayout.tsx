@@ -40,11 +40,12 @@ export default function AdminLayout() {
   }, []);
 
   useEffect(() => {
-    void loadNotifications();
+    const initialLoad = window.setTimeout(() => void loadNotifications(), 0);
     const interval = window.setInterval(() => void loadNotifications(), 45000);
     const refreshOnFocus = () => void loadNotifications();
     window.addEventListener("focus", refreshOnFocus);
     return () => {
+      window.clearTimeout(initialLoad);
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
     };

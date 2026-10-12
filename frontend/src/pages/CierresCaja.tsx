@@ -25,7 +25,10 @@ export default function CierresCaja() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [load]);
 
   const review = async (closing: CashClosing, action: "approve" | "observe") => {
     const comentario = comments[closing.id]?.trim() || "";

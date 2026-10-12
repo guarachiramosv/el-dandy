@@ -197,7 +197,7 @@ function buildCashClosingText(
   options: { declaredCash?: number; notes?: string | null } = {},
 ) {
   const closing = summary.cierre;
-  const { time } = formatDateParts(closing?.createdAt);
+  const { time } = formatDateParts(closing?.enviadoAt || closing?.createdAt);
   const grossCash = summary.totals.totalEfectivo || 0;
   const grossQr = summary.totals.totalQr || 0;
   const creditPayments = summary.cobrosCredito?.totals || { totalCobrosCredito: 0, totalEfectivo: 0, totalTransferencia: 0, totalQr: 0, totalTarjeta: 0 };
@@ -211,15 +211,29 @@ function buildCashClosingText(
   const discountTotal = salesDiscountTotal(summary);
   const subtotalSales = salesSubtotal(summary);
   const expensesDetail = expenseItems(summary);
+  const closingState = closing?.estado || "PENDIENTE";
+  const closingVersion = closing?.version || 1;
+  const printedAt = formatDateParts();
+  const statusTitle = closingState === "APROBADO"
+    ? "CIERRE APROBADO"
+    : closingState === "OBSERVADO"
+      ? "CIERRE OBSERVADO - NO VIGENTE"
+      : "PENDIENTE DE REVISION";
 
   const lines = [
     repeat("="),
     center("EL DANDY"),
     center("CIERRE DE CAJA"),
     repeat("="),
+    center(statusTitle),
+    center(`VERSION ${closingVersion}`),
+    ...(closingState === "PENDIENTE" ? [center("COMPROBANTE NO DEFINITIVO")] : []),
+    repeat("="),
+    ...(closing?.id ? [`ID: ${closing.id}`] : []),
     lineBetween(`Fecha: ${summary.fecha}`, `Hora: ${time}`),
-    `Vendedor: ${normalizeText(fallbackSellerName || "Vendedor")}`,
-    `Estado: ${summary.cerrado ? "CERRADO" : "PRECIERRE"}`,
+    lineBetween(`Impreso: ${printedAt.date}`, printedAt.time),
+    `Vendedor: ${normalizeText(closing?.usuario?.nombre || fallbackSellerName || "Vendedor")}`,
+    `Estado: ${closingState}`,
     repeat("-"),
     lineBetween("Ventas:", String(summary.totals.cantidadVentas || 0)),
   ];
@@ -267,6 +281,13 @@ function buildCashClosingText(
     center(money(declaredCash)),
   );
 
+  if (closing?.depositadoBanco) {
+    lines.push(
+      lineBetween("Depositado banco:", money(closing.montoDepositado || 0)),
+      ...(closing.referenciaDeposito ? wrapText(`Ref: ${closing.referenciaDeposito}`, TICKET_WIDTH) : []),
+    );
+  }
+
   lines.push(repeat("-"), center("DETALLE GASTOS"));
   if (expensesDetail.length === 0) {
     lines.push(center("Sin gastos registrados"));
@@ -287,6 +308,29 @@ function buildCashClosingText(
   if (notes) {
     lines.push(repeat("-"), "Nota:");
     wrapText(notes, TICKET_WIDTH).forEach((line) => lines.push(line));
+  }
+
+  if (closingState === "APROBADO") {
+    lines.push(
+      repeat("="),
+      center("DOCUMENTO DEFINITIVO"),
+      ...(closing?.administrador?.nombre ? wrapText(`Aprobado por: ${closing.administrador.nombre}`, TICKET_WIDTH) : []),
+      ...(closing?.revisadoAt ? wrapText(`Aprobado: ${formatDateParts(closing.revisadoAt).date} ${formatDateParts(closing.revisadoAt).time}`, TICKET_WIDTH) : []),
+      ...(closing?.notaAdministrador ? wrapText(`Nota admin: ${closing.notaAdministrador}`, TICKET_WIDTH) : []),
+    );
+  } else if (closingState === "PENDIENTE") {
+    lines.push(
+      repeat("="),
+      center("RESPALDO PROVISIONAL"),
+      center(`VALIDO SOLO PARA VERSION ${closingVersion}`),
+      ...wrapText("Si el cierre es observado y corregido, esta impresion queda reemplazada.", TICKET_WIDTH).map(center),
+    );
+  } else {
+    lines.push(
+      repeat("="),
+      center("ESTA VERSION NO ES VIGENTE"),
+      ...wrapText("Corrija el cierre, reenvielo e imprima la nueva version.", TICKET_WIDTH).map(center),
+    );
   }
 
   lines.push(

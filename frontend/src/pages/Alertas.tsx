@@ -43,22 +43,24 @@ export default function Alertas() {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
-
-    fetchStockAlerts()
-      .then((data) => {
-        if (active) setAlerts(data);
-      })
-      .catch((err: unknown) => {
-        if (active) setError(getErrorMessage(err));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const initialLoad = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      fetchStockAlerts()
+        .then((data) => {
+          if (active) setAlerts(data);
+        })
+        .catch((err: unknown) => {
+          if (active) setError(getErrorMessage(err));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 0);
 
     return () => {
       active = false;
+      window.clearTimeout(initialLoad);
     };
   }, []);
 

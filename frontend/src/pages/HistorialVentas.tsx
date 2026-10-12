@@ -91,24 +91,36 @@ export default function HistorialVentas() {
   }, [loadSummary]);
 
   useEffect(() => {
-    if (pendingDate && pendingDate !== reportDate) setReportDate(pendingDate);
+    if (!pendingDate || pendingDate === reportDate) return;
+    const updateDate = window.setTimeout(() => setReportDate(pendingDate), 0);
+    return () => window.clearTimeout(updateDate);
   }, [pendingDate, reportDate]);
 
   useEffect(() => {
     if (!requestedSaleId || !summary) return;
     const requestedSale = summary.ventas.find((sale) => sale.id === requestedSaleId);
-    if (requestedSale) setSelectedSale(requestedSale);
+    if (!requestedSale) return;
+    const openSale = window.setTimeout(() => setSelectedSale(requestedSale), 0);
+    return () => window.clearTimeout(openSale);
   }, [requestedSaleId, summary]);
 
   const handleCloseCash = async () => {
     setMessage(null);
+    const parsedDeposit = parseMoneyInput(depositAmount);
+    if (depositToBank && (!Number.isFinite(parsedDeposit) || parsedDeposit <= 0)) {
+      return setMessage("Indica el monto que se depositó al banco.");
+    }
+    if (!summary) return setMessage("No se pudo preparar el cierre para impresión.");
+
+    // Se abre durante el clic para evitar que el navegador bloquee la impresión
+    // después de esperar la respuesta del servidor.
+    const printWindow = window.open("", "_blank", "width=360,height=720");
+    if (!printWindow) {
+      return setMessage("Habilita las ventanas emergentes para enviar e imprimir el cierre.");
+    }
+
     setClosingCash(true);
     try {
-      const parsedDeposit = parseMoneyInput(depositAmount);
-      if (depositToBank && (!Number.isFinite(parsedDeposit) || parsedDeposit <= 0)) {
-        setClosingCash(false);
-        return setMessage("Indica el monto que se depositó al banco.");
-      }
       const closing = await closeCashRegister({
         fecha: reportDate,
         montoDeclarado: declaredCash,
@@ -117,9 +129,32 @@ export default function HistorialVentas() {
         montoDepositado: depositToBank ? parsedDeposit : null,
         referenciaDeposito: depositToBank ? depositReference.trim() || null : null,
       });
-      setMessage(`Cierre enviado a revisión. Diferencia: ${money(closing.diferencia)}.`);
+      const printableSummary: DailySalesSummary = {
+        ...summary,
+        cerrado: true,
+        estadoCaja: closing.estado,
+        cierre: closing,
+      };
+      let printPrepared = false;
+      if (!printWindow.closed) {
+        try {
+          printWindow.document.open();
+          printWindow.document.write(buildThermalCashClosingHtml(printableSummary, user?.nombre || "", {
+            declaredCash,
+            notes: closeNotes || null,
+          }));
+          printWindow.document.close();
+          printPrepared = true;
+        } catch {
+          // El cierre ya fue guardado; el vendedor puede usar el boton de reimpresion.
+        }
+      }
+      setMessage(printPrepared
+        ? `Cierre enviado a revisión e impresión de la versión ${closing.version || 1} preparada. Diferencia: ${money(closing.diferencia)}.`
+        : `Cierre enviado a revisión. No se abrió la impresión; usa "Reimprimir comprobante pendiente" para imprimir la versión ${closing.version || 1}.`);
       await loadSummary();
     } catch (err: unknown) {
+      printWindow.close();
       setMessage(getErrorMessage(err));
     } finally {
       setClosingCash(false);
@@ -185,8 +220,8 @@ export default function HistorialVentas() {
 
   const printCashClosing = () => {
     if (!summary) return;
-    if (!summary.cierre || summary.cierre.estado !== "APROBADO") {
-      return setMessage("El administrador debe aprobar el cierre antes de imprimir el reporte definitivo.");
+    if (!summary.cierre || summary.cierre.estado === "OBSERVADO") {
+      return setMessage("El cierre observado debe corregirse y reenviarse antes de imprimir una nueva versión.");
     }
     const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
@@ -610,13 +645,20 @@ export default function HistorialVentas() {
             {summary?.cerrado ? (
               <>
                 <ClosedCashBox closing={summary.cierre} />
-                {summary.cierre?.estado === "APROBADO" && <button
+                {summary.cierre && summary.cierre.estado !== "OBSERVADO" && <button
                   type="button"
                   onClick={printCashClosing}
                   className="btn-primary w-full flex items-center justify-center gap-2"
                 >
-                  <Printer size={18} /> Imprimir cierre 80mm
+                  <Printer size={18} /> {summary.cierre.estado === "APROBADO"
+                    ? `Imprimir cierre aprobado · versión ${summary.cierre.version || 1}`
+                    : `Reimprimir comprobante pendiente · versión ${summary.cierre.version || 1}`}
                 </button>}
+                {summary.cierre?.estado === "PENDIENTE" && (
+                  <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
+                    Conserva la impresión pendiente. Si el administrador devuelve este cierre, esta versión dejará de ser vigente y al reenviarlo se imprimirá una nueva.
+                  </div>
+                )}
               </>
             ) : (
               <div className="grid gap-2">
@@ -672,8 +714,9 @@ export default function HistorialVentas() {
 function ClosedCashBox({ closing }: { closing?: CashClosing | null }) {
   const state = closing?.estado || "PENDIENTE";
   return (
-    <div className={`space-y-1 rounded-lg border p-3 text-sm ${state === "APROBADO" ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-blue-500/30 bg-blue-500/10 text-blue-200"}`}>
-      <p className="font-bold">Estado: {state}</p>
+    <div className={`space-y-1 rounded-lg border p-3 text-sm ${state === "APROBADO" ? "border-green-500/30 bg-green-500/10 text-green-200" : state === "OBSERVADO" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-blue-500/30 bg-blue-500/10 text-blue-200"}`}>
+      <p className="font-bold">Estado: {state} · Versión {closing?.version || 1}</p>
+      {closing?.id && <p className="font-mono text-xs">ID: {closing.id}</p>}
       <p>Declarado con {money(closing?.montoDeclarado || 0)} en caja.</p>
       <p>Cobros de credito {money(closing?.totalCobrosCredito || 0)}.</p>
       <p>Efectivo neto esperado {money(closing?.netoEfectivo ?? closing?.totalEfectivo ?? 0)}.</p>
