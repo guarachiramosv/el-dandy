@@ -77,6 +77,7 @@ export const reviewCashClosingSchema = z.object({
 export const createCashExpenseSchema = z.object({
   usuarioId: z.string().uuid('Usuario invalido').optional(),
   sucursalId: z.string().uuid('Sucursal invalida').optional(),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de gasto invalida').optional().nullable(),
   motivo: z.string().trim().min(2, 'Motivo requerido').max(160, 'Motivo demasiado largo'),
   monto: z.number().positive('Monto debe ser mayor a cero'),
   metodoPago: z.enum(['EFECTIVO', 'QR']),

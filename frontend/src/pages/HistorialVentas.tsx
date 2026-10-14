@@ -17,6 +17,11 @@ const formatDateTime = (value: string) =>
 const formatDateOnly = (value?: string | null) =>
   value ? new Date(value).toLocaleDateString("es-BO", { timeZone: "America/La_Paz" }) : "-";
 
+const formatInputDate = (value: string) => {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
+};
+
 const defaultDay = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/La_Paz",
   year: "numeric",
@@ -167,12 +172,15 @@ export default function HistorialVentas() {
     const monto = parseMoneyInput(expenseAmount);
     if (!motivo) return setMessage("Indica para que se saco dinero.");
     if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
-    if (reportDate !== defaultDay) return setMessage("Los gastos históricos no se pueden registrar desde esta pantalla.");
-    if (summary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
+    if (reportDate !== defaultDay && summary?.estadoCaja !== "OBSERVADO") {
+      return setMessage("Para agregar un gasto histórico, el administrador debe reabrir primero ese cierre.");
+    }
+    if (summary?.cerrado) return setMessage("La caja de este dia ya fue cerrada.");
 
     setSavingExpense(true);
     try {
       await createCashExpense({
+        fecha: reportDate,
         motivo,
         monto,
         metodoPago: expenseMethod,
@@ -182,7 +190,7 @@ export default function HistorialVentas() {
       setExpenseAmount("");
       setExpenseMethod("EFECTIVO");
       setExpenseNotes("");
-      setMessage("Gasto registrado correctamente.");
+      setMessage(reportDate === defaultDay ? "Gasto registrado correctamente." : `Gasto agregado a la caja del ${reportDate}.`);
       await loadSummary();
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
@@ -306,6 +314,8 @@ export default function HistorialVentas() {
   const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr + creditPaymentTotals.totalQr - expenseTotals.totalQr, 0);
   const difference = declaredCash - expectedCash;
   const pendingVoidRequests = (summary?.ventas || []).filter((sale) => sale.solicitudAnulacion?.estado === "PENDIENTE");
+  const isHistoricalDay = reportDate !== defaultDay;
+  const canEditExpenses = !summary?.cerrado && (!isHistoricalDay || summary?.estadoCaja === "OBSERVADO");
 
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
 
@@ -434,16 +444,21 @@ export default function HistorialVentas() {
             <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h4 className="font-semibold text-white flex items-center gap-2">
-                  <ReceiptText size={18} className="text-amber-300" /> Gastos del dia
+                  <ReceiptText size={18} className="text-amber-300" /> Gastos del {formatInputDate(reportDate)}
                 </h4>
                 <span className="text-sm font-semibold text-amber-200">{money(expenseTotals.totalGastos)}</span>
               </div>
+              {isHistoricalDay && summary?.estadoCaja === "OBSERVADO" && (
+                <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-100">
+                  Los gastos que añadas aquí se guardarán en la caja del {formatInputDate(reportDate)}, no en la caja de hoy.
+                </div>
+              )}
               <div className="grid gap-3 md:grid-cols-[1fr_150px_180px]">
                 <input
                   type="text"
                   value={expenseReason}
                   onChange={(event) => setExpenseReason(event.target.value)}
-                  disabled={summary?.cerrado}
+                  disabled={!canEditExpenses}
                   placeholder="Para que se saco dinero..."
                   className="premium-input"
                 />
@@ -455,7 +470,7 @@ export default function HistorialVentas() {
                     const value = event.target.value;
                     if (moneyInputPattern.test(value)) setExpenseAmount(value);
                   }}
-                  disabled={summary?.cerrado}
+                  disabled={!canEditExpenses}
                   placeholder="Cuanto gasto"
                   aria-label="Cuanto gasto"
                   className="premium-input"
@@ -466,7 +481,7 @@ export default function HistorialVentas() {
                       key={method}
                       type="button"
                       onClick={() => setExpenseMethod(method)}
-                      disabled={summary?.cerrado}
+                      disabled={!canEditExpenses}
                       className={`rounded-lg border px-3 py-2 text-sm font-semibold transition disabled:opacity-60 ${
                         expenseMethod === method
                           ? "border-amber-400/60 bg-amber-400/15 text-amber-100"
@@ -483,16 +498,16 @@ export default function HistorialVentas() {
                   type="text"
                   value={expenseNotes}
                   onChange={(event) => setExpenseNotes(event.target.value)}
-                  disabled={summary?.cerrado}
+                  disabled={!canEditExpenses}
                   placeholder="Nota opcional"
                   className="premium-input"
                 />
                 <button
                   onClick={handleAddExpense}
-                  disabled={savingExpense || summary?.cerrado}
+                  disabled={savingExpense || !canEditExpenses}
                   className="btn-secondary flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  <Plus size={18} /> {savingExpense ? "Guardando..." : "Agregar gasto"}
+                  <Plus size={18} /> {savingExpense ? "Guardando..." : `Añadir gasto al ${formatInputDate(reportDate)}`}
                 </button>
               </div>
 

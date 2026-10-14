@@ -26,8 +26,9 @@ export default function SellerLayout() {
   const [pendingClosings, setPendingClosings] = useState<PendingCashClosing[]>([]);
   const user = getCurrentUser();
   const priorityClosing = [...pendingClosings].sort((a, b) => {
-    if (a.estado === "OBSERVADO" && b.estado !== "OBSERVADO") return -1;
-    if (b.estado === "OBSERVADO" && a.estado !== "OBSERVADO") return 1;
+    const priority = { OBSERVADO: 0, SIN_ENVIAR: 1, PENDIENTE: 2, APROBADO: 3 } as const;
+    const stateDifference = priority[a.estado] - priority[b.estado];
+    if (stateDifference !== 0) return stateDifference;
     return b.fecha.localeCompare(a.fecha);
   })[0];
 
@@ -153,9 +154,15 @@ export default function SellerLayout() {
                 <div className="flex gap-3">
                   <AlertTriangle className="mt-0.5 shrink-0 text-red-300" size={24} />
                   <div>
-                    <p className="font-black uppercase tracking-wide text-red-100">{priorityClosing.estado === "OBSERVADO" ? "Caja observada: requiere corrección" : "Caja pendiente de cierre"}</p>
+                    <p className="font-black uppercase tracking-wide text-red-100">
+                      {priorityClosing.estado === "OBSERVADO"
+                        ? "Caja observada: requiere corrección"
+                        : priorityClosing.estado === "PENDIENTE"
+                          ? "Cierre enviado: pendiente de aprobación"
+                          : "Caja pendiente de cierre"}
+                    </p>
                     <p className="mt-1 text-sm text-red-100/90">
-                      Tienes una caja {priorityClosing.estado === "OBSERVADO" ? "devuelta" : "sin terminar"} del {priorityClosing.fecha}.
+                      Tienes una caja {priorityClosing.estado === "OBSERVADO" ? "devuelta" : priorityClosing.estado === "PENDIENTE" ? "en revisión" : "sin terminar"} del {priorityClosing.fecha}.
                       {pendingClosings.length > 1 ? ` Hay ${pendingClosings.length} dias pendientes.` : ""}
                     </p>
                     {priorityClosing.motivoObservacion && <p className="mt-1 text-sm font-semibold text-amber-200">Motivo: {priorityClosing.motivoObservacion}</p>}

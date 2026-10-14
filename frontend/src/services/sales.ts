@@ -38,8 +38,10 @@ export const closeCashRegister = async (input: {
   return response.data.data;
 };
 
-export const fetchCashClosingsForReview = async (): Promise<CashClosing[]> => {
-  const response = await api.get<{ success: boolean; data: CashClosing[] }>('/sales/cash-closings/review');
+export const fetchCashClosingsForReview = async (month?: string): Promise<CashClosing[]> => {
+  const response = await api.get<{ success: boolean; data: CashClosing[] }>('/sales/cash-closings/review', {
+    params: month ? { mes: month } : undefined,
+  });
   return response.data.data;
 };
 
@@ -54,6 +56,7 @@ export const observeCashClosing = async (id: string, comentario: string): Promis
 };
 
 export const createCashExpense = async (input: {
+  fecha?: string | null;
   motivo: string;
   monto: number;
   metodoPago: 'EFECTIVO' | 'QR';

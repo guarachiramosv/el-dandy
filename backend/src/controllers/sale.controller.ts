@@ -73,8 +73,9 @@ export const getPendingCashClosings = asyncHandler(async (req: Request, res: Res
   res.json({ success: true, data });
 });
 
-export const getCashClosingsForReview = asyncHandler(async (_req: Request, res: Response) => {
-  res.json({ success: true, data: await service.getCashClosingsForReview() });
+export const getCashClosingsForReview = asyncHandler(async (req: Request, res: Response) => {
+  const month = typeof req.query.mes === 'string' ? req.query.mes : undefined;
+  res.json({ success: true, data: await service.getCashClosingsForReview(month) });
 });
 
 export const approveCashClosing = asyncHandler(async (req: Request, res: Response) => {

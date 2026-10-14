@@ -50,6 +50,7 @@ type ReviewCashClosingInput = {
 type CreateCashExpenseInput = {
   usuarioId: string;
   sucursalId: string;
+  fecha?: string | null;
   motivo: string;
   monto: number;
   metodoPago: 'EFECTIVO' | 'QR';
@@ -721,7 +722,9 @@ export class SaleService {
   }
 
   async createCashExpense(data: CreateCashExpenseInput) {
-    const businessDay = getBusinessDay();
+    const today = getBusinessDay();
+    const businessDay = getBusinessDay(data.fecha);
+    const isHistoricalCorrection = businessDay.label !== today.label;
     const [cierre, previousObserved] = await Promise.all([
       prisma.cierreCaja.findFirst({
         where: {
@@ -733,19 +736,23 @@ export class SaleService {
         where: {
           usuarioId: data.usuarioId,
           sucursalId: data.sucursalId,
-          fecha: { lt: businessDay.start },
+          fecha: { lt: today.start },
           estado: CashClosingStatus.OBSERVADO,
         },
         select: { id: true },
       }),
     ]);
 
-    if (previousObserved) {
+    if (isHistoricalCorrection && cierre?.estado !== CashClosingStatus.OBSERVADO) {
+      throw Object.assign(new Error('Solo se pueden agregar gastos historicos a un cierre observado por el administrador.'), { status: 409 });
+    }
+
+    if (!isHistoricalCorrection && previousObserved) {
       throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar gastos de hoy.'), { status: 409 });
     }
 
     if (cierre && cierre.estado !== CashClosingStatus.OBSERVADO) {
-      throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar mas gastos.'), { status: 409 });
+      throw Object.assign(new Error('La caja de ese dia ya fue cerrada. No se pueden registrar mas gastos.'), { status: 409 });
     }
 
     return prisma.gastoCaja.create({
@@ -1097,9 +1104,26 @@ export class SaleService {
     });
   }
 
-  async getCashClosingsForReview() {
+  async getCashClosingsForReview(month?: string) {
+    let dateFilter: Prisma.DateTimeFilter | undefined;
+    if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) {
+        throw Object.assign(new Error('Mes de cierres invalido'), { status: 400 });
+      }
+      const [year, monthNumber] = month.split('-').map(Number);
+      if (monthNumber < 1 || monthNumber > 12) {
+        throw Object.assign(new Error('Mes de cierres invalido'), { status: 400 });
+      }
+      dateFilter = {
+        gte: new Date(Date.UTC(year, monthNumber - 1, 1, BOLIVIA_UTC_OFFSET_HOURS)),
+        lt: new Date(Date.UTC(year, monthNumber, 1, BOLIVIA_UTC_OFFSET_HOURS)),
+      };
+    }
+
     return prisma.cierreCaja.findMany({
-      where: { estado: { in: [CashClosingStatus.PENDIENTE, CashClosingStatus.OBSERVADO] } },
+      where: month
+        ? { fecha: dateFilter }
+        : { estado: { in: [CashClosingStatus.PENDIENTE, CashClosingStatus.OBSERVADO] } },
       include: {
         usuario: { select: { id: true, nombre: true, email: true } },
         sucursal: true,
@@ -1109,7 +1133,7 @@ export class SaleService {
           orderBy: { createdAt: 'asc' },
         },
       },
-      orderBy: [{ estado: 'asc' }, { fecha: 'asc' }],
+      orderBy: [{ fecha: 'desc' }, { estado: 'asc' }],
     });
   }
 
@@ -1151,7 +1175,10 @@ export class SaleService {
       const closing = await tx.cierreCaja.findUnique({ where: { id: data.cierreId } });
       if (!closing) throw Object.assign(new Error('Cierre de caja no encontrado'), { status: 404 });
       const transition = await tx.cierreCaja.updateMany({
-        where: { id: closing.id, estado: CashClosingStatus.PENDIENTE },
+        where: {
+          id: closing.id,
+          estado: { in: [CashClosingStatus.PENDIENTE, CashClosingStatus.APROBADO] },
+        },
         data: {
           estado: CashClosingStatus.OBSERVADO,
           administradorId: data.administradorId,
@@ -1161,7 +1188,7 @@ export class SaleService {
         },
       });
       if (transition.count !== 1) {
-        throw Object.assign(new Error('El cierre ya fue procesado por otro administrador'), { status: 409 });
+        throw Object.assign(new Error('El cierre ya fue observado o procesado por otro administrador'), { status: 409 });
       }
       await tx.historialCierreCaja.create({
         data: {
