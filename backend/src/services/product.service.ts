@@ -154,7 +154,7 @@ const buildProductChanges = (before: Record<string, unknown>, after: Record<stri
   });
 
 type PurchaseStockInput = {
-  proveedorId: string;
+  proveedorId?: string | null;
   precioCompraUnitario: number;
   precioCompraUnitarioReales: number;
   tipoCambio: number;
@@ -386,7 +386,9 @@ export class ProductService {
       ? initialPurchase.cantidad
       : typeof data.stock === 'number' ? data.stock : 0;
     const initialUnitCostBs = initialPurchase
-      ? roundCurrency(initialPurchase.precioCompraUnitarioReales * initialPurchase.tipoCambio)
+      ? initialPurchase.precioCompraUnitarioReales > 0
+        ? roundCurrency(initialPurchase.precioCompraUnitarioReales * initialPurchase.tipoCambio)
+        : roundCurrency(initialPurchase.precioCompraUnitario)
       : 0;
     
     // Remove deletedImageUrls so it's not passed to Prisma during creation
@@ -396,11 +398,11 @@ export class ProductService {
       createData.precioCompra = initialUnitCostBs;
       createData.precioCompraReales = initialPurchase.precioCompraUnitarioReales;
       createData.tipoCambioCompra = initialPurchase.tipoCambio;
-      createData.proveedorId = initialPurchase.proveedorId;
+      createData.proveedorId = initialPurchase.proveedorId || null;
     }
 
     return prisma.$transaction(async (tx) => {
-      if (initialPurchase) {
+      if (initialPurchase?.proveedorId) {
         if (!usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra inicial'), { status: 401 });
         const provider = await tx.proveedor.findFirst({
           where: { id: initialPurchase.proveedorId, activo: true },
@@ -421,7 +423,7 @@ export class ProductService {
           ubicacion: product.ubicacion,
         },
       });
-      const initialPurchaseRecord = initialPurchase && usuarioId
+      const initialPurchaseRecord = initialPurchase?.proveedorId && usuarioId
         ? await purchaseRecordService.create(tx, {
             proveedorId: initialPurchase.proveedorId,
             sucursalId: data.sucursalId,
@@ -440,7 +442,7 @@ export class ProductService {
         : null;
       if (initialStock > 0) {
         await stockService.recordMovement(tx, {
-          tipoMovimiento: initialPurchase ? 'COMPRA' : 'AJUSTE',
+          tipoMovimiento: initialPurchase?.proveedorId ? 'COMPRA' : 'AJUSTE',
           productoId: product.id,
           sucursalId: data.sucursalId,
           stockAnterior: 0,
@@ -456,7 +458,7 @@ export class ProductService {
           comprobante: initialPurchase?.comprobante?.trim() || null,
           usuarioId,
           referenciaId: initialPurchaseRecord?.id,
-          referenciaTipo: initialPurchase ? 'COMPRA' : 'ALTA_PRODUCTO',
+          referenciaTipo: initialPurchase?.proveedorId ? 'COMPRA' : 'ALTA_PRODUCTO',
           notas: initialPurchase?.notas?.trim() || 'Stock inicial al crear producto',
         });
       }
@@ -647,7 +649,9 @@ export class ProductService {
     notas?: string | null;
   }) {
     const product = await prisma.$transaction(async (tx) => {
-      const precioCompraUnitarioBs = roundCurrency(data.precioCompraUnitarioReales * data.tipoCambio);
+      const precioCompraUnitarioBs = data.precioCompraUnitarioReales > 0
+        ? roundCurrency(data.precioCompraUnitarioReales * data.tipoCambio)
+        : roundCurrency(data.precioCompraUnitario);
       const current = await tx.producto.findUnique({
         where: { id },
         include: { stockSucursales: true },
@@ -655,12 +659,13 @@ export class ProductService {
       if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
       if (data.cantidad > 0) {
         if (!data.usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra'), { status: 401 });
-        if (!data.proveedorId) throw Object.assign(new Error('Proveedor es requerido para registrar una compra'), { status: 400 });
-        const provider = await tx.proveedor.findFirst({
-          where: { id: data.proveedorId, activo: true },
-          select: { id: true },
-        });
-        if (!provider) throw Object.assign(new Error('Proveedor no encontrado o inactivo'), { status: 404 });
+        if (data.proveedorId) {
+          const provider = await tx.proveedor.findFirst({
+            where: { id: data.proveedorId, activo: true },
+            select: { id: true },
+          });
+          if (!provider) throw Object.assign(new Error('Proveedor no encontrado o inactivo'), { status: 404 });
+        }
       }
 
       const branchStock = current.stockSucursales.find((item) => item.sucursalId === data.sucursalId);
@@ -691,14 +696,14 @@ export class ProductService {
             precioCompra: precioCompraUnitarioBs,
             precioCompraReales: data.precioCompraUnitarioReales,
             tipoCambioCompra: data.tipoCambio,
-            proveedorId: data.proveedorId,
+            proveedorId: data.proveedorId || null,
           },
         });
       }
 
       if (data.cantidad > 0) {
-        const purchase = await purchaseRecordService.create(tx, {
-          proveedorId: data.proveedorId!,
+        const purchase = data.proveedorId ? await purchaseRecordService.create(tx, {
+          proveedorId: data.proveedorId,
           sucursalId: data.sucursalId,
           usuarioId: data.usuarioId!,
           items: [{
@@ -711,9 +716,9 @@ export class ProductService {
           tipoCambio: data.tipoCambio,
           comprobante: data.comprobante,
           notas: data.notas,
-        });
+        }) : null;
         await stockService.recordMovement(tx, {
-          tipoMovimiento: 'COMPRA',
+          tipoMovimiento: data.proveedorId ? 'COMPRA' : 'AJUSTE',
           productoId: id,
           sucursalId: data.sucursalId,
           stockAnterior,
@@ -728,8 +733,8 @@ export class ProductService {
           estante: ubicacion,
           comprobante: data.comprobante?.trim() || null,
           usuarioId: data.usuarioId,
-          referenciaId: purchase.id,
-          referenciaTipo: 'COMPRA',
+          referenciaId: purchase?.id,
+          referenciaTipo: data.proveedorId ? 'COMPRA' : 'INGRESO_SIN_PROVEEDOR',
           notas: data.notas,
         });
       }

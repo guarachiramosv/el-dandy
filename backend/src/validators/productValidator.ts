@@ -8,13 +8,16 @@ const uuidLikeSchema = z.string().regex(
 const finiteNumber = z.number().refine(Number.isFinite, 'Valor numerico invalido');
 
 const purchaseInfoSchema = z.object({
-  proveedorId: uuidLikeSchema,
+  proveedorId: uuidLikeSchema.optional().nullable(),
   precioCompraUnitario: finiteNumber.min(0, 'Precio de compra no puede ser negativo').optional().default(0),
   precioCompraUnitarioReales: finiteNumber.min(0, 'Precio de compra en reales no puede ser negativo').optional().default(0),
-  tipoCambio: finiteNumber.positive('Tipo de cambio debe ser mayor a cero'),
+  tipoCambio: finiteNumber.min(0, 'Tipo de cambio no puede ser negativo').optional().default(0),
   cantidad: finiteNumber.positive('Cantidad debe ser mayor a cero'),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
+}).refine((data) => data.precioCompraUnitarioReales <= 0 || data.tipoCambio > 0, {
+  message: 'Tipo de cambio debe ser mayor a cero para compras en reales',
+  path: ['tipoCambio'],
 });
 
 export const createProductSchema = z.object({
@@ -54,11 +57,8 @@ export const addProductStockSchema = z.object({
   tipoCambio: finiteNumber.min(0, 'Tipo de cambio no puede ser negativo').optional().default(0),
   comprobante: z.string().trim().optional().nullable(),
   notas: z.string().trim().optional().nullable(),
-}).refine((data) => data.cantidad === 0 || Boolean(data.proveedorId), {
-  message: 'Proveedor es requerido para registrar una compra',
-  path: ['proveedorId'],
-}).refine((data) => data.cantidad === 0 || data.tipoCambio > 0, {
-  message: 'Tipo de cambio debe ser mayor a cero',
+}).refine((data) => data.cantidad === 0 || data.precioCompraUnitarioReales <= 0 || data.tipoCambio > 0, {
+  message: 'Tipo de cambio debe ser mayor a cero para compras en reales',
   path: ['tipoCambio'],
 });
 

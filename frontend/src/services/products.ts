@@ -44,7 +44,7 @@ export const addProductStock = async (
     sucursalId: string;
     cantidad: number;
     ubicacion?: string | null;
-    proveedorId: string;
+    proveedorId?: string | null;
     precioCompraUnitario: number;
     precioCompraUnitarioReales: number;
     tipoCambio: number;

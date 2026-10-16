@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import ProductTable from "../../components/admin/productos/ProductTable";
 import ProductFilters from "../../components/admin/productos/ProductFilters";
 import ProductModal, { ProductFormData } from "../../components/admin/productos/ProductModal";
+import PurchaseSourceFields from "../../components/admin/productos/PurchaseSourceFields";
 import { Category, Product, ProductDeletionHistory, Provider, Sucursal } from "../../types";
 import { useProducts } from "../../hooks/useProducts";
 import {
@@ -18,6 +19,7 @@ import { fetchProviders } from "../../services/providers";
 import { uploadProductImages } from "../../services/uploads";
 import { getErrorMessage } from "../../utils/errors";
 import { filterAndSortBySearch } from "../../utils/fuzzySearch";
+import { validatePurchaseCost, type PurchaseCurrency } from "../../domain/purchaseDetails";
 
 const statusFilterOptions: Array<{ value: ProductStatusFilter | "deleted"; label: string }> = [
   { value: "active", label: "Activos" },
@@ -263,7 +265,7 @@ export default function Productos() {
         sucursalId: stockSucursalId,
         cantidad: stockCantidad,
         ubicacion,
-        proveedorId: stockProveedorId,
+        proveedorId: stockProveedorId || null,
         precioCompraUnitario: stockPrecioCompra,
         precioCompraUnitarioReales: stockPrecioCompraReales,
         tipoCambio: stockTipoCambio,
@@ -294,9 +296,13 @@ export default function Productos() {
       setConfirmZeroStock(true);
       return;
     }
-    if (!stockProveedorId) return setSaveError("Selecciona un proveedor.");
-    if (!Number.isFinite(stockPrecioCompraReales) || stockPrecioCompraReales < 0) return setSaveError("El precio de compra en reales no puede ser negativo.");
-    if (!Number.isFinite(stockTipoCambio) || stockTipoCambio <= 0) return setSaveError("El tipo de cambio debe ser mayor a 0.");
+    const currency: PurchaseCurrency = stockPrecioCompraReales > 0 ? "BRL" : "BOB";
+    const purchaseCostError = validatePurchaseCost(currency, {
+      precioBs: stockPrecioCompra,
+      precioReales: stockPrecioCompraReales,
+      tipoCambio: stockTipoCambio,
+    });
+    if (purchaseCostError) return setSaveError(purchaseCostError);
     await saveProductStock();
   };
 
@@ -434,6 +440,7 @@ export default function Productos() {
           setSelectedSucursalId("");
         }}
         onSave={handleSaveProduct}
+        onProviderCreated={(provider) => setProviders(current => [provider, ...current.filter(item => item.id !== provider.id)])}
         saving={savingProduct}
         error={saveError}
       />
@@ -457,6 +464,10 @@ export default function Productos() {
           onCantidadChange={setStockCantidad}
           onUbicacionChange={setStockUbicacion}
           onProveedorChange={setStockProveedorId}
+          onProviderCreated={(provider) => {
+            setProviders(current => [provider, ...current.filter(item => item.id !== provider.id)]);
+            setStockProveedorId(provider.id);
+          }}
           onPrecioCompraChange={handleStockPrecioCompraChange}
           onPrecioCompraRealesChange={handleStockPrecioCompraRealesChange}
           onTipoCambioChange={handleStockTipoCambioChange}
@@ -588,6 +599,7 @@ function AddStockModal({
   onCantidadChange,
   onUbicacionChange,
   onProveedorChange,
+  onProviderCreated,
   onPrecioCompraChange,
   onPrecioCompraRealesChange,
   onTipoCambioChange,
@@ -613,6 +625,7 @@ function AddStockModal({
   onCantidadChange: (value: number) => void;
   onUbicacionChange: (value: string) => void;
   onProveedorChange: (value: string) => void;
+  onProviderCreated: (provider: Provider) => void;
   onPrecioCompraChange: (value: number) => void;
   onPrecioCompraRealesChange: (value: number) => void;
   onTipoCambioChange: (value: number) => void;
@@ -621,6 +634,9 @@ function AddStockModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const [purchaseCurrency, setPurchaseCurrency] = useState<PurchaseCurrency>(
+    precioCompraReales > 0 && tipoCambio > 0 ? "BRL" : "BOB"
+  );
   const branchStock = product.stockSucursales?.find((item) => item.sucursalId === sucursalId);
   const currentStock = branchStock?.stock || 0;
   const nextStock = currentStock + (Number.isFinite(cantidad) ? cantidad : 0);
@@ -631,6 +647,13 @@ function AddStockModal({
   useEffect(() => {
     if (!ubicacion && defaultUbicacion) onUbicacionChange(defaultUbicacion);
   }, [defaultUbicacion, onUbicacionChange, ubicacion]);
+
+  const changeCurrency = (currency: PurchaseCurrency) => {
+    setPurchaseCurrency(currency);
+    onPrecioCompraChange(0);
+    onPrecioCompraRealesChange(0);
+    onTipoCambioChange(0);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -662,16 +685,6 @@ function AddStockModal({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-300">Proveedor</span>
-            <select className="premium-input" value={proveedorId} onChange={(event) => onProveedorChange(event.target.value)}>
-              <option value="">Seleccionar proveedor</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.nombre}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
             <span className="mb-1 block text-sm font-medium text-gray-300">Cantidad a agregar</span>
             <input
               className="premium-input"
@@ -682,48 +695,32 @@ function AddStockModal({
             />
           </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-300">Precio de compra unitario (R$)</span>
-            <input
-              className="premium-input"
-              type="text"
-              inputMode="decimal"
-              value={precioCompraReales}
-              onChange={(event) => onPrecioCompraRealesChange(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-300">Tipo de cambio (Bs por R$)</span>
-            <input
-              className="premium-input"
-              type="text"
-              inputMode="decimal"
-              value={tipoCambio}
-              onChange={(event) => onTipoCambioChange(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-300">Precio de compra unitario (Bs)</span>
-            <input
-              className="premium-input"
-              type="text"
-              inputMode="decimal"
-              value={precioCompra}
-              onChange={(event) => onPrecioCompraChange(Number(event.target.value))}
-            />
-          </label>
+          <PurchaseSourceFields
+            providers={providers}
+            proveedorId={proveedorId}
+            currency={purchaseCurrency}
+            precioBs={precioCompra}
+            precioReales={precioCompraReales}
+            tipoCambio={tipoCambio}
+            onProveedorChange={onProveedorChange}
+            onProviderCreated={onProviderCreated}
+            onCurrencyChange={changeCurrency}
+            onPrecioBsChange={onPrecioCompraChange}
+            onPrecioRealesChange={onPrecioCompraRealesChange}
+            onTipoCambioChange={onTipoCambioChange}
+          />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-primary/25 bg-primary/10 p-3">
               <p className="text-xs uppercase text-primary-light">Costo total (Bs)</p>
               <p className="mt-1 text-xl font-black text-white">Bs {totalCompra.toLocaleString("es-BO")}</p>
             </div>
-            <div className="rounded-lg border border-green-500/25 bg-green-500/10 p-3">
-              <p className="text-xs uppercase text-green-300/80">Costo total (R$)</p>
-              <p className="mt-1 text-xl font-black text-green-200">R$ {totalCompraReales.toLocaleString("pt-BR")}</p>
-            </div>
+            {purchaseCurrency === "BRL" && (
+              <div className="rounded-lg border border-green-500/25 bg-green-500/10 p-3">
+                <p className="text-xs uppercase text-green-300/80">Costo total (R$)</p>
+                <p className="mt-1 text-xl font-black text-green-200">R$ {totalCompraReales.toLocaleString("pt-BR")}</p>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

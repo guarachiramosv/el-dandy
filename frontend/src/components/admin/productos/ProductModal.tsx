@@ -3,8 +3,10 @@ import type React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera, ImagePlus, Save, Truck, X } from "lucide-react";
 import ImageLightbox from "../../ImageLightbox";
+import PurchaseSourceFields from "./PurchaseSourceFields";
 import type { Category, Product, Provider, Sucursal } from "../../../types";
 import { productImageUrl } from "../../../utils/images";
+import { calculatePurchaseUnitCostBs, validatePurchaseCost, type PurchaseCurrency } from "../../../domain/purchaseDetails";
 
 type ProductFormData = {
   id?: string;
@@ -25,7 +27,7 @@ type ProductFormData = {
   precioVenta: number;
   sucursalId: string;
   compraInicial?: {
-    proveedorId: string;
+    proveedorId: string | null;
     precioCompraUnitario: number;
     precioCompraUnitarioReales: number;
     tipoCambio: number;
@@ -48,6 +50,7 @@ interface ProductModalProps {
   providers: Provider[];
   onClose: () => void;
   onSave: (product: ProductFormData) => void;
+  onProviderCreated?: (provider: Provider) => void;
   saving?: boolean;
   error?: string | null;
 }
@@ -57,7 +60,6 @@ const buildInitialFormData = (
   mode: ProductModalProps["mode"],
   categories: Category[],
   sucursales: Sucursal[],
-  providers: Provider[],
 ): ProductFormData => {
   const defaultCategoryId = categories[0]?.id || "";
   const defaultSucursalId = sucursales[0]?.id || "";
@@ -106,7 +108,7 @@ const buildInitialFormData = (
     precioVenta: 0,
     sucursalId: defaultSucursalId,
     compraInicial: {
-      proveedorId: providers[0]?.id || "",
+      proveedorId: "",
       precioCompraUnitario: 0,
       precioCompraUnitarioReales: 0,
       tipoCambio: 0,
@@ -148,13 +150,15 @@ function ProductModalContent({
   providers,
   onClose,
   onSave,
+  onProviderCreated,
   saving = false,
   error,
 }: ProductModalContentProps) {
   const [lightboxImage, setLightboxImage] = useState<{ url: string; alt: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [purchaseCurrency, setPurchaseCurrency] = useState<PurchaseCurrency>("BOB");
   const [formData, setFormData] = useState<ProductFormData>(() =>
-    buildInitialFormData(product, mode, categories, sucursales, providers)
+    buildInitialFormData(product, mode, categories, sucursales)
   );
 
   const selectedPreviewUrls = useMemo(
@@ -190,13 +194,12 @@ function ProductModalContent({
     });
   };
 
-  const handlePurchaseChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
+  const updatePurchaseField = (name: string, value: string | number) => {
     const numericValue = name === "cantidad" || name === "precioCompraUnitario" || name === "precioCompraUnitarioReales" || name === "tipoCambio" ? Number(value) : value;
     setFormError(null);
     setFormData(prev => {
       const nextPurchase = {
-        proveedorId: prev.compraInicial?.proveedorId || providers[0]?.id || "",
+        proveedorId: prev.compraInicial?.proveedorId || "",
         precioCompraUnitario: prev.compraInicial?.precioCompraUnitario || 0,
         precioCompraUnitarioReales: prev.compraInicial?.precioCompraUnitarioReales || 0,
         tipoCambio: prev.compraInicial?.tipoCambio || 0,
@@ -211,7 +214,7 @@ function ProductModalContent({
         }
       } else if (name === "precioCompraUnitarioReales" && nextPurchase.precioCompraUnitarioReales > 0 && nextPurchase.tipoCambio <= 0 && nextPurchase.precioCompraUnitario > 0) {
         nextPurchase.tipoCambio = roundExchangeRate(nextPurchase.precioCompraUnitario / nextPurchase.precioCompraUnitarioReales);
-      } else {
+      } else if (name === "precioCompraUnitarioReales" || name === "tipoCambio") {
         nextPurchase.precioCompraUnitario = roundCurrency(nextPurchase.precioCompraUnitarioReales * nextPurchase.tipoCambio);
       }
       return {
@@ -223,6 +226,10 @@ function ProductModalContent({
         tipoCambioCompra: nextPurchase.tipoCambio,
       };
     });
+  };
+
+  const handlePurchaseChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    updatePurchaseField(e.target.name, e.target.value);
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -265,6 +272,7 @@ function ProductModalContent({
       compraInicial: isCreateMode && formData.compraInicial
         ? {
             ...formData.compraInicial,
+            proveedorId: formData.compraInicial.proveedorId || null,
             comprobante: formData.compraInicial.comprobante?.trim() || null,
             notas: formData.compraInicial.notas?.trim() || null,
           }
@@ -280,11 +288,15 @@ function ProductModalContent({
     if (!isCreateMode && payload.precioCompraReales > 0 && payload.tipoCambioCompra <= 0) return setFormError("El tipo de cambio debe ser mayor a 0.");
     if (payload.precioVenta <= 0) return setFormError("El precio de venta debe ser mayor a 0.");
     if (isCreateMode) {
-      if (!payload.compraInicial?.proveedorId) return setFormError("Selecciona el proveedor de la compra inicial.");
-      if (!Number.isFinite(payload.compraInicial.cantidad) || payload.compraInicial.cantidad <= 0) return setFormError("La cantidad inicial debe ser mayor a 0.");
-      if (!Number.isFinite(payload.compraInicial.precioCompraUnitario) || payload.compraInicial.precioCompraUnitario < 0) return setFormError("El precio de compra inicial no puede ser negativo.");
-      if (!Number.isFinite(payload.compraInicial.precioCompraUnitarioReales) || payload.compraInicial.precioCompraUnitarioReales < 0) return setFormError("El precio de compra inicial en reales no puede ser negativo.");
-      if (!Number.isFinite(payload.compraInicial.tipoCambio) || payload.compraInicial.tipoCambio <= 0) return setFormError("El tipo de cambio debe ser mayor a 0.");
+      const compraInicial = payload.compraInicial;
+      if (!compraInicial) return setFormError("Completa la informacion de compra inicial.");
+      if (!Number.isFinite(compraInicial.cantidad) || compraInicial.cantidad <= 0) return setFormError("La cantidad inicial debe ser mayor a 0.");
+      const purchaseCostError = validatePurchaseCost(purchaseCurrency, {
+        precioBs: compraInicial.precioCompraUnitario,
+        precioReales: compraInicial.precioCompraUnitarioReales,
+        tipoCambio: compraInicial.tipoCambio,
+      });
+      if (purchaseCostError) return setFormError(purchaseCostError);
     }
 
     onSave(payload);
@@ -299,9 +311,30 @@ function ProductModalContent({
     : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
   const initialPurchase = formData.compraInicial;
-  const initialPurchaseUnitBs = roundCurrency((initialPurchase?.precioCompraUnitarioReales || 0) * (initialPurchase?.tipoCambio || 0));
+  const initialPurchaseUnitBs = calculatePurchaseUnitCostBs(purchaseCurrency, {
+    precioBs: initialPurchase?.precioCompraUnitario || 0,
+    precioReales: initialPurchase?.precioCompraUnitarioReales || 0,
+    tipoCambio: initialPurchase?.tipoCambio || 0,
+  });
   const initialPurchaseTotalBs = roundCurrency((initialPurchase?.cantidad || 0) * initialPurchaseUnitBs);
   const initialPurchaseTotalReales = roundCurrency((initialPurchase?.cantidad || 0) * (initialPurchase?.precioCompraUnitarioReales || 0));
+
+  const handleCurrencyChange = (currency: PurchaseCurrency) => {
+    setPurchaseCurrency(currency);
+    setFormError(null);
+    setFormData(current => ({
+      ...current,
+      compraInicial: current.compraInicial ? {
+        ...current.compraInicial,
+        precioCompraUnitario: 0,
+        precioCompraUnitarioReales: 0,
+        tipoCambio: 0,
+      } : null,
+      precioCompra: 0,
+      precioCompraReales: 0,
+      tipoCambioCompra: 0,
+    }));
+  };
 
   return (
     <AnimatePresence>
@@ -538,36 +571,33 @@ function ProductModalContent({
                   <h4 className="text-sm font-bold uppercase tracking-wide text-primary-light">Informacion de compra inicial</h4>
                   <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Proveedor</label>
-                      <select name="proveedorId" value={initialPurchase?.proveedorId || ""} onChange={handlePurchaseChange} className="premium-input">
-                        <option value="">Seleccionar proveedor</option>
-                        {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.nombre}</option>)}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
                       <label className="text-sm font-medium text-gray-300">Cantidad inicial</label>
                       <input type="text" inputMode="decimal" name="cantidad" value={initialPurchase?.cantidad || 0} onChange={handlePurchaseChange} className="premium-input" />
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio de compra unitario (R$)</label>
-                      <input type="text" inputMode="decimal" name="precioCompraUnitarioReales" value={initialPurchase?.precioCompraUnitarioReales || 0} onChange={handlePurchaseChange} className="premium-input" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Tipo de cambio (Bs por R$)</label>
-                      <input type="text" inputMode="decimal" name="tipoCambio" value={initialPurchase?.tipoCambio || 0} onChange={handlePurchaseChange} className="premium-input" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-gray-300">Precio unitario (Bs)</label>
-                      <input type="text" inputMode="decimal" name="precioCompraUnitario" value={initialPurchaseUnitBs} onChange={handlePurchaseChange} className="premium-input" />
-                    </div>
+                    <PurchaseSourceFields
+                      providers={providers}
+                      proveedorId={initialPurchase?.proveedorId || ""}
+                      currency={purchaseCurrency}
+                      precioBs={initialPurchaseUnitBs}
+                      precioReales={initialPurchase?.precioCompraUnitarioReales || 0}
+                      tipoCambio={initialPurchase?.tipoCambio || 0}
+                      onProveedorChange={(value) => updatePurchaseField("proveedorId", value)}
+                      onProviderCreated={(provider) => onProviderCreated?.(provider)}
+                      onCurrencyChange={handleCurrencyChange}
+                      onPrecioBsChange={(value) => updatePurchaseField("precioCompraUnitario", value)}
+                      onPrecioRealesChange={(value) => updatePurchaseField("precioCompraUnitarioReales", value)}
+                      onTipoCambioChange={(value) => updatePurchaseField("tipoCambio", value)}
+                    />
                     <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
                       <p className="text-xs uppercase text-gray-500">Costo total (Bs)</p>
                       <p className="mt-1 text-lg font-black text-primary-light">Bs {initialPurchaseTotalBs.toLocaleString("es-BO")}</p>
                     </div>
-                    <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
-                      <p className="text-xs uppercase text-gray-500">Costo total (R$)</p>
-                      <p className="mt-1 text-lg font-black text-green-300">R$ {initialPurchaseTotalReales.toLocaleString("pt-BR")}</p>
-                    </div>
+                    {purchaseCurrency === "BRL" && (
+                      <div className="rounded-lg border border-gray-700 bg-grafito-900/50 p-3">
+                        <p className="text-xs uppercase text-gray-500">Costo total (R$)</p>
+                        <p className="mt-1 text-lg font-black text-green-300">R$ {initialPurchaseTotalReales.toLocaleString("pt-BR")}</p>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <label className="text-sm font-medium text-gray-300">Factura / Comprobante</label>
                       <input name="comprobante" value={initialPurchase?.comprobante || ""} onChange={handlePurchaseChange} className="premium-input" placeholder="Opcional" />
