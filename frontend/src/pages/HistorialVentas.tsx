@@ -809,15 +809,15 @@ function SaleDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium overflow-hidden">
-        <div className="bg-grafito-900/80 p-5 border-b border-gray-700 flex items-center justify-between">
+      <div className="relative flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-grafito-800 shadow-premium">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-700 bg-grafito-900/80 p-5">
           <div>
             <h3 className="text-xl font-bold text-white">Detalle de venta</h3>
             <p className="text-sm text-gray-400">{formatDateTime(sale.createdAt)} - {sale.cliente?.nombre || "Cliente ocasional"}</p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white"><X size={22} /></button>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto p-5 custom-scrollbar">
           {pendingVoidRequest && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
               <div className="mb-1 flex items-center gap-2 font-semibold text-white">
