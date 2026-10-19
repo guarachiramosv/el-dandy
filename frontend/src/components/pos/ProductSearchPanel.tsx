@@ -66,14 +66,22 @@ export function ProductSearchPanel(props: ProductSearchPanelProps) {
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[600px] table-fixed text-left">
+            <colgroup>
+              <col className="w-[100px]" />
+              <col />
+              <col className="w-[76px]" />
+              <col className="w-[62px]" />
+              <col className="w-[88px]" />
+              <col className="w-[96px]" />
+            </colgroup>
             <thead className="sticky top-0 z-10 bg-[#111315] text-[11px] uppercase tracking-wide text-gray-500">
               <tr className="border-b border-gray-800">
-                <th className="w-[16%] px-4 py-3 font-semibold">Código</th>
-                <th className="w-[38%] px-3 py-3 font-semibold">Producto</th>
-                <th className="w-[12%] px-3 py-3 text-center font-semibold">Estado</th>
-                <th className="w-[10%] px-3 py-3 text-center font-semibold">Stock</th>
-                <th className="w-[13%] px-3 py-3 text-right font-semibold">Precio</th>
-                <th className="w-[11%] px-4 py-3 text-right font-semibold">Acción</th>
+                <th className="px-4 py-3 font-semibold">Código</th>
+                <th className="px-3 py-3 font-semibold">Producto</th>
+                <th className="px-2 py-3 text-center font-semibold">Estado</th>
+                <th className="px-2 py-3 text-center font-semibold">Stock</th>
+                <th className="px-2 py-3 text-right font-semibold">Precio</th>
+                <th className="px-2 py-3 text-center font-semibold">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/90">
@@ -99,11 +107,11 @@ export function ProductSearchPanel(props: ProductSearchPanelProps) {
                       </p>
                       {selected && <p className="mt-1 text-[11px] font-semibold text-green-400">En venta: {formatQuantity(selected.cantidad, product)}</p>}
                     </td>
-                    <td className="px-3 py-3 text-center align-middle"><span className={`inline-flex rounded border px-2 py-1 text-[11px] font-semibold ${productConditionClass(product.condicion)}`}>{productConditionLabel(product.condicion)}</span></td>
-                    <td className={`px-3 py-3 text-center text-sm font-bold ${availableStock > 0 ? "text-green-400" : "text-red-300"}`}>{availableStock.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
-                    <td className="px-3 py-3 text-right text-sm font-bold text-primary-light">{money(product.precioVenta)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button type="button" onClick={() => props.onAddProduct(product)} disabled={outOfStock || props.isClosed} className="rounded bg-primary px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400">
+                    <td className="px-2 py-3 text-center align-middle"><span className={`inline-flex rounded border px-2 py-1 text-[11px] font-semibold ${productConditionClass(product.condicion)}`}>{productConditionLabel(product.condicion)}</span></td>
+                    <td className={`px-2 py-3 text-center text-sm font-bold ${availableStock > 0 ? "text-green-400" : "text-red-300"}`}>{availableStock.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
+                    <td className="px-2 py-3 text-right text-sm font-bold text-primary-light">{money(product.precioVenta)}</td>
+                    <td className="px-2 py-3 text-center">
+                      <button type="button" onClick={() => props.onAddProduct(product)} disabled={outOfStock || props.isClosed} className="w-full whitespace-nowrap rounded bg-primary px-2 py-2 text-xs font-bold text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400">
                         {outOfStock ? "Sin stock" : "Agregar"}
                       </button>
                     </td>
