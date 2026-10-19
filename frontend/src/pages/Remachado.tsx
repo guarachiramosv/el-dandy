@@ -580,14 +580,23 @@ export default function Remachado() {
         </button>
       </div>
 
-      <div className={`grid gap-3 ${isAdmin ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+      <div
+        className={isAdmin
+          ? "grid gap-3 md:grid-cols-3"
+          : "inline-flex w-full max-w-md rounded-xl border border-gray-800 bg-[#111315] p-1"}
+        role="tablist"
+        aria-label="Secciones de remachado"
+      >
         {availableTabs.map((item) => (
           <button
             key={item}
+            type="button"
+            role="tab"
+            aria-selected={tab === item}
             onClick={() => setTab(item)}
-            className={`min-h-14 rounded-lg px-4 font-bold ${tab === item ? "bg-primary-gradient text-white" : "border border-white/10 bg-grafito-900/80 text-gray-200"}`}
+            className={`${isAdmin ? "min-h-14" : "min-h-10 flex-1"} rounded-lg px-4 text-sm font-bold transition ${tab === item ? "bg-primary text-white shadow-sm" : isAdmin ? "border border-white/10 bg-grafito-900/80 text-gray-200" : "text-gray-400 hover:bg-white/5 hover:text-white"}`}
           >
-            {item}
+            {item === "TRABAJO" ? "Registrar trabajo" : item === "BALATAS" ? "Lista de balatas" : item === "REMACHES" ? "Remaches" : "Historial"}
           </button>
         ))}
       </div>
@@ -671,7 +680,7 @@ export default function Remachado() {
       )}
 
       {tab === "BALATAS" && (
-        <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
+        <div className={isAdmin ? "grid gap-5 xl:grid-cols-[420px_1fr]" : "w-full"}>
           {isAdmin && (
             <div className="glass-panel p-5">
               <h3 className="mb-4 text-xl font-bold text-white">Nueva medida</h3>
@@ -708,14 +717,27 @@ export default function Remachado() {
             </div>
           )}
 
-          <div className="glass-panel overflow-x-auto">
-            <div className="border-b border-gray-700 p-4">
-              <div className="relative">
+          <div className="glass-panel overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-gray-700 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="font-bold text-white">Medidas de balata</h3>
+                <p className="mt-0.5 text-xs text-gray-500">{filteredMedidas.length} medidas disponibles</p>
+              </div>
+              <div className="relative w-full sm:max-w-sm">
                 <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
                 <input className="premium-input pl-10" placeholder="Buscar medida..." value={search} onChange={(event) => setSearch(event.target.value)} />
               </div>
             </div>
-            <table className="w-full text-left">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] table-fixed text-left">
+              {!isAdmin && (
+                <colgroup>
+                  <col className="w-[34%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[22%]" />
+                </colgroup>
+              )}
               <thead className="bg-grafito-800/80 text-sm uppercase text-gray-400">
                 {isAdmin ? (
                   <tr>
@@ -738,10 +760,10 @@ export default function Remachado() {
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {filteredMedidas.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className="transition-colors hover:bg-white/[0.03]">
                     <td className="p-4">
                       <p className="font-bold text-white">{item.medida}</p>
-                      {isAdmin && <p className="text-xs text-gray-500">{item.descripcion}</p>}
+                      {item.descripcion && <p className="mt-0.5 truncate text-xs text-gray-500" title={item.descripcion}>{item.descripcion}</p>}
                     </td>
                     <td className={getStockTextClass(item.stockJuegos, item.stockMinimoJuegos)}>{item.stockJuegos} juegos</td>
                     {isAdmin ? (
@@ -766,6 +788,7 @@ export default function Remachado() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
