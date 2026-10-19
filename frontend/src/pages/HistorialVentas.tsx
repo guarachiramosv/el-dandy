@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Banknote, CalendarDays, CheckCircle2, Clock3, LockKeyhole, Plus, Printer, ReceiptText, Trash2, X } from "lucide-react";
+import { Banknote, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, LockKeyhole, Plus, Printer, ReceiptText, RefreshCw, Send, Trash2, TriangleAlert, X } from "lucide-react";
 import { CashClosing, CashExpense, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
 import { approveSaleVoidRequest, closeCashRegister, createCashExpense, deleteCashExpense, fetchDailySalesSummary, requestSaleVoid, updateSalePaymentMethod, deleteSale } from "../services/sales";
 import { addCreditPayment } from "../services/customers";
 import { getErrorMessage } from "../utils/errors";
 import { buildThermalCashClosingHtml, buildThermalReceiptHtml } from "../utils/thermalReceipt";
+import { HistorySummaryStrip } from "../components/history/HistorySummaryStrip";
+import { SalesHistoryTable } from "../components/history/SalesHistoryTable";
+import { moneyInputPattern, parseMoneyInput, validateCashReconciliation } from "../components/history/cashReconciliation";
 
 const money = (value: number) =>
   `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -36,8 +39,11 @@ const productConditionClass = (condition?: string | null) =>
     : "border-green-500/40 bg-green-500/10 text-green-200";
 type ExpenseMethod = "EFECTIVO" | "QR";
 const expenseMethods: ExpenseMethod[] = ["EFECTIVO", "QR"];
-const moneyInputPattern = /^[0-9]*([.,][0-9]{0,2})?$/;
-const parseMoneyInput = (value: string) => Number(value.trim().replace(",", "."));
+const shiftInputDate = (value: string, days: number) => {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+};
 
 export default function HistorialVentas() {
   const user = getCurrentUser();
@@ -48,7 +54,9 @@ export default function HistorialVentas() {
   const [reportDate, setReportDate] = useState(pendingDate || defaultDay);
   const [summary, setSummary] = useState<DailySalesSummary | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  const [declaredCash, setDeclaredCash] = useState(0);
+  const [declaredCashInput, setDeclaredCashInput] = useState("");
+  const [verifiedQrInput, setVerifiedQrInput] = useState("");
+  const [reconciliationConfirmed, setReconciliationConfirmed] = useState(false);
   const [closeNotes, setCloseNotes] = useState("");
   const [depositToBank, setDepositToBank] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
@@ -76,7 +84,9 @@ export default function HistorialVentas() {
         user?.role === "ADMIN" ? requestedBranchId || undefined : undefined,
       );
       setSummary(data);
-      setDeclaredCash(data.cierre?.montoDeclarado ?? data.netos?.totalEfectivo ?? data.totals.totalEfectivo);
+      setDeclaredCashInput(data.cerrado && data.cierre ? String(data.cierre.montoDeclarado) : "");
+      setVerifiedQrInput(data.cerrado && data.cierre ? String(data.cierre.netoQr) : "");
+      setReconciliationConfirmed(Boolean(data.cerrado));
       setCloseNotes(data.cierre?.notas || "");
       setDepositToBank(Boolean(data.cierre?.depositadoBanco));
       setDepositAmount(data.cierre?.montoDepositado != null ? String(data.cierre.montoDepositado) : "");
@@ -111,11 +121,32 @@ export default function HistorialVentas() {
 
   const handleCloseCash = async () => {
     setMessage(null);
+    if (!summary) return setMessage("No se pudo preparar el cierre para impresión.");
+
+    const reconciliation = validateCashReconciliation({
+      expectedCash,
+      expectedQr,
+      countedCash: declaredCashInput,
+      verifiedQr: verifiedQrInput,
+      confirmed: reconciliationConfirmed,
+      notes: closeNotes,
+    });
+    if (!reconciliation.canSubmit || reconciliation.countedCash === null) {
+      return setMessage(reconciliation.errors[0] || "Completa la verificación de caja.");
+    }
+
     const parsedDeposit = parseMoneyInput(depositAmount);
-    if (depositToBank && (!Number.isFinite(parsedDeposit) || parsedDeposit <= 0)) {
+    if (depositToBank && (parsedDeposit === null || parsedDeposit <= 0)) {
       return setMessage("Indica el monto que se depositó al banco.");
     }
-    if (!summary) return setMessage("No se pudo preparar el cierre para impresión.");
+    if (depositToBank && parsedDeposit !== null && parsedDeposit > reconciliation.countedCash) {
+      return setMessage("El monto depositado no puede ser mayor al efectivo contado.");
+    }
+    if (depositToBank && !depositReference.trim()) {
+      return setMessage("Ingresa la referencia o número del comprobante del depósito.");
+    }
+
+    const declaredCash = reconciliation.countedCash;
 
     // Se abre durante el clic para evitar que el navegador bloquee la impresión
     // después de esperar la respuesta del servidor.
@@ -171,7 +202,7 @@ export default function HistorialVentas() {
     const motivo = expenseReason.trim();
     const monto = parseMoneyInput(expenseAmount);
     if (!motivo) return setMessage("Indica para que se saco dinero.");
-    if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
+    if (monto === null || monto <= 0) return setMessage("Ingresa un monto de gasto mayor a cero.");
     if (reportDate !== defaultDay && summary?.estadoCaja !== "OBSERVADO") {
       return setMessage("Para agregar un gasto histórico, el administrador debe reabrir primero ese cierre.");
     }
@@ -220,7 +251,6 @@ export default function HistorialVentas() {
 
   const fillBankDepositNote = () => {
     const amount = money(expectedCash);
-    setDeclaredCash(expectedCash);
     setDepositToBank(true);
     setDepositAmount(String(expectedCash));
     setCloseNotes(`Efectivo neto del dia (${amount}) entregado para deposito al banco. Ya no queda efectivo de ventas en caja.`);
@@ -234,7 +264,7 @@ export default function HistorialVentas() {
     const printWindow = window.open("", "_blank", "width=360,height=720");
     if (!printWindow) return setMessage("No se pudo abrir la ventana de impresion.");
     printWindow.document.write(buildThermalCashClosingHtml(summary, user?.nombre || "", {
-      declaredCash,
+      declaredCash: parseMoneyInput(declaredCashInput) ?? summary.cierre?.montoDeclarado ?? 0,
       notes: closeNotes || null,
     }));
     printWindow.document.close();
@@ -260,7 +290,7 @@ export default function HistorialVentas() {
     if (!user?.id) return setMessage("Debes iniciar sesion nuevamente.");
     if (!paymentSale?.cuenta) return setMessage("Esta venta no tiene cuenta de credito.");
     const monto = parseMoneyInput(paymentAmount);
-    if (!Number.isFinite(monto) || monto <= 0) return setMessage("Ingresa un monto de pago mayor a cero.");
+    if (monto === null || monto <= 0) return setMessage("Ingresa un monto de pago mayor a cero.");
 
     setSavingPayment(true);
     try {
@@ -312,7 +342,15 @@ export default function HistorialVentas() {
   const expenseTotals = summary?.gastos?.totals || { totalGastos: 0, totalEfectivo: 0, totalQr: 0 };
   const expectedCash = summary?.netos?.totalEfectivo ?? Math.max(grossCash + creditPaymentTotals.totalEfectivo - expenseTotals.totalEfectivo, 0);
   const expectedQr = summary?.netos?.totalQr ?? Math.max(grossQr + creditPaymentTotals.totalQr - expenseTotals.totalQr, 0);
-  const difference = declaredCash - expectedCash;
+  const reconciliation = validateCashReconciliation({
+    expectedCash,
+    expectedQr,
+    countedCash: declaredCashInput,
+    verifiedQr: verifiedQrInput,
+    confirmed: reconciliationConfirmed,
+    notes: closeNotes,
+  });
+  const difference = reconciliation.cashDifference;
   const pendingVoidRequests = (summary?.ventas || []).filter((sale) => sale.solicitudAnulacion?.estado === "PENDIENTE");
   const isHistoricalDay = reportDate !== defaultDay;
   const canEditExpenses = !summary?.cerrado && (!isHistoricalDay || summary?.estadoCaja === "OBSERVADO");
@@ -320,37 +358,73 @@ export default function HistorialVentas() {
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+            <h2 className="flex items-center gap-2 text-2xl font-bold text-white">
               <CalendarDays className="text-primary" /> Historial de ventas
             </h2>
-            <p className="text-gray-400 text-sm mt-1">Ventas del dia, control de efectivo y cierre de caja.</p>
+            <p className="mt-1 text-sm text-gray-400">Revisa las ventas y realiza el cierre de caja.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setReportDate((current) => shiftInputDate(current, -1))}
+              className="btn-secondary flex h-11 w-11 items-center justify-center px-0"
+              aria-label="Ver día anterior"
+            >
+              <ChevronLeft size={20} />
+            </button>
             <input
               type="date"
               value={reportDate}
+              max={defaultDay}
               onChange={(event) => setReportDate(event.target.value)}
-              className="premium-input h-11"
+              className="premium-input h-11 min-w-40"
             />
-            <button onClick={loadSummary} disabled={loading} className="btn-secondary h-11 disabled:opacity-60">
-              {loading ? "Cargando..." : "Actualizar dia"}
+            <button
+              type="button"
+              onClick={() => setReportDate((current) => shiftInputDate(current, 1))}
+              disabled={reportDate >= defaultDay}
+              className="btn-secondary flex h-11 w-11 items-center justify-center px-0 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Ver día siguiente"
+            >
+              <ChevronRight size={20} />
+            </button>
+            <button type="button" onClick={() => setReportDate(defaultDay)} disabled={reportDate === defaultDay} className="btn-secondary h-11 disabled:opacity-50">
+              Hoy
+            </button>
+            <button type="button" onClick={loadSummary} disabled={loading} className="btn-secondary flex h-11 w-11 items-center justify-center px-0 disabled:opacity-60" aria-label="Actualizar información">
+              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
             </button>
           </div>
-        </div>
       </div>
 
       {message && <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-primary-light">{message}</div>}
 
+      {summary?.estadoCaja === "OBSERVADO" && (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-amber-100 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <TriangleAlert className="mt-0.5 shrink-0 text-amber-300" size={22} />
+            <div>
+              <p className="font-bold text-white">Caja observada: requiere corrección</p>
+              <p className="text-sm text-amber-100/90">
+                {summary.cierre?.motivoObservacion || "Verifica las ventas y gastos antes de reenviar el cierre."}
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-bold text-amber-200">
+            Requiere corrección
+          </span>
+        </div>
+      )}
+
       <div className="glass-panel overflow-hidden">
-        <div className="bg-grafito-800/80 p-4 border-b border-gray-700 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 border-b border-gray-700 bg-grafito-800/80 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="font-medium text-white">Historial vendido de hoy</h3>
+            <h3 className="font-semibold text-white">Movimientos del {formatInputDate(reportDate)}</h3>
             <p className="text-sm text-gray-400">
-              {summary?.fecha || "Hoy"} - {summary?.totals.cantidadVentas || 0} ventas registradas
+              {summary?.totals.cantidadVentas || 0} ventas registradas
             </p>
           </div>
           {summary?.cierre && (
@@ -360,17 +434,21 @@ export default function HistorialVentas() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 p-4 border-b border-gray-800">
-          <Stat label="Total" value={money(summary?.totals.totalVentas || 0)} />
-          <Stat label="Efectivo" value={money(summary?.totals.totalEfectivo || 0)} />
-          <Stat label="Transferencia" value={money(summary?.totals.totalTransferencia || 0)} />
-          <Stat label="QR" value={money(summary?.totals.totalQr || 0)} />
-          <Stat label="Tarjeta" value={money(summary?.totals.totalTarjeta || 0)} />
-          <Stat label="Credito" value={money(summary?.totals.totalCredito || 0)} />
-          <Stat label="Cobros cred." value={money(creditPaymentTotals.totalCobrosCredito)} />
+        <HistorySummaryStrip items={[
+          { label: "Total vendido", value: money(summary?.totals.totalVentas || 0) },
+          { label: "Efectivo", value: money(grossCash), tone: "success" },
+          { label: "QR", value: money(grossQr), tone: "info" },
+          { label: "Gastos", value: money(expenseTotals.totalGastos), tone: "warning" },
+          { label: "Efectivo neto", value: money(expectedCash), tone: "success" },
+        ]} />
+        <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-gray-800 bg-[#101214] px-4 py-2.5 text-xs text-gray-500">
+          <span>Transferencia <strong className="ml-1 text-gray-300">{money(summary?.totals.totalTransferencia || 0)}</strong></span>
+          <span>Tarjeta <strong className="ml-1 text-gray-300">{money(summary?.totals.totalTarjeta || 0)}</strong></span>
+          <span>Crédito <strong className="ml-1 text-gray-300">{money(summary?.totals.totalCredito || 0)}</strong></span>
+          <span>Cobros de crédito <strong className="ml-1 text-gray-300">{money(creditPaymentTotals.totalCobrosCredito)}</strong></span>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4 p-4">
+        <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_390px]">
           <div className="space-y-4">
             {user?.role === "ADMIN" && pendingVoidRequests.length > 0 && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
@@ -400,46 +478,7 @@ export default function HistorialVentas() {
                 </div>
               </div>
             )}
-            <div className="rounded-xl border border-gray-800 overflow-hidden">
-              <table className="w-full text-left">
-                <thead className="bg-grafito-900 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="p-3">Hora</th>
-                    <th className="p-3">Cliente</th>
-                    <th className="p-3">Pago</th>
-                    <th className="p-3 text-right">Total</th>
-                    <th className="p-3 text-right">Accion</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800 text-sm">
-                  {(summary?.ventas || []).map((sale) => (
-                    <tr key={sale.id} className="hover:bg-grafito-800/50">
-                      <td className="p-3 text-gray-400">{formatDateTime(sale.createdAt)}</td>
-                      <td className="p-3 text-white">{sale.cliente?.nombre || "Cliente ocasional"}</td>
-                      <td className="p-3 text-gray-300">{sale.tipoVenta === "CREDITO" ? "CREDITO" : sale.metodoPago}</td>
-                      <td className="p-3 text-right font-bold text-primary-light">{money(sale.total)}</td>
-                      <td className="p-3 text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          {sale.solicitudAnulacion?.estado === "PENDIENTE" && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-200">
-                              <Clock3 size={12} /> Pendiente
-                            </span>
-                          )}
-                          <button onClick={() => setSelectedSale(sale)} className="text-gray-300 hover:text-white">
-                            Ver detalle
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {(summary?.ventas || []).length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-gray-500">Aun no hay ventas hoy.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <SalesHistoryTable sales={summary?.ventas || []} money={money} onSelect={setSelectedSale} />
 
             <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -558,104 +597,100 @@ export default function HistorialVentas() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-gray-800 bg-grafito-900/40 p-4 space-y-3">
-            <h4 className="font-semibold text-white flex items-center gap-2">
-              <Banknote size={18} className="text-green-300" /> Dinero disponible y cierre de caja
-            </h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-green-200/80">Queda en efectivo</p>
-                <p className="mt-1 text-xl font-black text-green-200">{money(expectedCash)}</p>
-              </div>
-              <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-200/80">Queda en QR</p>
-                <p className="mt-1 text-xl font-black text-blue-200">{money(expectedQr)}</p>
-              </div>
+          <aside className="space-y-4 self-start rounded-xl border border-gray-800 bg-grafito-900/40 p-4 xl:sticky xl:top-4">
+            <div>
+              <h4 className="flex items-center gap-2 text-lg font-bold text-white">
+                <Banknote size={20} className="text-primary" /> {summary?.estadoCaja === "OBSERVADO" ? "Corregir cierre de caja" : "Cierre de caja"}
+              </h4>
+              <p className="mt-1 text-xs text-gray-500">Cuenta el efectivo y comprueba los pagos QR antes de enviar.</p>
             </div>
 
-            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
-              <p className="text-xs font-bold uppercase tracking-wide text-green-300">Detalle efectivo</p>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Ventas en efectivo</span>
-                <span className="font-semibold text-white">{money(grossCash)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Cobros de credito</span>
-                <span className="font-semibold text-green-200">+{money(creditPaymentTotals.totalEfectivo)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Gastos pagados en efectivo</span>
-                <span className="font-semibold text-amber-200">-{money(expenseTotals.totalEfectivo)}</span>
-              </div>
-              <div className="flex justify-between border-t border-gray-800 pt-2 text-sm">
-                <span className="font-semibold text-white">Efectivo disponible</span>
-                <span className="font-bold text-green-200">{money(expectedCash)}</span>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
-              <p className="text-xs font-bold uppercase tracking-wide text-blue-300">Detalle QR</p>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Ventas por QR</span>
-                <span className="font-semibold text-white">{money(grossQr)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Cobros de credito</span>
-                <span className="font-semibold text-blue-200">+{money(creditPaymentTotals.totalQr)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Gastos pagados por QR</span>
-                <span className="font-semibold text-amber-200">-{money(expenseTotals.totalQr)}</span>
-              </div>
-              <div className="flex justify-between border-t border-gray-800 pt-2 text-sm">
-                <span className="font-semibold text-white">QR disponible</span>
-                <span className="font-bold text-blue-200">{money(expectedQr)}</span>
-              </div>
-            </div>
-            <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-100">
-              El dinero contado y el dinero depositado son datos diferentes. Marca el depósito solo si realmente se realizó.
-            </div>
-            <label className="block text-sm text-gray-300">
-              <span className="mb-1 block">Dinero contado en caja</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={declaredCash}
-                onChange={(event) => setDeclaredCash(Number(event.target.value))}
-                disabled={summary?.cerrado}
-                className="premium-input"
-              />
-            </label>
-            <div className={`rounded-lg border p-3 text-sm ${
-              difference === 0
-                ? "border-green-500/30 bg-green-500/10 text-green-200"
-                : "border-amber-500/30 bg-amber-500/10 text-amber-200"
-            }`}>
-              Diferencia: {money(difference)}
-            </div>
-            <label className="block text-sm text-gray-300">
-              <span className="mb-1 block">Notas</span>
-              <textarea
-                value={closeNotes}
-                onChange={(event) => setCloseNotes(event.target.value)}
-                disabled={summary?.cerrado}
-                className="premium-input min-h-20"
-              />
-            </label>
             {!summary?.cerrado && (
-              <div className="space-y-3 rounded-lg border border-gray-700 p-3">
-                <label className="flex items-center gap-2 text-sm text-gray-200">
-                  <input type="checkbox" checked={depositToBank} onChange={(event) => {
-                    setDepositToBank(event.target.checked);
-                    if (event.target.checked && !depositAmount) setDepositAmount(String(expectedCash));
-                  }} /> El efectivo fue depositado al banco
+              <>
+                <div className="grid grid-cols-3 gap-2 border-b border-gray-800 pb-4 text-center text-[11px] font-semibold">
+                  <div className="text-green-300"><span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-green-500/15">✓</span>Revisar</div>
+                  <div className="text-primary-light"><span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary/20">2</span>Contar</div>
+                  <div className="text-gray-500"><span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-gray-800">3</span>Enviar</div>
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-gray-800 bg-[#111315] p-3 text-sm">
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Ventas en efectivo</span><strong className="text-white">{money(grossCash)}</strong></div>
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Cobros de crédito</span><strong className="text-green-200">+{money(creditPaymentTotals.totalEfectivo)}</strong></div>
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Gastos en efectivo</span><strong className="text-amber-200">-{money(expenseTotals.totalEfectivo)}</strong></div>
+                  <div className="flex justify-between gap-3 border-t border-gray-700 pt-2 font-bold text-white"><span>Efectivo esperado</span><strong className="text-green-300">{money(expectedCash)}</strong></div>
+                </div>
+
+                <label className="block text-sm text-gray-200">
+                  <span className="mb-1.5 block font-semibold">¿Cuánto dinero contaste físicamente?</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={declaredCashInput}
+                    onChange={(event) => { if (moneyInputPattern.test(event.target.value)) setDeclaredCashInput(event.target.value); }}
+                    className="premium-input h-12 text-lg font-bold"
+                    placeholder="0,00"
+                    aria-describedby="cash-reconciliation-status"
+                  />
                 </label>
-                {depositToBank && <>
-                  <label className="block text-sm text-gray-300"><span className="mb-1 block">Monto depositado</span><input className="premium-input" inputMode="decimal" value={depositAmount} onChange={(event) => { if (moneyInputPattern.test(event.target.value)) setDepositAmount(event.target.value); }} /></label>
-                  <label className="block text-sm text-gray-300"><span className="mb-1 block">Referencia o comprobante</span><input className="premium-input" maxLength={120} value={depositReference} onChange={(event) => setDepositReference(event.target.value)} /></label>
-                  <button type="button" onClick={fillBankDepositNote} className="btn-secondary w-full">Usar todo el efectivo esperado</button>
-                </>}
-              </div>
+                <ReconciliationStatus id="cash-reconciliation-status" kind="Efectivo" difference={difference} money={money} />
+
+                <div className="space-y-2 rounded-lg border border-gray-800 bg-[#111315] p-3 text-sm">
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Ventas por QR</span><strong className="text-white">{money(grossQr)}</strong></div>
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Cobros de crédito</span><strong className="text-blue-200">+{money(creditPaymentTotals.totalQr)}</strong></div>
+                  <div className="flex justify-between gap-3 text-gray-400"><span>Gastos por QR</span><strong className="text-amber-200">-{money(expenseTotals.totalQr)}</strong></div>
+                  <div className="flex justify-between gap-3 border-t border-gray-700 pt-2 font-bold text-white"><span>QR esperado</span><strong className="text-blue-300">{money(expectedQr)}</strong></div>
+                </div>
+
+                <label className="block text-sm text-gray-200">
+                  <span className="mb-1.5 block font-semibold">Monto verificado en la cuenta QR</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={verifiedQrInput}
+                    onChange={(event) => { if (moneyInputPattern.test(event.target.value)) setVerifiedQrInput(event.target.value); }}
+                    className="premium-input h-12 text-lg font-bold"
+                    placeholder="0,00"
+                    aria-describedby="qr-reconciliation-status"
+                  />
+                  <span className="mt-1.5 block text-xs text-gray-500">Comprueba los abonos en la aplicación o cuenta bancaria.</span>
+                </label>
+                <ReconciliationStatus id="qr-reconciliation-status" kind="QR" difference={reconciliation.qrDifference} money={money} />
+
+                <label className="block text-sm text-gray-300">
+                  <span className="mb-1 block font-semibold">Observaciones {reconciliation.hasDifference ? <span className="text-amber-300">(obligatorias por la diferencia)</span> : "(opcional)"}</span>
+                  <textarea
+                    value={closeNotes}
+                    onChange={(event) => setCloseNotes(event.target.value)}
+                    className="premium-input min-h-20"
+                    maxLength={500}
+                    placeholder={reconciliation.hasDifference ? "Explica el motivo del sobrante o faltante..." : "Agrega una nota si es necesario..."}
+                  />
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-700 bg-[#111315] p-3 text-sm text-gray-200">
+                  <input
+                    type="checkbox"
+                    checked={reconciliationConfirmed}
+                    onChange={(event) => setReconciliationConfirmed(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-orange-500"
+                  />
+                  <span>Confirmo que conté todo el efectivo y verifiqué los pagos QR.</span>
+                </label>
+
+                <div className="space-y-3 rounded-lg border border-gray-700 p-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-200">
+                    <input type="checkbox" checked={depositToBank} onChange={(event) => {
+                      setDepositToBank(event.target.checked);
+                      if (event.target.checked && !depositAmount) setDepositAmount(String(expectedCash));
+                    }} /> El efectivo fue depositado al banco
+                  </label>
+                  {depositToBank && <>
+                    <label className="block text-sm text-gray-300"><span className="mb-1 block">Monto depositado</span><input className="premium-input" inputMode="decimal" value={depositAmount} onChange={(event) => { if (moneyInputPattern.test(event.target.value)) setDepositAmount(event.target.value); }} /></label>
+                    <label className="block text-sm text-gray-300"><span className="mb-1 block">Referencia o comprobante</span><input className="premium-input" maxLength={120} value={depositReference} onChange={(event) => setDepositReference(event.target.value)} /></label>
+                    <button type="button" onClick={fillBankDepositNote} className="btn-secondary w-full">Preparar depósito del efectivo esperado</button>
+                  </>}
+                </div>
+              </>
             )}
             {summary?.cerrado ? (
               <>
@@ -677,19 +712,19 @@ export default function HistorialVentas() {
               </>
             ) : (
               <div className="grid gap-2">
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-                  Envía la caja para que el administrador pueda aprobarla o devolverla con una observación.
-                </div>
                 <button
                   onClick={handleCloseCash}
-                  disabled={closingCash}
-                  className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
+                  disabled={closingCash || !reconciliation.canSubmit}
+                  className="btn-primary flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <LockKeyhole size={18} /> {closingCash ? "Enviando..." : summary?.estadoCaja === "OBSERVADO" ? "Reenviar cierre corregido" : "Enviar cierre a revisión"}
+                  {summary?.estadoCaja === "OBSERVADO" ? <Send size={18} /> : <LockKeyhole size={18} />}
+                  {closingCash ? "Enviando..." : summary?.estadoCaja === "OBSERVADO" ? "Reenviar cierre corregido" : "Enviar cierre a revisión"}
                 </button>
+                {!reconciliation.canSubmit && <p className="text-center text-xs text-gray-500">Completa la verificación para habilitar el envío.</p>}
+                <p className="text-center text-xs text-gray-500">Se enviará al administrador para revisión.</p>
               </div>
             )}
-          </div>
+          </aside>
         </div>
       </div>
 
@@ -722,6 +757,41 @@ export default function HistorialVentas() {
           onConfirm={handleCreditPayment}
         />
       )}
+    </div>
+  );
+}
+
+function ReconciliationStatus({
+  id,
+  kind,
+  difference,
+  money: formatMoney,
+}: {
+  id: string;
+  kind: "Efectivo" | "QR";
+  difference: number | null;
+  money: (value: number) => string;
+}) {
+  if (difference === null) {
+    return <div id={id} className="rounded-lg border border-gray-700 bg-gray-800/30 p-3 text-sm text-gray-400">Ingresa el monto que verificaste.</div>;
+  }
+  if (difference === 0) {
+    return (
+      <div id={id} className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm font-semibold text-green-200">
+        <CheckCircle2 size={17} /> {kind} correcto. No existen sobrantes ni faltantes.
+      </div>
+    );
+  }
+  if (difference < 0) {
+    return (
+      <div id={id} className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-semibold text-red-200">
+        Faltan {formatMoney(Math.abs(difference))}. Vuelve a verificar y explica la diferencia si continúa.
+      </div>
+    );
+  }
+  return (
+    <div id={id} className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-semibold text-amber-200">
+      Sobran {formatMoney(difference)}. Revisa las ventas y gastos antes de enviar.
     </div>
   );
 }
