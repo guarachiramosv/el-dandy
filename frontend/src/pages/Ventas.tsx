@@ -1,31 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   LockKeyhole,
   Printer,
-  Receipt,
-  Search,
-  ShoppingCart,
-  Trash2,
   X,
 } from "lucide-react";
-import { Customer, DailySalesSummary, PaymentMethod, Product, Sale } from "../types";
+import { Customer, DailySalesSummary, PaymentMethod, Sale } from "../types";
 import { createSale, fetchDailySalesSummary } from "../services/sales";
 import { getCurrentUser } from "../services/auth";
 import { createCustomer, fetchCustomers, updateCustomer } from "../services/customers";
 import { fetchProductById, searchProductsForSale } from "../services/products";
 import { buildThermalReceiptHtml } from "../utils/thermalReceipt";
-import { filterAndSortBySearch, getSearchTerms, normalizeSearchText } from "../utils/fuzzySearch";
-
-interface CartItem {
-  product: Product;
-  cantidad: number;
-}
-
-const money = (value: number) =>
-  `Bs ${value.toLocaleString("es-BO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { CorrectionBanner } from "../components/pos/CorrectionBanner";
+import { CurrentSalePanel } from "../components/pos/CurrentSalePanel";
+import { ProductSearchPanel } from "../components/pos/ProductSearchPanel";
+import { formatQuantity, money, productConditionClass, productConditionLabel, validateInvoiceCustomer, validateSaleDraft, type CartItem, type SellerPaymentOption } from "../components/pos/posDomain";
+import { useProductSearch } from "../components/pos/useProductSearch";
+import { useSaleCart } from "../components/pos/useSaleCart";
 
 const formatDateTime = (value: string) =>
   new Date(value).toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" });
@@ -37,19 +29,8 @@ const formatInputDate = (value: string) => {
 };
 
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : "Ocurrio un error inesperado.";
-const sellerPaymentOptions = ["EFECTIVO", "QR", "MIXTO", "CREDITO"] as const;
-type SellerPaymentOption = (typeof sellerPaymentOptions)[number];
 const salePaymentLabel = (tipoVenta: "CONTADO" | "CREDITO", metodoPago: PaymentMethod) =>
   tipoVenta === "CREDITO" ? "CREDITO" : metodoPago;
-
-const productUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "unidades";
-const productStep = (product: Product) => product.unidadVenta === "METRO" ? 0.5 : 1;
-const formatQuantity = (value: number, product?: Product) => `${value.toLocaleString("es-BO", { maximumFractionDigits: 2 })} ${product ? productUnitLabel(product) : "unidades"}`;
-const productConditionLabel = (condition?: string | null) => condition === "USADO" ? "Usado" : "Nuevo";
-const productConditionClass = (condition?: string | null) =>
-  condition === "USADO"
-    ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-    : "border-green-500/40 bg-green-500/10 text-green-200";
 
 export default function Ventas() {
   const location = useLocation();
@@ -62,25 +43,41 @@ export default function Ventas() {
   const productToAddFromInventory = (location.state as { addProductId?: string } | null)?.addProductId;
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySalesSummary | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
   const [metodoPago, setMetodoPago] = useState<PaymentMethod>("EFECTIVO");
   const [montoEfectivoMixto, setMontoEfectivoMixto] = useState("");
   const [tipoVenta, setTipoVenta] = useState<"CONTADO" | "CREDITO">("CONTADO");
   const [fechaVencimiento, setFechaVencimiento] = useState("");
-  const [descuento, setDescuento] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
-  const [searchResults, setSearchResults] = useState<Product[]>([]);
-  const [searchingProducts, setSearchingProducts] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
   const [invoiceCustomerNit, setInvoiceCustomerNit] = useState("");
   const [invoiceCustomerPhone, setInvoiceCustomerPhone] = useState("");
   const [correctionReason, setCorrectionReason] = useState(correctionReasonFromAdmin);
   const user = getCurrentUser();
+  const {
+    cart,
+    discount: descuento,
+    subtotal,
+    total,
+    totalQuantity,
+    getAvailableStock,
+    addProduct,
+    changeQuantity,
+    removeProduct,
+    setDiscount: setDescuento,
+    clear: clearCart,
+  } = useSaleCart({ branchId: user?.sucursalId, onError: setMessage });
+  const {
+    searchTerm,
+    setSearchTerm,
+    clearSearch,
+    hasSearch,
+    filteredProducts,
+    searching: searchingProducts,
+    error: searchError,
+  } = useProductSearch(searchProductsForSale);
 
   const loadDailySummary = useCallback(async () => {
     try {
@@ -105,81 +102,6 @@ export default function Ventas() {
     }
   }, [metodoPago, tipoVenta]);
 
-  useEffect(() => {
-    const query = searchTerm.trim();
-    if (!query) {
-      const timer = window.setTimeout(() => {
-        setSearchResults([]);
-        setSearchError(null);
-        setSearchingProducts(false);
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setSearchingProducts(true);
-      searchProductsForSale(query)
-        .then((items) => {
-          if (cancelled) return;
-          setSearchResults(items);
-          setSearchError(null);
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          setSearchResults([]);
-          setSearchError(getErrorMessage(err));
-        })
-        .finally(() => {
-          if (!cancelled) setSearchingProducts(false);
-        });
-    }, 220);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [searchTerm]);
-
-  const getAvailableStock = useCallback((product: Product) => {
-    if (!user?.sucursalId) return product.stock;
-    const activeBranchStocks = product.stockSucursales?.filter(
-      (item) => item.estado === "ACTIVO" && item.activo !== false,
-    ) || [];
-    const sellerBranchStock = activeBranchStocks.find((item) => item.sucursalId === user.sucursalId);
-    if (sellerBranchStock) return sellerBranchStock.stock;
-    const productBranchStock = activeBranchStocks.find((item) => item.sucursalId === product.sucursalId);
-    if (productBranchStock) return productBranchStock.stock;
-    return product.stock;
-  }, [user?.sucursalId]);
-
-  const hasProductSearch = normalizeSearchText(searchTerm).length > 0;
-  const clearProductSearch = () => setSearchTerm("");
-
-  const filteredProducts = useMemo(() => {
-    const terms = getSearchTerms(searchTerm);
-    if (terms.length === 0) return [];
-    const sourceProducts = Array.from(new Map(searchResults.map((product) => [product.id, product])).values());
-    return filterAndSortBySearch(
-      sourceProducts,
-      searchTerm,
-      (product) => [
-        { value: product.codigo, weight: 2 },
-        { value: product.codigoRepuesto, weight: 1.9 },
-        { value: product.descripcion, weight: 1.5 },
-        { value: product.descripcionDetallada, weight: 0.8 },
-        { value: product.ubicacion, weight: 1.25 },
-        { value: product.marca, weight: 1 },
-        { value: product.categoria?.nombre, weight: 0.9 },
-        { value: product.sucursal?.nombre, weight: 0.7 },
-      ],
-      (product) => product.descripcion,
-    );
-  }, [searchResults, searchTerm]);
-
-  const subtotal = cart.reduce((acc, item) => acc + item.product.precioVenta * item.cantidad, 0);
-  const totalQuantity = cart.reduce((acc, item) => acc + item.cantidad, 0);
-  const total = Math.max(subtotal - descuento, 0);
   const selectedPaymentOption: SellerPaymentOption = tipoVenta === "CREDITO" ? "CREDITO" : metodoPago === "MIXTO" ? "MIXTO" : metodoPago === "QR" ? "QR" : "EFECTIVO";
   const mixedCashAmount = Number(montoEfectivoMixto.replace(",", ".")) || 0;
   const mixedQrAmount = Math.max(Math.round((total - mixedCashAmount) * 100) / 100, 0);
@@ -197,33 +119,6 @@ export default function Ventas() {
     setFechaVencimiento("");
   };
 
-  const addToCart = useCallback((product: Product) => {
-    setMessage(null);
-    const availableStock = getAvailableStock(product);
-    const step = productStep(product);
-    if (availableStock < step) {
-      setMessage("Producto sin stock disponible en tu sucursal.");
-      return false;
-    }
-    const existing = cart.find((item) => item.product.id === product.id);
-    if (existing && existing.cantidad + step > availableStock) {
-      setMessage(`Stock insuficiente. Disponible: ${availableStock}`);
-      return false;
-    }
-    const productForCart = { ...product, stock: availableStock };
-    setCart((prev) => {
-      const current = prev.find((item) => item.product.id === product.id);
-      if (current) {
-        const next = current.cantidad + step;
-        return prev.map((item) =>
-          item.product.id === product.id ? { ...item, cantidad: next } : item,
-        );
-      }
-      return [...prev, { product: productForCart, cantidad: step }];
-    });
-    return true;
-  }, [cart, getAvailableStock]);
-
   useEffect(() => {
     if (!productToAddFromInventory) return;
     let cancelled = false;
@@ -231,7 +126,7 @@ export default function Ventas() {
       fetchProductById(productToAddFromInventory)
         .then((product) => {
           if (cancelled) return;
-        const added = addToCart(product);
+        const added = addProduct(product);
         if (added) setMessage("Producto agregado al carrito desde Inventario.");
         })
         .catch(() => {
@@ -245,34 +140,25 @@ export default function Ventas() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [addToCart, navigate, productToAddFromInventory]);
-
-  const changeQuantity = (productId: string, delta: number) => {
-    setCart((prev) =>
-      prev.map((item) => {
-        if (item.product.id !== productId) return item;
-        const step = productStep(item.product);
-        const next = Math.max(step, Math.min(item.product.stock, item.cantidad + delta * step));
-        if (next === item.cantidad && delta > 0) setMessage(`Stock insuficiente. Disponible: ${item.product.stock}`);
-        return { ...item, cantidad: next };
-      }),
-    );
-  };
-
-  const removeItem = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
-  };
+  }, [addProduct, navigate, productToAddFromInventory]);
 
   const openInvoice = () => {
     setMessage(null);
-    if (!user) return setMessage("Debes iniciar sesion nuevamente.");
-    if (cart.length === 0) return setMessage("Agrega al menos un producto.");
-    if (dailySummary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
-    if (isCorrectionMode && correctionReason.trim().length < 5) return setMessage("Explica el motivo de la correccion del cierre.");
-    if (tipoVenta === "CREDITO" && !fechaVencimiento) return setMessage("Indica la fecha en que el cliente pagara el credito.");
-    if (metodoPago === "MIXTO" && (mixedCashAmount <= 0 || mixedCashAmount >= total)) {
-      return setMessage("En pago mixto, el monto en efectivo debe ser mayor a cero y menor al total.");
-    }
+    const validationError = validateSaleDraft({
+      hasUser: Boolean(user),
+      cart,
+      isClosed: Boolean(dailySummary?.cerrado),
+      isCorrectionMode,
+      correctionReason,
+      saleType: tipoVenta,
+      dueDate: fechaVencimiento,
+      paymentMethod: metodoPago,
+      mixedCashAmount,
+      subtotal,
+      discount: descuento,
+      total,
+    });
+    if (validationError) return setMessage(validationError);
     setInvoiceCustomerName("");
     setInvoiceCustomerNit("");
     setInvoiceCustomerPhone("");
@@ -284,12 +170,8 @@ export default function Ventas() {
     const nit = invoiceCustomerNit.trim();
     const phone = invoiceCustomerPhone.trim();
 
-    if (!name) {
-      throw new Error("Ingresa el nombre del cliente o empresa para la factura.");
-    }
-    if (tipoVenta === "CREDITO" && !phone) {
-      throw new Error("Ingresa el numero de celular del cliente para la venta a credito.");
-    }
+    const customerError = validateInvoiceCustomer(name, phone, tipoVenta);
+    if (customerError) throw new Error(customerError);
 
     const normalizedName = name.toLowerCase();
     const existing = customers.find((customer) => {
@@ -318,9 +200,21 @@ export default function Ventas() {
 
   const handleConfirmSale = async () => {
     setMessage(null);
-    if (!user) return setMessage("Debes iniciar sesion nuevamente.");
-    if (cart.length === 0) return setMessage("Agrega al menos un producto.");
-    if (dailySummary?.cerrado) return setMessage("La caja de hoy ya fue cerrada.");
+    const validationError = validateSaleDraft({
+      hasUser: Boolean(user),
+      cart,
+      isClosed: Boolean(dailySummary?.cerrado),
+      isCorrectionMode,
+      correctionReason,
+      saleType: tipoVenta,
+      dueDate: fechaVencimiento,
+      paymentMethod: metodoPago,
+      mixedCashAmount,
+      subtotal,
+      discount: descuento,
+      total,
+    });
+    if (validationError || !user) return setMessage(validationError || "Debes iniciar sesión nuevamente.");
 
     setSaving(true);
     try {
@@ -346,8 +240,7 @@ export default function Ventas() {
           descuentoItem: 0,
         })),
       });
-      setCart([]);
-      setDescuento(0);
+      clearCart();
       setTipoVenta("CONTADO");
       setMetodoPago("EFECTIVO");
       setMontoEfectivoMixto("");
@@ -374,320 +267,65 @@ export default function Ventas() {
   };
 
   return (
-    <div className="flex flex-col xl:flex-row h-full gap-6">
-      <div className="flex-1 flex flex-col space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <ShoppingCart className="text-primary" /> Punto de Venta
-          </h2>
-          <p className="text-gray-400 text-sm mt-1">Arma el carrito, revisa el detalle y emite la factura al confirmar</p>
+    <div className="flex min-h-full flex-col gap-4">
+      {isCorrectionMode && (
+        <CorrectionBanner
+          dateLabel={formatInputDate(correctionDate || "")}
+          reason={correctionReason}
+          onReasonChange={setCorrectionReason}
+          onBack={() => navigate(`/seller/historial?fecha=${correctionDate}`)}
+        />
+      )}
+
+      {message && (
+        <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary-light">{message}</div>
+      )}
+
+      {dailySummary?.cerrado && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <LockKeyhole size={18} /> Caja cerrada por hoy. No se pueden registrar más ventas en esta jornada.
         </div>
+      )}
 
-        {message && <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-primary-light">{message}</div>}
-        {isCorrectionMode && (
-          <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
-            <div className="flex items-center gap-2 font-black uppercase"><LockKeyhole size={18} /> Corrigiendo caja del {formatInputDate(correctionDate || "")}</div>
-            <p className="text-sm">Esta venta quedará registrada en la jornada observada y conservará la fecha real en que hiciste la corrección.</p>
-            <label className="block text-sm">
-              <span className="mb-1 block font-semibold">Motivo de la corrección</span>
-              <textarea className="premium-input min-h-20" maxLength={300} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} />
-            </label>
-            {cart.length === 0 && dailySummary?.ventas.length ? (
-              <button type="button" className="btn-secondary" onClick={() => navigate(`/seller/historial?fecha=${correctionDate}`)}>Volver al cierre observado</button>
-            ) : null}
-          </div>
-        )}
-        {dailySummary?.cerrado && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 flex items-center gap-2">
-            <LockKeyhole size={18} /> Caja cerrada por hoy. No se pueden registrar mas ventas en esta jornada.
-          </div>
-        )}
-
-        <div className="pos-search-card">
-          <div className="pos-search-shell">
-            <Search className="pos-search-icon" />
-            <input
-              type="text"
-              aria-label="Buscar producto"
-              autoComplete="off"
-              placeholder="Buscar por nombre o codigo..."
-              className="pos-search-input"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") clearProductSearch();
-              }}
-            />
-            {hasProductSearch && (
-              <button
-                type="button"
-                onClick={clearProductSearch}
-                className="pos-search-clear"
-                aria-label="Borrar busqueda"
-                title="Borrar busqueda"
-              >
-                <X size={24} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {hasProductSearch && (
-          <div className="flex items-center justify-between rounded-lg border border-gray-700 bg-grafito-900/70 px-4 py-3 text-sm text-gray-300">
-            <span>
-              {searchingProducts
-                ? "Buscando en inventario..."
-                : `${filteredProducts.length} producto(s) encontrados para "${searchTerm.trim()}"`}
-            </span>
-            {searchError && <span className="text-red-300">Error: {searchError}</span>}
-          </div>
-        )}
-
-        {filteredProducts.length > 0 && (
-          <div className="rounded-2xl border border-primary/25 bg-grafito-900/80 p-4 shadow-lg shadow-black/25">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-bold text-white">Selecciona un producto</h3>
-              <span className="text-sm text-gray-400">{filteredProducts.length} resultado(s)</span>
-            </div>
-            <div className="grid max-h-96 grid-cols-1 gap-3 overflow-y-auto pr-1">
-              {filteredProducts.map((product) => {
-                const selected = cart.find((item) => item.product.id === product.id);
-                const availableStock = getAvailableStock(product);
-                const shelf = product.ubicacion?.trim() || "Sin ubicacion";
-                const isBlocked = availableStock <= 0;
-                return (
-                  <button
-                    key={product.id}
-                    onClick={() => addToCart(product)}
-                    disabled={isBlocked}
-                    className="group text-left rounded-xl border border-gray-700 bg-grafito-800/90 p-4 transition-colors hover:border-primary/70 hover:bg-grafito-800 disabled:cursor-not-allowed disabled:opacity-75"
-                  >
-                    <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
-                      <div className="min-w-0">
-                        <p className="truncate text-lg font-black text-white">{product.descripcion}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 font-mono text-xs text-gray-300">{product.codigo}</span>
-                          <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-sm font-bold text-primary-light">
-                            Estante: {shelf}
-                          </span>
-                          <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 text-xs text-gray-300">
-                            {product.sucursal?.nombre || "Sucursal"}
-                          </span>
-                          <span className={`rounded-md border px-2 py-1 text-xs font-bold ${productConditionClass(product.condicion)}`}>
-                            {productConditionLabel(product.condicion)}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm text-gray-400">
-                          {product.marca || "Sin marca"} - Stock disponible {formatQuantity(availableStock, product)}
-                        </p>
-                        {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {formatQuantity(selected.cantidad, product)}</p>}
-                      </div>
-                      <div className="text-left lg:text-right">
-                        <span className="block text-2xl font-black text-primary-light">{money(product.precioVenta)}</span>
-                        <span className="text-xs text-gray-500">Precio venta</span>
-                      </div>
-                      <span className={`inline-flex h-11 items-center justify-center rounded-lg px-4 text-sm font-bold ${
-                        isBlocked ? "border border-amber-500/30 bg-amber-500/10 text-amber-200" : "bg-primary-gradient text-white"
-                      }`}>
-                        {availableStock <= 0 ? "Sin stock" : "Agregar"}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="hidden">
-          {filteredProducts.map((product) => {
-            const selected = cart.find((item) => item.product.id === product.id);
-            const availableStock = getAvailableStock(product);
-            const shelf = product.ubicacion?.trim() || "Sin ubicacion";
-            return (
-              <button
-                key={product.id}
-                onClick={() => addToCart(product)}
-                disabled={availableStock <= 0 || dailySummary?.cerrado}
-                className="text-left rounded-xl border border-gray-700 bg-grafito-800/75 p-4 transition-colors hover:border-primary/70 hover:bg-grafito-800 disabled:opacity-50"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-lg font-black text-white">{product.descripcion}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="rounded-md border border-gray-700 bg-black/20 px-2 py-1 font-mono text-xs text-gray-300">{product.codigo}</span>
-                      <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-sm font-bold text-primary-light">
-                        Estante: {shelf}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm text-gray-400">
-                      {product.marca || "Sin marca"} · Stock disponible {formatQuantity(availableStock, product)}
-                    </p>
-                    {selected && <p className="mt-1 text-xs font-semibold text-green-300">En carrito: {formatQuantity(selected.cantidad, product)}</p>}
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <span className="block text-xl font-black text-primary-light">{money(product.precioVenta)}</span>
-                    <span className="mt-1 block text-xs text-gray-500">{product.sucursal?.nombre || "Sucursal"}</span>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {filteredProducts.length === 0 && (
-          <div className="rounded-lg border border-gray-700 bg-grafito-800/60 p-6 text-center text-gray-400">
-            {searchingProducts
-              ? "Buscando productos..."
-              : searchError
-                ? `No se pudo buscar en el servidor: ${searchError}`
-                : hasProductSearch
-                  ? "No hay productos que coincidan con esa busqueda."
-                  : "Busca un producto por nombre, codigo o estante para agregarlo a la venta."}
-          </div>
-        )}
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel flex min-h-[360px] flex-1 flex-col overflow-hidden">
-          <div className="bg-grafito-800/80 p-4 border-b border-gray-700 flex justify-between items-center">
-            <h3 className="font-medium text-white">Detalle de Productos</h3>
-            <span className="text-sm text-gray-400">{cart.length} items / {totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
-          </div>
-          <div className="overflow-x-auto flex-1 p-4">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-sm uppercase text-gray-400 border-b border-gray-700">
-                  <th className="pb-3 font-medium">Codigo</th>
-                  <th className="pb-3 font-medium">Descripcion</th>
-                  <th className="pb-3 font-medium text-center">Cantidad</th>
-                  <th className="pb-3 font-medium text-right">Precio unit.</th>
-                  <th className="pb-3 font-medium text-right">Calculo</th>
-                  <th className="pb-3 font-medium text-right">Total linea</th>
-                  <th className="pb-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/50">
-                {cart.map((item) => (
-                  <tr key={item.product.id}>
-                    <td className="py-4 font-mono text-sm text-gray-400">{item.product.codigo}</td>
-                    <td className="py-4">
-                      <p className="font-medium text-gray-200">{item.product.descripcion}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                        <span className="text-gray-500">Disponible: {formatQuantity(item.product.stock, item.product)}</span>
-                        <span className={`rounded border px-2 py-0.5 font-bold ${productConditionClass(item.product.condicion)}`}>
-                          {productConditionLabel(item.product.condicion)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => changeQuantity(item.product.id, -1)} className="w-6 h-6 rounded-md bg-grafito-600 hover:bg-grafito-500 text-white">-</button>
-                        <span className="w-14 text-center text-white">{formatQuantity(item.cantidad, item.product)}</span>
-                        <button onClick={() => changeQuantity(item.product.id, 1)} className="w-6 h-6 rounded-md bg-grafito-600 hover:bg-grafito-500 text-white">+</button>
-                      </div>
-                    </td>
-                    <td className="py-4 text-right text-gray-400">{money(item.product.precioVenta)}</td>
-                    <td className="py-4 text-right text-gray-400">{formatQuantity(item.cantidad, item.product)} x {money(item.product.precioVenta)}</td>
-                    <td className="py-4 text-right font-medium text-primary-light">{money(item.product.precioVenta * item.cantidad)}</td>
-                    <td className="py-4 text-right">
-                      <button onClick={() => removeItem(item.product.id)} className="p-2 text-gray-500 hover:text-accent hover:bg-accent/10 rounded-lg">
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {cart.length > 0 && (
-              <div className="mt-4 flex justify-end border-t border-gray-800 pt-4">
-                <div className="min-w-64 rounded-xl border border-gray-700 bg-grafito-900/40 p-4">
-                  <div className="flex justify-between text-sm text-gray-400">
-                    <span>Cantidad total</span>
-                    <span>{totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="mt-2 flex justify-between text-lg font-bold text-white">
-                    <span>Total carrito</span>
-                    <span className="text-primary-light">{money(subtotal)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </motion.div>
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]">
+        <ProductSearchPanel
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          onClearSearch={clearSearch}
+          hasSearch={hasSearch}
+          searching={searchingProducts}
+          searchError={searchError}
+          products={filteredProducts}
+          cart={cart}
+          isClosed={Boolean(dailySummary?.cerrado)}
+          getAvailableStock={getAvailableStock}
+          onAddProduct={(product) => { setMessage(null); addProduct(product); }}
+        />
+        <CurrentSalePanel
+          cart={cart}
+          subtotal={subtotal}
+          discount={descuento}
+          total={total}
+          totalQuantity={totalQuantity}
+          selectedPaymentOption={selectedPaymentOption}
+          paymentMethod={metodoPago}
+          saleType={tipoVenta}
+          mixedCashInput={montoEfectivoMixto}
+          mixedQrAmount={mixedQrAmount}
+          dueDate={fechaVencimiento}
+          isClosed={Boolean(dailySummary?.cerrado)}
+          onClear={clearCart}
+          onChangeQuantity={changeQuantity}
+          onRemoveProduct={removeProduct}
+          onDiscountChange={setDescuento}
+          onPaymentOptionChange={selectPaymentOption}
+          onMixedCashChange={(value) => {
+            if (/^[0-9]*([.,][0-9]{0,2})?$/.test(value)) setMontoEfectivoMixto(value);
+          }}
+          onDueDateChange={setFechaVencimiento}
+          onCheckout={openInvoice}
+        />
       </div>
-
-      <aside className="flex w-full flex-col space-y-6 xl:w-[420px]">
-        <div className="glass-panel flex flex-1 flex-col p-5">
-          <h3 className="mb-4 flex items-center gap-2 font-medium text-white">
-            <Receipt className="text-gray-400" size={20} /> Resumen
-          </h3>
-          <div className="flex-1 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              {sellerPaymentOptions.map((option) => (
-                <button
-                  key={option}
-                  onClick={() => selectPaymentOption(option)}
-                  className={`rounded-lg border py-2 text-sm font-medium ${selectedPaymentOption === option ? "border-primary/50 bg-primary/10 text-primary" : "border-gray-600 bg-grafito-800 text-gray-300"}`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-            {metodoPago === "MIXTO" && tipoVenta === "CONTADO" && (
-              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
-                <label className="block text-gray-300">
-                  <span className="mb-1 block text-sm font-semibold">Monto en efectivo</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={montoEfectivoMixto}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      if (/^[0-9]*([.,][0-9]{0,2})?$/.test(value)) setMontoEfectivoMixto(value);
-                    }}
-                    placeholder="0,00"
-                    className="premium-input"
-                  />
-                </label>
-                <div className="flex justify-between text-sm text-gray-300">
-                  <span>Monto por QR</span>
-                  <strong className="text-primary-light">{money(mixedQrAmount)}</strong>
-                </div>
-                <p className="text-xs text-gray-500">El monto QR se calcula automáticamente para completar el total.</p>
-              </div>
-            )}
-            {tipoVenta === "CREDITO" && (
-              <label className="block text-gray-400">
-                <span className="mb-1 block">Fecha vencimiento</span>
-                <input type="date" value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} className="premium-input" />
-              </label>
-            )}
-            <div className="flex justify-between text-gray-400">
-              <span>Productos</span>
-              <span>{cart.length} items / {totalQuantity.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
-            </div>
-            <div className="flex justify-between text-gray-400">
-              <span>Subtotal</span>
-              <span>{money(subtotal)}</span>
-            </div>
-            <label className="block text-gray-400">
-              <span className="mb-1 block">Descuento</span>
-              <input type="text" inputMode="decimal" value={descuento} onChange={(e) => setDescuento(Number(e.target.value))} className="premium-input" />
-            </label>
-            <div className="pt-4 border-t border-gray-700 flex justify-between items-center">
-              <span className="text-lg font-medium text-white">Total</span>
-              <span className="text-3xl font-bold text-primary-light">{money(total)}</span>
-            </div>
-          </div>
-          <div className="mt-4 shrink-0 border-t border-gray-700 pt-4">
-            <button
-              onClick={openInvoice}
-              disabled={cart.length === 0 || dailySummary?.cerrado}
-              className="btn-primary flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-base font-bold shadow-lg shadow-primary/20 disabled:opacity-60"
-            >
-              Pasar a Factura <ArrowRight size={20} className="shrink-0" />
-            </button>
-          </div>
-        </div>
-      </aside>
 
       {invoiceOpen && (
         <InvoiceModal
