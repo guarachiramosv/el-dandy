@@ -239,7 +239,7 @@ export class ProductService {
     return {
       ...product,
       stock: branchStock.stock,
-      ubicacion: branchStock.ubicacion || product.ubicacion,
+      ubicacion: (product.sucursalId === sucursalId ? product.ubicacion : null) || branchStock.ubicacion,
       sucursalId,
       sucursal: branchStock.sucursal || product.sucursal,
     };
@@ -529,6 +529,11 @@ export class ProductService {
     const nextCodigo = typeof data.codigo === 'string' ? data.codigo.trim() : current.codigo;
     const nextSucursalId = typeof data.sucursalId === 'string' ? data.sucursalId : current.sucursalId;
     const nextStock = typeof data.stock === 'number' ? data.stock : undefined;
+    const nextUbicacion: string | null | undefined = typeof data.ubicacion === 'string'
+      ? data.ubicacion.trim() || null
+      : data.ubicacion === null
+        ? null
+        : undefined;
 
     if (typeof data.codigo === 'string') data.codigo = nextCodigo;
     if (typeof data.codigoRepuesto === 'string') data.codigoRepuesto = data.codigoRepuesto.trim() || null;
@@ -543,6 +548,7 @@ export class ProductService {
       delete updateData.stock;
       delete updateData.deletedImageUrls;
       delete updateData.compraInicial;
+      if (nextSucursalId !== current.sucursalId) delete updateData.ubicacion;
 
       if (data.deletedImageUrls && data.deletedImageUrls.length > 0) {
         await tx.productoImagen.deleteMany({
@@ -585,7 +591,7 @@ export class ProductService {
         });
       }
 
-      if (nextStock !== undefined || nextSucursalId !== current.sucursalId) {
+      if (nextStock !== undefined || nextSucursalId !== current.sucursalId || nextUbicacion !== undefined) {
         const existingStock = await tx.productoStockSucursal.findUnique({
           where: { productoId_sucursalId: { productoId: id, sucursalId: nextSucursalId } },
         });
@@ -593,14 +599,20 @@ export class ProductService {
         const stockNuevo = nextStock ?? stockAnterior;
         await tx.productoStockSucursal.upsert({
           where: { productoId_sucursalId: { productoId: id, sucursalId: nextSucursalId } },
-          update: { stock: stockNuevo },
+          update: {
+            stock: stockNuevo,
+            ...(nextUbicacion !== undefined ? { ubicacion: nextUbicacion } : {}),
+          },
           create: {
             productoId: id,
             sucursalId: nextSucursalId,
             stock: stockNuevo,
+            ubicacion: nextUbicacion ?? null,
           },
         });
-        await this.syncProductTotalStock(tx, id);
+        if (nextStock !== undefined || nextSucursalId !== current.sucursalId) {
+          await this.syncProductTotalStock(tx, id);
+        }
 
         if (nextStock !== undefined && stockNuevo !== stockAnterior) {
           await stockService.recordMovement(tx, {

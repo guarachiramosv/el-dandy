@@ -35,7 +35,6 @@ const saleDetailRowsFrom = (report: SalesHistoryReport) =>
     const grossTotal = details.reduce((sum, detail) => sum + detail.precioUnitario * detail.cantidad, 0);
     const totalDiscount = Math.max(grossTotal - sale.total, 0);
     return details.map((detail, index) => {
-      const netFactor = sale.subtotal > 0 ? sale.total / sale.subtotal : 0;
       return {
         id: `${sale.id}-${detail.id}`,
         fecha: sale.createdAt,
@@ -46,7 +45,7 @@ const saleDetailRowsFrom = (report: SalesHistoryReport) =>
         codigo: detail.producto?.codigo || detail.tipoLinea || "",
         cantidad: detail.cantidad,
         precioUnitario: detail.precioUnitario,
-        total: detail.subtotal * netFactor,
+        subtotal: detail.subtotal,
         isLast: index === details.length - 1,
         saleSubtotal: grossTotal,
         saleDiscount: totalDiscount,
@@ -161,7 +160,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
           item.codigo,
           String(item.cantidad),
           item.producto,
-          money(item.total),
+          money(item.subtotal),
         ],
       },
       ...(item.isLast ? [{
@@ -244,7 +243,7 @@ const salesReportPdfBytes = (report: SalesHistoryReport, sucursal: string) => {
         page += pdfText("Codigo", 295, y + 4, 7, true);
         page += pdfText("Cant.", 345, y + 4, 7, true);
         page += pdfText("Producto", 390, y + 4, 7, true);
-        page += pdfText("Total", 710, y + 4, 7, true);
+        page += pdfText("Subtotal", 700, y + 4, 7, true);
       } else {
         page += pdfText("Fecha", 36, y + 4, 7, true);
         page += pdfText("Vendedor", 155, y + 4, 7, true);
@@ -631,7 +630,7 @@ export default function Reportes() {
                     <th className="col-code p-3">Codigo</th>
                     <th className="col-product p-3">Producto</th>
                     <th className="col-qty p-3 text-right">Cantidad</th>
-                    <th className="col-total p-3 text-right">Total</th>
+                    <th className="col-total p-3 text-right">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800 print:divide-gray-200">
@@ -644,10 +643,10 @@ export default function Reportes() {
                         <td className="p-3 font-mono">{item.codigo}</td>
                         <td className="p-3">
                           <p className="font-semibold">{item.producto}</p>
-                          <p className="print-muted text-xs text-gray-500 print:text-gray-600">{money(item.precioUnitario)} unit.</p>
+                          <p className="print-muted text-xs text-gray-500 print:text-gray-600">Precio unit.: {money(item.precioUnitario)}</p>
                         </td>
                         <td className="p-3 text-right">{item.cantidad}</td>
-                        <td className="p-3 text-right">{money(item.total)}</td>
+                        <td className="p-3 text-right">{money(item.subtotal)}</td>
                       </tr>
                       {item.isLast && (
                         <tr className="bg-gray-900/70 font-semibold print:bg-gray-100">

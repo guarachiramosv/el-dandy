@@ -307,7 +307,7 @@ function ProductModalContent({
   const selectedBranch = product?.stockSucursales?.find((item) => item.sucursalId === selectedSucursalId);
   const selectedBranchName = selectedBranch?.sucursal?.nombre || product?.sucursal?.nombre || "Sucursal seleccionada";
   const selectedBranchLocation = selectedBranch
-    ? selectedBranch.ubicacion || (product?.sucursalId === selectedBranch.sucursalId ? product?.ubicacion : null) || "Sin ubicacion"
+    ? (product?.sucursalId === selectedBranch.sucursalId ? product?.ubicacion : null) || selectedBranch.ubicacion || "Sin ubicacion"
     : "Sin ubicacion";
   const primaryPreviewImage = selectedPreviewUrls[0] || productImageUrl(existingImageUrls[0]);
   const initialPurchase = formData.compraInicial;

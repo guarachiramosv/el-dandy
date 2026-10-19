@@ -28,7 +28,7 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
   const getCoverImage = (product: Product) => product.imagenes?.[0]?.url || product.imagen;
   const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
   const getBranchLocation = (product: Product, sucursalId: string, location?: string | null) =>
-    location || (product.sucursalId === sucursalId ? product.ubicacion : null) || "Sin ubicacion";
+    (product.sucursalId === sucursalId ? product.ubicacion : null) || location || "Sin ubicacion";
 
   const statusStyles = {
     ACTIVO: "bg-green-500/10 text-green-300 border-green-500/25",
@@ -124,7 +124,6 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
                           {product.stockSucursales?.map((item) => (
                             <div key={item.id} className={item.estado === "ACTIVO" || !item.estado ? "" : "text-amber-400"}>
                               {item.sucursal?.nombre || "Sucursal"}: {item.stock} {getUnitLabel(product)}
-                              {` - ${getBranchLocation(product, item.sucursalId, item.ubicacion)}`}
                               {item.estado && item.estado !== "ACTIVO" ? ` (${item.estado})` : ""}
                             </div>
                           ))}
@@ -136,9 +135,14 @@ export default function ProductTable({ products, onEdit, onDelete, onView, onAdd
                     Bs {product.precioVenta.toLocaleString()}
                   </td>
                   <td className="p-4 text-sm text-gray-400">
-                    <span className="block">{product.ubicacion || "Sin ubicacion"}</span>
-                    {(product.stockSucursales?.length || 0) > 0 && (
-                      <div className="mt-1 space-y-0.5 text-xs text-gray-500">
+                    {(product.stockSucursales?.length || 0) === 0 ? (
+                      <span className="block">{product.ubicacion || "Sin ubicacion"}</span>
+                    ) : product.stockSucursales?.length === 1 ? (
+                      <span className="block">
+                        {getBranchLocation(product, product.stockSucursales[0].sucursalId, product.stockSucursales[0].ubicacion)}
+                      </span>
+                    ) : (
+                      <div className="space-y-0.5 text-xs text-gray-500">
                         {product.stockSucursales?.map((item) => (
                           <div key={item.id}>{item.sucursal?.nombre || "Sucursal"}: {getBranchLocation(product, item.sucursalId, item.ubicacion)}</div>
                         ))}

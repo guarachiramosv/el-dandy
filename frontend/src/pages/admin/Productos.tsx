@@ -30,6 +30,8 @@ const statusFilterOptions: Array<{ value: ProductStatusFilter | "deleted"; label
 
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const roundExchangeRate = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000;
+const currentBranchLocation = (product: Product, sucursalId: string, branchLocation?: string | null) =>
+  (product.sucursalId === sucursalId ? product.ubicacion : null) || branchLocation || "";
 
 export default function Productos() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -166,7 +168,7 @@ export default function Productos() {
       sucursalId,
       sucursal: branch?.sucursal || product.sucursal,
       stock: branch?.stock ?? product.stock,
-      ubicacion: branch?.ubicacion ?? product.ubicacion,
+      ubicacion: currentBranchLocation(product, sucursalId, branch?.ubicacion),
     };
 
     if (action === "VIEW" || action === "EDIT") {
@@ -218,7 +220,7 @@ export default function Productos() {
     const initialBranch = product.stockSucursales?.find((item) => item.sucursalId === initialSucursalId);
     setStockSucursalId(initialSucursalId);
     setStockCantidad(0);
-    setStockUbicacion(initialBranch?.ubicacion || product.ubicacion || "");
+    setStockUbicacion(currentBranchLocation(product, initialSucursalId, initialBranch?.ubicacion));
     setStockProveedorId(product.proveedorId || providers[0]?.id || "");
     setStockPrecioCompra(product.precioCompra || 0);
     setStockPrecioCompraReales(product.precioCompraReales || 0);
@@ -230,8 +232,7 @@ export default function Productos() {
   const handleStockSucursalChange = (sucursalId: string) => {
     setStockSucursalId(sucursalId);
     const branch = stockProduct?.stockSucursales?.find((item) => item.sucursalId === sucursalId);
-    const fallbackLocation = stockProduct?.sucursalId === sucursalId ? stockProduct.ubicacion || "" : "";
-    setStockUbicacion(branch?.ubicacion || fallbackLocation);
+    setStockUbicacion(stockProduct ? currentBranchLocation(stockProduct, sucursalId, branch?.ubicacion) : "");
   };
 
   const handleStockPrecioCompraRealesChange = (value: number) => {
@@ -642,7 +643,7 @@ function AddStockModal({
   const nextStock = currentStock + (Number.isFinite(cantidad) ? cantidad : 0);
   const totalCompra = roundCurrency((Number.isFinite(cantidad) ? cantidad : 0) * (Number.isFinite(precioCompra) ? precioCompra : 0));
   const totalCompraReales = roundCurrency((Number.isFinite(cantidad) ? cantidad : 0) * (Number.isFinite(precioCompraReales) ? precioCompraReales : 0));
-  const defaultUbicacion = branchStock?.ubicacion || (product.sucursalId === sucursalId ? product.ubicacion || "" : "");
+  const defaultUbicacion = currentBranchLocation(product, sucursalId, branchStock?.ubicacion);
 
   useEffect(() => {
     if (!ubicacion && defaultUbicacion) onUbicacionChange(defaultUbicacion);
@@ -814,7 +815,7 @@ function BranchActionModal({
 
   const selectedBranch = branches.find((branch) => branch.sucursalId === sucursalId) || branches[0];
   const selectedBranchLocation = selectedBranch
-    ? selectedBranch.ubicacion || (product.sucursalId === selectedBranch.sucursalId ? product.ubicacion : null) || "Sin ubicacion registrada"
+    ? currentBranchLocation(product, selectedBranch.sucursalId, selectedBranch.ubicacion) || "Sin ubicacion registrada"
     : "Sin ubicacion registrada";
 
   return (
@@ -843,7 +844,7 @@ function BranchActionModal({
                   <div>
                     <p className="font-semibold text-white">{branch.sucursal?.nombre || "Sucursal"}</p>
                     <p className="mt-1 text-sm text-gray-400">
-                      Stock: {branch.stock} - Estante: {branch.ubicacion || (product.sucursalId === branch.sucursalId ? product.ubicacion : null) || "Sin ubicacion"} - Estado: {branchStatus}
+                      Stock: {branch.stock} - Estante: {currentBranchLocation(product, branch.sucursalId, branch.ubicacion) || "Sin ubicacion"} - Estado: {branchStatus}
                     </p>
                   </div>
                   <span className={`rounded-full border px-2 py-1 text-xs font-bold ${
