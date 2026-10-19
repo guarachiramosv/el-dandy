@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Banknote, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, LockKeyhole, Plus, Printer, ReceiptText, RefreshCw, Send, Trash2, TriangleAlert, X } from "lucide-react";
+import { Banknote, CalendarDays, CheckCircle2, Clock3, LockKeyhole, Plus, Printer, ReceiptText, Send, Trash2, TriangleAlert, X } from "lucide-react";
 import { CashClosing, CashExpense, DailySalesSummary, Sale } from "../types";
 import { getCurrentUser } from "../services/auth";
 import { approveSaleVoidRequest, closeCashRegister, createCashExpense, deleteCashExpense, fetchDailySalesSummary, requestSaleVoid, updateSalePaymentMethod, deleteSale } from "../services/sales";
@@ -39,12 +39,6 @@ const productConditionClass = (condition?: string | null) =>
     : "border-green-500/40 bg-green-500/10 text-green-200";
 type ExpenseMethod = "EFECTIVO" | "QR";
 const expenseMethods: ExpenseMethod[] = ["EFECTIVO", "QR"];
-const shiftInputDate = (value: string, days: number) => {
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days));
-  return date.toISOString().slice(0, 10);
-};
-
 export default function HistorialVentas() {
   const user = getCurrentUser();
   const [searchParams] = useSearchParams();
@@ -84,13 +78,16 @@ export default function HistorialVentas() {
         user?.role === "ADMIN" ? requestedBranchId || undefined : undefined,
       );
       setSummary(data);
-      setDeclaredCashInput(data.cerrado && data.cierre ? String(data.cierre.montoDeclarado) : "");
-      setVerifiedQrInput(data.cerrado && data.cierre ? String(data.cierre.netoQr) : "");
+      const hasNoMovements = data.totals.cantidadVentas === 0
+        && data.cobrosCredito.totals.totalCobrosCredito === 0
+        && data.gastos.totals.totalGastos === 0;
+      setDeclaredCashInput(data.cerrado && data.cierre ? String(data.cierre.montoDeclarado) : hasNoMovements ? "0" : "");
+      setVerifiedQrInput(data.cerrado && data.cierre ? String(data.cierre.netoQr) : hasNoMovements ? "0" : "");
       setReconciliationConfirmed(Boolean(data.cerrado));
       setCloseNotes(data.cierre?.notas || "");
-      setDepositToBank(Boolean(data.cierre?.depositadoBanco));
-      setDepositAmount(data.cierre?.montoDepositado != null ? String(data.cierre.montoDepositado) : "");
-      setDepositReference(data.cierre?.referenciaDeposito || "");
+      setDepositToBank(hasNoMovements && !data.cerrado ? false : Boolean(data.cierre?.depositadoBanco));
+      setDepositAmount(hasNoMovements && !data.cerrado ? "" : data.cierre?.montoDepositado != null ? String(data.cierre.montoDepositado) : "");
+      setDepositReference(hasNoMovements && !data.cerrado ? "" : data.cierre?.referenciaDeposito || "");
     } catch (err: unknown) {
       setMessage(getErrorMessage(err));
     } finally {
@@ -354,6 +351,10 @@ export default function HistorialVentas() {
   const pendingVoidRequests = (summary?.ventas || []).filter((sale) => sale.solicitudAnulacion?.estado === "PENDIENTE");
   const isHistoricalDay = reportDate !== defaultDay;
   const canEditExpenses = !summary?.cerrado && (!isHistoricalDay || summary?.estadoCaja === "OBSERVADO");
+  const hasNoSales = (summary?.totals.cantidadVentas || 0) === 0;
+  const hasNoMovements = hasNoSales
+    && creditPaymentTotals.totalCobrosCredito === 0
+    && expenseTotals.totalGastos === 0;
 
   if (loading) return <div className="p-6 text-white">Cargando historial...</div>;
 
@@ -366,41 +367,35 @@ export default function HistorialVentas() {
             </h2>
             <p className="mt-1 text-sm text-gray-400">Revisa las ventas y realiza el cierre de caja.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setReportDate((current) => shiftInputDate(current, -1))}
-              className="btn-secondary flex h-11 w-11 items-center justify-center px-0"
-              aria-label="Ver día anterior"
-            >
-              <ChevronLeft size={20} />
-            </button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <input
               type="date"
               value={reportDate}
               max={defaultDay}
               onChange={(event) => setReportDate(event.target.value)}
-              className="premium-input h-11 min-w-40"
+              className="premium-input h-11 sm:w-48"
             />
-            <button
-              type="button"
-              onClick={() => setReportDate((current) => shiftInputDate(current, 1))}
-              disabled={reportDate >= defaultDay}
-              className="btn-secondary flex h-11 w-11 items-center justify-center px-0 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Ver día siguiente"
-            >
-              <ChevronRight size={20} />
-            </button>
-            <button type="button" onClick={() => setReportDate(defaultDay)} disabled={reportDate === defaultDay} className="btn-secondary h-11 disabled:opacity-50">
-              Hoy
-            </button>
-            <button type="button" onClick={loadSummary} disabled={loading} className="btn-secondary flex h-11 w-11 items-center justify-center px-0 disabled:opacity-60" aria-label="Actualizar información">
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            <button type="button" onClick={loadSummary} disabled={loading} className="btn-secondary h-11 whitespace-nowrap disabled:opacity-60">
+              {loading ? "Actualizando..." : "Actualizar día"}
             </button>
           </div>
       </div>
 
       {message && <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-primary-light">{message}</div>}
+
+      {hasNoSales && (
+        <div className="flex items-start gap-3 rounded-xl border border-gray-700 bg-gray-800/30 px-4 py-3">
+          <ReceiptText className="mt-0.5 shrink-0 text-gray-400" size={20} />
+          <div>
+            <p className="font-bold text-white">No hubo ventas en este día</p>
+            <p className="text-sm text-gray-400">
+              {hasNoMovements
+                ? "Puedes enviar el cierre en Bs 0,00 después de confirmar que no existieron movimientos pendientes."
+                : "No se registraron ventas, pero existen otros movimientos que debes revisar antes de cerrar la caja."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {summary?.estadoCaja === "OBSERVADO" && (
         <div className="flex flex-col gap-3 rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-amber-100 lg:flex-row lg:items-center lg:justify-between">
@@ -602,7 +597,9 @@ export default function HistorialVentas() {
               <h4 className="flex items-center gap-2 text-lg font-bold text-white">
                 <Banknote size={20} className="text-primary" /> {summary?.estadoCaja === "OBSERVADO" ? "Corregir cierre de caja" : "Cierre de caja"}
               </h4>
-              <p className="mt-1 text-xs text-gray-500">Cuenta el efectivo y comprueba los pagos QR antes de enviar.</p>
+              <p className="mt-1 text-xs text-gray-500">
+                {hasNoMovements ? "Confirma que el día terminó sin ventas ni otros movimientos." : "Cuenta el efectivo y comprueba los pagos QR antes de enviar."}
+              </p>
             </div>
 
             {!summary?.cerrado && (
@@ -674,10 +671,12 @@ export default function HistorialVentas() {
                     onChange={(event) => setReconciliationConfirmed(event.target.checked)}
                     className="mt-0.5 h-4 w-4 accent-orange-500"
                   />
-                  <span>Confirmo que conté todo el efectivo y verifiqué los pagos QR.</span>
+                  <span>{hasNoMovements
+                    ? "Confirmo que no hubo ventas, cobros, gastos ni dinero pendiente en este día."
+                    : "Confirmo que conté todo el efectivo y verifiqué los pagos QR."}</span>
                 </label>
 
-                <div className="space-y-3 rounded-lg border border-gray-700 p-3">
+                {!hasNoMovements && <div className="space-y-3 rounded-lg border border-gray-700 p-3">
                   <label className="flex items-center gap-2 text-sm text-gray-200">
                     <input type="checkbox" checked={depositToBank} onChange={(event) => {
                       setDepositToBank(event.target.checked);
@@ -689,7 +688,7 @@ export default function HistorialVentas() {
                     <label className="block text-sm text-gray-300"><span className="mb-1 block">Referencia o comprobante</span><input className="premium-input" maxLength={120} value={depositReference} onChange={(event) => setDepositReference(event.target.value)} /></label>
                     <button type="button" onClick={fillBankDepositNote} className="btn-secondary w-full">Preparar depósito del efectivo esperado</button>
                   </>}
-                </div>
+                </div>}
               </>
             )}
             {summary?.cerrado ? (
@@ -718,7 +717,13 @@ export default function HistorialVentas() {
                   className="btn-primary flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {summary?.estadoCaja === "OBSERVADO" ? <Send size={18} /> : <LockKeyhole size={18} />}
-                  {closingCash ? "Enviando..." : summary?.estadoCaja === "OBSERVADO" ? "Reenviar cierre corregido" : "Enviar cierre a revisión"}
+                  {closingCash
+                    ? "Enviando..."
+                    : summary?.estadoCaja === "OBSERVADO"
+                      ? "Reenviar cierre corregido"
+                      : hasNoMovements
+                        ? "Enviar cierre en Bs 0,00"
+                        : "Enviar cierre a revisión"}
                 </button>
                 {!reconciliation.canSubmit && <p className="text-center text-xs text-gray-500">Completa la verificación para habilitar el envío.</p>}
                 <p className="text-center text-xs text-gray-500">Se enviará al administrador para revisión.</p>
