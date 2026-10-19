@@ -67,7 +67,7 @@ export function ProductSearchPanel(props: ProductSearchPanelProps) {
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[600px] table-fixed text-left">
             <colgroup>
-              <col className="w-[100px]" />
+              <col className="w-[112px]" />
               <col />
               <col className="w-[76px]" />
               <col className="w-[62px]" />
@@ -76,7 +76,7 @@ export function ProductSearchPanel(props: ProductSearchPanelProps) {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-[#111315] text-[11px] uppercase tracking-wide text-gray-500">
               <tr className="border-b border-gray-800">
-                <th className="px-4 py-3 font-semibold">Código</th>
+                <th className="px-3 py-3 font-semibold">Código</th>
                 <th className="px-3 py-3 font-semibold">Producto</th>
                 <th className="px-2 py-3 text-center font-semibold">Estado</th>
                 <th className="px-2 py-3 text-center font-semibold">Stock</th>
@@ -92,20 +92,24 @@ export function ProductSearchPanel(props: ProductSearchPanelProps) {
                 const image = productImageUrl(product.imagenes?.[0]?.url || product.imagen);
                 return (
                   <tr key={product.id} className="group bg-[#15171a] transition-colors hover:bg-[#1a1d20]">
-                    <td className="px-4 py-3 align-middle">
-                      <div className="flex items-center gap-3">
+                    <td className="px-3 py-3 align-middle">
+                      <span className="block break-all font-mono text-xs font-semibold leading-5 text-gray-200" title={product.codigo}>
+                        {product.codigo}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border border-gray-700 bg-[#0d0f11]">
                           {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <PackageOpen size={19} className="text-gray-600" />}
                         </div>
-                        <span className="truncate font-mono text-xs text-gray-300">{product.codigo}</span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-gray-100" title={product.descripcion}>{product.descripcion}</p>
+                          <p className="mt-0.5 truncate text-xs text-gray-500">
+                            {[product.marca, product.ubicacion ? `Estante ${product.ubicacion}` : null].filter(Boolean).join(" · ") || "Sin datos adicionales"}
+                          </p>
+                          {selected && <p className="mt-1 text-[11px] font-semibold text-green-400">En venta: {formatQuantity(selected.cantidad, product)}</p>}
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-3 py-3 align-middle">
-                      <p className="truncate text-sm font-semibold text-gray-100" title={product.descripcion}>{product.descripcion}</p>
-                      <p className="mt-0.5 truncate text-xs text-gray-500">
-                        {[product.marca, product.ubicacion ? `Estante ${product.ubicacion}` : null].filter(Boolean).join(" · ") || "Sin datos adicionales"}
-                      </p>
-                      {selected && <p className="mt-1 text-[11px] font-semibold text-green-400">En venta: {formatQuantity(selected.cantidad, product)}</p>}
                     </td>
                     <td className="px-2 py-3 text-center align-middle"><span className={`inline-flex rounded border px-2 py-1 text-[11px] font-semibold ${productConditionClass(product.condicion)}`}>{productConditionLabel(product.condicion)}</span></td>
                     <td className={`px-2 py-3 text-center text-sm font-bold ${availableStock > 0 ? "text-green-400" : "text-red-300"}`}>{availableStock.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</td>
