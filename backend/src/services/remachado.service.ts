@@ -1,3 +1,4 @@
+import { assertPreviousCashClosed } from './cashClosingPolicy.service';
 import { CashClosingStatus, PaymentMethod, Prisma, RemachadoTrabajoTipo, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
@@ -326,6 +327,7 @@ export class RemachadoService {
       }
 
       const businessDay = getBusinessDay();
+      await assertPreviousCashClosed(tx, data.usuarioId, data.sucursalId);
       const previousObserved = await tx.cierreCaja.findFirst({
         where: {
           usuarioId: data.usuarioId,

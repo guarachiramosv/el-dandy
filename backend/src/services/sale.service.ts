@@ -1,3 +1,4 @@
+import { assertPreviousCashClosed } from './cashClosingPolicy.service';
 import { CashClosingAction, CashClosingStatus, PaymentMethod, Prisma, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { StockService } from './stock.service';
@@ -344,6 +345,7 @@ export class SaleService {
       const today = getBusinessDay();
       const businessDay = getBusinessDay(data.fechaNegocio);
       const isHistoricalCorrection = businessDay.label !== today.label;
+      if (!isHistoricalCorrection && !data.cierreCorregidoId) await assertPreviousCashClosed(tx, data.usuarioId, data.sucursalId, today.start);
       let correctionClosing: { id: string } | null = null;
 
       if (isHistoricalCorrection || data.cierreCorregidoId) {
@@ -725,6 +727,7 @@ export class SaleService {
     const today = getBusinessDay();
     const businessDay = getBusinessDay(data.fecha);
     const isHistoricalCorrection = businessDay.label !== today.label;
+    if (!isHistoricalCorrection) await assertPreviousCashClosed(prisma, data.usuarioId, data.sucursalId, today.start);
     const [cierre, previousObserved] = await Promise.all([
       prisma.cierreCaja.findFirst({
         where: {

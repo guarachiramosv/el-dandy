@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { AlertTriangle, ShoppingCart, Users, Package, FileSignature, LogOut, Bell, ChevronDown, History, Hammer } from "lucide-react";
 import { clearSession, getCurrentUser } from "../services/auth";
 import { fetchPendingCashClosings } from "../services/sales";
@@ -20,6 +20,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export default function SellerLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -32,6 +33,15 @@ export default function SellerLayout() {
     return b.fecha.localeCompare(a.fecha);
   })[0];
 
+  const requiredClosing = pendingClosings.filter(item => item.estado === "SIN_ENVIAR")
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
+
+  useEffect(() => {
+    if (requiredClosing && location.pathname !== "/seller/historial" && !new URLSearchParams(location.search).has("cierre")) {
+      navigate(`/seller/historial?fecha=${requiredClosing.fecha}`, { replace: true });
+    }
+  }, [requiredClosing?.fecha, location.pathname, location.search, navigate]);
+
   useEffect(() => {
     if (user?.role !== "SELLER") return;
     let mounted = true;
@@ -42,10 +52,12 @@ export default function SellerLayout() {
     const interval = window.setInterval(() => void loadPendingClosings(), 45000);
     const refreshOnFocus = () => void loadPendingClosings();
     window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("cash-closing-updated", refreshOnFocus);
     return () => {
       mounted = false;
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("cash-closing-updated", refreshOnFocus);
     };
   }, [user?.role]);
 
@@ -159,7 +171,7 @@ export default function SellerLayout() {
                         ? "Caja observada: requiere corrección"
                         : priorityClosing.estado === "PENDIENTE"
                           ? "Cierre enviado: pendiente de aprobación"
-                          : "Caja pendiente de cierre"}
+                          : "Debes cerrar la caja anterior para continuar"}
                     </p>
                     <p className="mt-1 text-sm text-red-100/90">
                       Tienes una caja {priorityClosing.estado === "OBSERVADO" ? "devuelta" : priorityClosing.estado === "PENDIENTE" ? "en revisión" : "sin terminar"} del {priorityClosing.fecha}.

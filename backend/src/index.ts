@@ -1,3 +1,4 @@
+import { startAutomaticCashClosings } from './services/cashClosingPolicy.service';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -71,6 +72,8 @@ app.use('/api/finances', requireAuth, requireAdmin, financeRoutes);
 app.use(errorHandler);
 
 // ─── Start ───────────────────────────────────────────────
+startAutomaticCashClosings();
+
 const PORT = process.env.PORT ?? 4000;
 app.listen(PORT, () => console.log(`🚀 Backend El Dandy → http://localhost:${PORT}`));
 

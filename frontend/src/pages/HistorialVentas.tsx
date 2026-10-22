@@ -162,6 +162,7 @@ export default function HistorialVentas() {
         montoDepositado: depositToBank ? parsedDeposit : null,
         referenciaDeposito: depositToBank ? depositReference.trim() || null : null,
       });
+      window.dispatchEvent(new Event("cash-closing-updated"));
       const printableSummary: DailySalesSummary = {
         ...summary,
         cerrado: true,

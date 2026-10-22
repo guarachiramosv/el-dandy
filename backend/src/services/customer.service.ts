@@ -1,3 +1,4 @@
+import { assertPreviousCashClosed } from './cashClosingPolicy.service';
 import bcrypt from 'bcryptjs';
 import { CashClosingStatus, DebtStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -216,6 +217,7 @@ export class CustomerService {
       const cuenta = await tx.cuentaCobrar.findUnique({ where: { id: cuentaId } });
       if (!cuenta) throw Object.assign(new Error('Cuenta por cobrar no encontrada'), { status: 404 });
       const businessDay = getBusinessDay();
+      await assertPreviousCashClosed(tx, data.usuarioId, cuenta.sucursalId);
       const [cierre, previousObserved] = await Promise.all([
         tx.cierreCaja.findFirst({
           where: {
