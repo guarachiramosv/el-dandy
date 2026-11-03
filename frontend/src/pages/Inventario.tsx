@@ -53,6 +53,16 @@ const formatInventoryQuantity = (value: number) => {
 };
 const getUnitLabel = (product: Product) => product.unidadVenta === "METRO" ? "m" : "u";
 
+const getSellerBranchStock = (product: Product, branchName: string) => {
+  const matchesName = (name?: string) => name?.trim().toLowerCase() === branchName.toLowerCase();
+  if (product.stockSucursales?.length) {
+    return product.stockSucursales
+      .filter((branch) => matchesName(branch.sucursal?.nombre) && branch.activo !== false && branch.estado !== "INACTIVO" && branch.estado !== "DESCONTINUADO")
+      .reduce((total, branch) => total + (Number(branch.stock) || 0), 0);
+  }
+  return matchesName(product.sucursal?.nombre) ? Number(product.stock) || 0 : 0;
+};
+
 const getBranchStocks = (item: ProductInventoryReport["items"][number]) => {
   const branches = item.stockSucursales?.length
     ? item.stockSucursales
@@ -578,7 +588,7 @@ export default function Inventario() {
             </div>
           </div>
 
-          <div className="glass-panel overflow-hidden">
+          <div className="glass-panel overflow-x-auto">
             <table className="w-full text-left">
               <thead className="border-b border-gray-700 bg-grafito-800/80 text-sm uppercase text-gray-400">
                 <tr>
@@ -587,7 +597,12 @@ export default function Inventario() {
                   <th className="p-3">Producto</th>
                   <th className="p-3">Sucursal</th>
                   <th className="p-3">Estante</th>
-                  <th className="p-3">Stock</th>
+                  {isSeller ? (
+                    <>
+                      <th className="p-3">Stock Santa Cruz</th>
+                      <th className="p-3">Stock Cochabamba</th>
+                    </>
+                  ) : <th className="p-3">Stock</th>}
                   <th className="p-3">Minimo</th>
                   <th className="p-3 text-right">Precio</th>
                   <th className="p-3 text-right">Acciones</th>
@@ -627,9 +642,18 @@ export default function Inventario() {
                           {product.ubicacion || "Sin ubicacion"}
                         </span>
                       </td>
-                      <td className={`p-3 font-bold ${product.stock <= (product.stockMinimo || 5) ? "text-red-300" : "text-green-300"}`}>
-                        {product.stock} {getUnitLabel(product)}
-                      </td>
+                      {isSeller ? ["Santa Cruz", "Cochabamba"].map((branchName) => {
+                        const stock = getSellerBranchStock(product, branchName);
+                        return (
+                          <td key={branchName} className={`p-3 whitespace-nowrap font-bold ${stock <= (product.stockMinimo ?? 5) ? "text-red-300" : "text-green-300"}`}>
+                            {formatInventoryQuantity(stock)} {getUnitLabel(product)}
+                          </td>
+                        );
+                      }) : (
+                        <td className={`p-3 font-bold ${product.stock <= (product.stockMinimo || 5) ? "text-red-300" : "text-green-300"}`}>
+                          {product.stock} {getUnitLabel(product)}
+                        </td>
+                      )}
                       <td className="p-3 text-gray-300">{product.stockMinimo || 5} {getUnitLabel(product)}</td>
                       <td className="p-3 text-right text-primary-light">Bs {product.precioVenta.toLocaleString()}</td>
                       <td className="p-3">
