@@ -42,6 +42,9 @@ export const createRemachadoTrabajoSchema = z.object({
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA']).default('EFECTIVO'),
   tipoVenta: z.enum(['CONTADO', 'CREDITO']).default('CONTADO'),
   fechaVencimiento: z.string().optional().nullable(),
+  fechaNegocio: z.iso.date().optional().nullable(),
+  cierreCorregidoId: uuidSchema.optional().nullable(),
+  motivoCorreccion: z.string().trim().max(300).optional().nullable(),
   trabajos: z.array(z.object({
     medidaId: uuidSchema,
     remacheId: uuidSchema.optional().nullable(),

@@ -1,3 +1,5 @@
+import { useLocation, useNavigate } from "react-router-dom";
+import { CorrectionBanner } from "../components/pos/CorrectionBanner";
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import { ArrowRight, Hammer, Plus, Printer, RefreshCcw, Save, Search, Trash2, X } from "lucide-react";
@@ -100,6 +102,13 @@ const getStockTextClass = (stock: number, stockMinimo: number) => {
 };
 
 export default function Remachado() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const correctionParams = new URLSearchParams(location.search);
+  const correctionDate = correctionParams.get("fechaNegocio");
+  const correctionClosingId = correctionParams.get("cierre");
+  const isCorrectionMode = Boolean(correctionDate && correctionClosingId);
+  const [correctionReason, setCorrectionReason] = useState(correctionParams.get("motivo") || "");
   const user = getCurrentUser();
   const isAdmin = user?.role === "ADMIN";
   const { data: products, refetch: refetchProducts } = useProducts("active", {
@@ -390,6 +399,7 @@ export default function Remachado() {
   const submitTrabajo = async () => {
     if (!user) return setMessage("Debes iniciar sesion nuevamente.");
     if (cartTrabajos.length === 0) return setMessage("Agrega al menos un trabajo a la lista.");
+    if (isCorrectionMode && !correctionReason.trim()) return setMessage("Explica el motivo de la correccion.");
     setSaving(true);
     setMessage(null);
     try {
@@ -398,6 +408,9 @@ export default function Remachado() {
         sucursalId: user.sucursalId,
         metodoPago: trabajoForm.metodoPago,
         tipoVenta: "CONTADO",
+        fechaNegocio: correctionDate,
+        cierreCorregidoId: correctionClosingId,
+        motivoCorreccion: isCorrectionMode ? correctionReason.trim() : null,
         trabajos: cartTrabajos.map(ct => ({
           medidaId: ct.medidaId,
           remacheId: ct.remacheId || null,
@@ -568,6 +581,8 @@ export default function Remachado() {
 
   return (
     <div className="flex h-full flex-col space-y-6">
+      {isCorrectionMode && <CorrectionBanner dateLabel={correctionDate || ""} reason={correctionReason}
+        onReasonChange={setCorrectionReason} onBack={() => navigate(`/seller/historial?fecha=${correctionDate}`)} />}
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-2xl font-bold text-white">

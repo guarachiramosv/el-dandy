@@ -85,6 +85,9 @@ export const createRemachadoTrabajo = async (data: {
   clienteId?: string | null;
   metodoPago: PaymentMethod;
   tipoVenta: 'CONTADO' | 'CREDITO';
+  fechaNegocio?: string | null;
+  cierreCorregidoId?: string | null;
+  motivoCorreccion?: string | null;
   trabajos: Array<{
     medidaId: string;
     remacheId?: string | null;

@@ -5,6 +5,10 @@ import { prisma } from '../lib/prisma';
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
 
 function getBusinessDay(dateValue?: string | null) {
+  if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    return { start: new Date(Date.UTC(year, month - 1, day, 4)) };
+  }
   const base = dateValue ? new Date(dateValue) : new Date();
   if (Number.isNaN(base.getTime())) {
     throw Object.assign(new Error('Fecha invalida'), { status: 400 });
@@ -295,6 +299,9 @@ export class RemachadoService {
     metodoPago: PaymentMethod;
     tipoVenta: SaleType;
     fechaVencimiento?: string | null;
+    fechaNegocio?: string | null;
+    cierreCorregidoId?: string | null;
+    motivoCorreccion?: string | null;
     trabajos: Array<{
       medidaId: string;
       remacheId?: string | null;
@@ -326,31 +333,35 @@ export class RemachadoService {
         }
       }
 
-      const businessDay = getBusinessDay();
-      await assertPreviousCashClosed(tx, data.usuarioId, data.sucursalId);
-      const previousObserved = await tx.cierreCaja.findFirst({
-        where: {
-          usuarioId: data.usuarioId,
-          sucursalId: data.sucursalId,
-          fecha: { lt: businessDay.start },
-          estado: CashClosingStatus.OBSERVADO,
-        },
-        select: { id: true },
-      });
-      if (previousObserved) {
-        throw Object.assign(new Error('Tienes un cierre observado pendiente. Corrigelo antes de registrar trabajos de hoy.'), { status: 409 });
+      const today = getBusinessDay();
+      const businessDay = getBusinessDay(data.fechaNegocio);
+      const isCorrection = Boolean(data.cierreCorregidoId) || businessDay.start.getTime() !== today.start.getTime();
+      if (businessDay.start > today.start) {
+        throw Object.assign(new Error('No se pueden registrar remachados en una fecha futura.'), { status: 400 });
+      }
+      let correctionClosing: { id: string } | null = null;
+      if (isCorrection) {
+        if (!data.cierreCorregidoId || !data.motivoCorreccion?.trim()) {
+          throw Object.assign(new Error('Selecciona el cierre observado y explica la correccion.'), { status: 400 });
+        }
+        correctionClosing = await tx.cierreCaja.findFirst({
+          where: { id: data.cierreCorregidoId, fecha: businessDay.start,
+            usuarioId: data.usuarioId, sucursalId: data.sucursalId, estado: CashClosingStatus.OBSERVADO },
+          select: { id: true },
+        });
+        if (!correctionClosing) {
+          throw Object.assign(new Error('El cierre seleccionado no esta observado o no pertenece a esta jornada.'), { status: 409 });
+        }
+      } else {
+        await assertPreviousCashClosed(tx, data.usuarioId, data.sucursalId, today.start);
       }
       const cierre = await tx.cierreCaja.findUnique({
-        where: {
-          fecha_usuarioId_sucursalId: {
-            fecha: businessDay.start,
-            usuarioId: data.usuarioId,
-            sucursalId: data.sucursalId,
-          },
-        },
+        where: { fecha_usuarioId_sucursalId: {
+          fecha: businessDay.start, usuarioId: data.usuarioId, sucursalId: data.sucursalId,
+        } },
       });
-      if (cierre) {
-        throw Object.assign(new Error('La caja de hoy ya fue cerrada. No se pueden registrar remachados.'), { status: 409 });
+      if (cierre && (cierre.estado !== CashClosingStatus.OBSERVADO || !correctionClosing)) {
+        throw Object.assign(new Error('La caja esta cerrada u observada. Usa el modo de correccion de la jornada autorizada.'), { status: 409 });
       }
 
       const medidaIds = [...new Set(data.trabajos.map(t => t.medidaId))];
@@ -551,6 +562,9 @@ export class RemachadoService {
           descuento: data.descuento || 0,
           total: total - (data.descuento || 0),
           fechaNegocio: businessDay.start,
+          esCorreccionCierre: Boolean(correctionClosing),
+          motivoCorreccion: correctionClosing ? data.motivoCorreccion?.trim() : null,
+          cierreCorregidoId: correctionClosing?.id,
           detalles: {
             create: [...ventaDetalles, ...accessoryDetailLines]
           },

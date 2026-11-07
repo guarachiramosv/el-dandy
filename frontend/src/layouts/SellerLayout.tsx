@@ -183,6 +183,12 @@ export default function SellerLayout() {
                     </p>
                   </div>
                 </div>
+                {priorityClosing.estado === "OBSERVADO" && (
+                  <button type="button" className="btn-secondary whitespace-nowrap"
+                    onClick={() => navigate(`/seller/remachado?fechaNegocio=${priorityClosing.fecha}&cierre=${priorityClosing.cierreId}&motivo=${encodeURIComponent(priorityClosing.motivoObservacion || "Correccion solicitada por el administrador")}`)}>
+                    Agregar remachado a esta caja
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => priorityClosing.estado === "OBSERVADO"
