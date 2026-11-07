@@ -108,7 +108,11 @@ export default function Remachado() {
   const correctionDate = correctionParams.get("fechaNegocio");
   const correctionClosingId = correctionParams.get("cierre");
   const isCorrectionMode = Boolean(correctionDate && correctionClosingId);
-  const [correctionReason, setCorrectionReason] = useState(correctionParams.get("motivo") || "");
+  const correctionAdminReason = correctionParams.get("motivo") || "";
+  const [correctionReason, setCorrectionReason] = useState(correctionAdminReason);
+  useEffect(() => {
+    setCorrectionReason(correctionAdminReason);
+  }, [correctionAdminReason, correctionClosingId]);
   const user = getCurrentUser();
   const isAdmin = user?.role === "ADMIN";
   const { data: products, refetch: refetchProducts } = useProducts("active", {
@@ -425,7 +429,7 @@ export default function Remachado() {
         notas: trabajoForm.notas || null,
         descuento: descuento > 0 ? descuento : undefined,
       });
-      setMessage("Remachado registrado, venta creada y stock descontado.");
+      setMessage(isCorrectionMode ? `Remachado registrado en la caja del ${correctionDate}. Vuelve al historial para reenviar el cierre corregido.` : "Remachado registrado, venta creada y stock descontado.");
       setDetailOpen(false);
       setDetailItems([]);
       setCartTrabajos([]);
@@ -436,7 +440,7 @@ export default function Remachado() {
       console.error(error);
       const msg = getErrorMessage(error);
       setMessage(msg);
-      alert("Error al guardar: " + msg + "\nDatos: " + JSON.stringify(cartTrabajos));
+
     } finally {
       setSaving(false);
     }

@@ -33,6 +33,21 @@ export default function SellerLayout() {
     return b.fecha.localeCompare(a.fecha);
   })[0];
 
+  const currentCorrection = new URLSearchParams(location.search);
+  const observedClosing = priorityClosing?.estado === "OBSERVADO" ? priorityClosing : undefined;
+  const correctionQuery = currentCorrection.get("cierre") && currentCorrection.get("fechaNegocio")
+    ? location.search
+    : observedClosing?.cierreId
+      ? `?${new URLSearchParams({ fechaNegocio: observedClosing.fecha, cierre: observedClosing.cierreId,
+          motivo: observedClosing.motivoObservacion || "Correccion solicitada por el administrador" })}`
+      : "";
+  const hasCorrection = Boolean(currentCorrection.get("cierre"));
+  useEffect(() => {
+    if (location.pathname === "/seller/remachado" && !hasCorrection && correctionQuery) {
+      navigate(`/seller/remachado${correctionQuery}`, { replace: true });
+    }
+  }, [location.pathname, hasCorrection, correctionQuery, navigate]);
+
   const requiredClosing = pendingClosings.filter(item => item.estado === "SIN_ENVIAR")
     .sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
 
@@ -84,7 +99,7 @@ export default function SellerLayout() {
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
-          <NavLink to="/seller/ventas" className={navLinkClass}>
+          <NavLink to={`/seller/ventas${correctionQuery}`} className={navLinkClass}>
             <ShoppingCart size={17} className="mr-3" /> Punto de Venta
           </NavLink>
           <NavLink to="/seller/historial" className={navLinkClass}>
@@ -93,7 +108,7 @@ export default function SellerLayout() {
           <NavLink to="/seller/inventario" className={navLinkClass}>
             <Package size={17} className="mr-3" /> Inventario
           </NavLink>
-          <NavLink to="/seller/remachado" className={navLinkClass}>
+          <NavLink to={`/seller/remachado${correctionQuery}`} className={navLinkClass}>
             <Hammer size={17} className="mr-3" /> Remachado
           </NavLink>
           <NavLink to="/seller/clientes" className={navLinkClass}>
