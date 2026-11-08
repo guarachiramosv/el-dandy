@@ -40,8 +40,8 @@ export function CurrentSalePanel(props: CurrentSalePanelProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid grid-cols-[minmax(0,1fr)_112px_88px_36px] gap-2 border-b border-gray-800 bg-[#111315] px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-          <span>Producto</span><span className="text-center">Cant.</span><span className="text-right">Subtotal</span><span />
+        <div className="grid grid-cols-[minmax(0,1fr)_36px] gap-2 border-b border-gray-800 bg-[#111315] px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+          <span>Productos y cantidades</span><span />
         </div>
         {props.cart.length === 0 ? (
           <div className="flex min-h-56 flex-col items-center justify-center px-6 text-center">
@@ -54,24 +54,24 @@ export function CurrentSalePanel(props: CurrentSalePanelProps) {
             {props.cart.map((item) => {
               const image = productImageUrl(item.product.imagenes?.[0]?.url || item.product.imagen);
               return (
-                <div key={item.product.id} className="grid grid-cols-[minmax(0,1fr)_112px_88px_36px] items-center gap-2 px-4 py-3">
-                  <div className="flex min-w-0 items-center gap-3">
+                <div key={item.product.id} className="grid grid-cols-[128px_minmax(0,1fr)_36px] items-center gap-2 px-4 py-3">
+                  <div className="col-span-3 flex min-w-0 items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border border-gray-700 bg-[#0d0f11]">
                       {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <PackageOpen size={18} className="text-gray-600" />}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-gray-200">{item.product.codigo}</p>
-                      <p className="mt-0.5 line-clamp-2 text-xs leading-4 text-gray-400">{item.product.descripcion}</p>
+                      <p className="break-words text-xs text-gray-400">{item.product.codigo}</p>
+                      <p className="mt-0.5 break-words text-sm font-semibold leading-5 text-gray-100">{item.product.descripcion}</p>
                       <p className="mt-1 text-[11px] text-gray-500">{money(item.product.precioVenta)} c/u</p>
                     </div>
                   </div>
-                  <div className="flex h-9 items-center justify-between overflow-hidden rounded border border-gray-700 bg-[#111315]">
+                  <div className="col-start-1 flex h-9 w-32 items-center justify-between overflow-hidden rounded border border-gray-700 bg-[#111315]">
                     <button type="button" onClick={() => props.onChangeQuantity(item.product.id, -1)} className="flex h-full w-8 items-center justify-center text-gray-400 hover:bg-gray-800 hover:text-white" aria-label="Reducir cantidad"><Minus size={14} /></button>
                     <span className="min-w-0 text-center text-xs font-semibold text-white">{item.cantidad.toLocaleString("es-BO", { maximumFractionDigits: 2 })}</span>
                     <button type="button" onClick={() => props.onChangeQuantity(item.product.id, 1)} className="flex h-full w-8 items-center justify-center text-gray-400 hover:bg-gray-800 hover:text-white" aria-label="Aumentar cantidad"><Plus size={14} /></button>
                   </div>
-                  <span className="text-right text-xs font-semibold text-gray-100">{money(item.product.precioVenta * item.cantidad)}</span>
-                  <button type="button" onClick={() => props.onRemoveProduct(item.product.id)} className="flex h-9 w-9 items-center justify-center rounded border border-red-500/40 text-red-400 transition-colors hover:bg-red-500/10" aria-label={`Quitar ${item.product.descripcion}`}><Trash2 size={15} /></button>
+                  <span className="col-start-2 text-right text-sm font-semibold text-gray-100">{money(item.product.precioVenta * item.cantidad)}</span>
+                  <button type="button" onClick={() => props.onRemoveProduct(item.product.id)} className="col-start-3 flex h-9 w-9 items-center justify-center rounded border border-red-500/40 text-red-400 transition-colors hover:bg-red-500/10" aria-label={`Quitar ${item.product.descripcion}`}><Trash2 size={15} /></button>
                 </div>
               );
             })}

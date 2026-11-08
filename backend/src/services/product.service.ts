@@ -36,6 +36,8 @@ const productInclude = {
 };
 
 const productSaleSelect = {
+  imagen: true,
+  imagenes: { select: { id: true, url: true, orden: true }, orderBy: { orden: 'asc' as const } },
   id: true,
   codigo: true,
   codigoRepuesto: true,

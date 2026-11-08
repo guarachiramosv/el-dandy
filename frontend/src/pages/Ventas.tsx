@@ -287,7 +287,7 @@ export default function Ventas() {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
         <ProductSearchPanel
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
