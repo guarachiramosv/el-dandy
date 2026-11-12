@@ -104,19 +104,10 @@ export default function CierresCaja() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Ventas" value={money(closing.totalVentas)} />
-              <Stat label="Efectivo esperado" value={money(closing.netoEfectivo)} />
+              <Stat label="Efectivo neto" value={money(closing.netoEfectivo)} />
+              <Stat label="QR neto" value={money(closing.netoQr)} />
               <Stat label="Efectivo contado" value={money(closing.montoDeclarado)} />
               <Stat label="Diferencia efectivo" value={`${closing.diferencia > 0 ? "+" : ""}${money(closing.diferencia)}`} alert={Math.abs(closing.diferencia) > 0.01} />
-            </div>
-
-            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3">
-              <p className="mb-3 text-sm font-bold text-white">Saldo al cierre por método de pago</p>
-              <div className="grid grid-cols-2 gap-3">
-                <Stat label="Efectivo neto" value={money(closing.netoEfectivo)} />
-                <Stat label="QR neto" value={money(closing.netoQr)} />
-              </div>
-              <p className="mt-2 text-xs text-gray-400">Ventas + cobros de créditos − gastos de cada método de pago. El efectivo contado se muestra arriba.</p>
             </div>
 
             {closing.notas && <p className="mt-4 rounded-lg bg-white/[0.04] p-3 text-sm text-gray-300"><strong>Nota del vendedor:</strong> {closing.notas}</p>}
