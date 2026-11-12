@@ -38,17 +38,16 @@ if (-not $env:EXPO_PUBLIC_API_URL -or $env:EXPO_PUBLIC_API_URL -match '192\.168\
   throw "Configura mobile\.env con EXPO_PUBLIC_API_URL=https://sistema-el-dandy.onrender.com/api antes de generar el APK."
 }
 
-if (-not (Test-Path $androidDir)) {
-  Push-Location $projectRoot
-  try {
-    & "npx.cmd" expo prebuild --platform android
-    if ($LASTEXITCODE -ne 0) {
-      throw "Expo prebuild fallo con codigo $LASTEXITCODE."
-    }
+Push-Location $projectRoot
+try {
+  # Sincroniza recursos nativos como el icono de instalación en cada APK.
+  & "npx.cmd" expo prebuild --platform android --no-install
+  if ($LASTEXITCODE -ne 0) {
+    throw "Expo prebuild fallo con codigo $LASTEXITCODE."
   }
-  finally {
-    Pop-Location
-  }
+}
+finally {
+  Pop-Location
 }
 
 $appBuildGradle = Join-Path $androidDir "app\build.gradle"

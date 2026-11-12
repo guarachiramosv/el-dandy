@@ -24,6 +24,10 @@ const valueForPeriod = (period: ReportPeriod, day: string, month: string, year: 
 };
 
 const inventoryShelf = (ubicacion?: string | null) => ubicacion?.trim() || "Sin estante";
+const sellerShelf = (product: Product, sucursalId?: string) => {
+  const branch = product.stockSucursales?.find((item) => item.sucursalId === sucursalId);
+  return inventoryShelf(branch?.ubicacion || (product.sucursalId === sucursalId ? product.ubicacion : null));
+};
 const salePriceValue = (item: { precioVenta?: number | null; precio?: number | null }) => {
   const value = item.precioVenta ?? item.precio ?? 0;
   const numericValue = Number(value);
@@ -635,11 +639,11 @@ export default function Inventario() {
                         <p className="text-sm text-gray-500">{product.marca} · {product.categoria?.nombre}</p>
                       </td>
                       <td className="p-3 text-gray-300">
-                        <span className="block">{product.sucursal?.nombre}</span>
+                        <span className="block">{isSeller ? user?.sucursal?.nombre || "Sin sucursal" : product.sucursal?.nombre}</span>
                       </td>
                       <td className="p-3">
                         <span className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-3 py-1 text-sm font-bold text-primary-light">
-                          {product.ubicacion || "Sin ubicacion"}
+                          {isSeller ? sellerShelf(product, user?.sucursalId) : product.ubicacion || "Sin ubicacion"}
                         </span>
                       </td>
                       {isSeller ? ["Santa Cruz", "Cochabamba"].map((branchName) => {
