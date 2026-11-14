@@ -70,6 +70,7 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --prefix backend
+      - run: npm run prisma:generate --prefix backend
       - run: npx prisma db push
         working-directory: backend
       - run: npm run test:inventory --prefix backend
