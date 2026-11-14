@@ -10,12 +10,13 @@ import {
 } from '../controllers/auth.controller';
 import { changeOwnPassword } from '../controllers/user.controller';
 import { requireAuth, requireCustomer } from '../middlewares/auth';
+import { authRateLimit, registrationRateLimit } from '../middlewares/authRateLimit';
 
 const router = Router();
 
-router.post('/login', login);
-router.post('/customers/register', registerCustomer);
-router.post('/customers/login', loginCustomer);
+router.post('/login', authRateLimit, login);
+router.post('/customers/register', registrationRateLimit, registerCustomer);
+router.post('/customers/login', authRateLimit, loginCustomer);
 router.patch('/change-password', requireAuth, changeOwnPassword);
 router.get('/customers/me', requireCustomer, getCustomerProfile);
 router.get('/customers/catalog', requireCustomer, getCustomerCatalog);

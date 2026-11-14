@@ -19,8 +19,8 @@ export const updatePaymentMethod = asyncHandler(async (req: Request, res: Respon
   res.json({ success: true, data });
 });
 
-export const getAllSales = asyncHandler(async (_req: Request, res: Response) => {
-  const data = await service.getAll();
+export const getAllSales = asyncHandler(async (req: Request, res: Response) => {
+  const data = await service.getAll(req.user?.role === 'SELLER' ? req.user.id : undefined);
   res.json({ success: true, data });
 });
 
@@ -102,9 +102,8 @@ export const observeCashClosing = asyncHandler(async (req: Request, res: Respons
 
 export const deleteSale = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { motivo } = req.body;
+  const { motivo } = saleVoidRequestSchema.parse(req.body);
   if (!id) return res.status(400).json({ success: false, error: 'ID requerido' });
-  if (!motivo || !motivo.trim()) return res.status(400).json({ success: false, error: 'El motivo es requerido para anular' });
   
   await service.deleteSale(String(id), String(motivo), req.user?.id);
   res.json({ success: true, message: 'Venta anulada correctamente' });

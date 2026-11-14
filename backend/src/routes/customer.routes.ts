@@ -1,3 +1,4 @@
+import { requireAdmin } from '../middlewares/auth';
 import { Router } from 'express';
 import {
   addCreditPayment,
@@ -15,6 +16,6 @@ router.post('/credits/:cuentaId/payments', addCreditPayment);
 router.get('/:id', getCustomerById);
 router.post('/', createCustomer);
 router.put('/:id', updateCustomer);
-router.delete('/:id', deleteCustomer);
+router.delete('/:id', requireAdmin, deleteCustomer);
 
 export default router;

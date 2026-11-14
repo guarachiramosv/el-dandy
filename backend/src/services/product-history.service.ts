@@ -73,6 +73,9 @@ export class ProductHistoryService {
           descuento: true,
           metodoPago: true,
           tipoVenta: true,
+          fechaNegocio: true,
+          esCorreccionCierre: true,
+          motivoCorreccion: true,
           usuario: { select: { id: true, nombre: true, email: true } },
           cliente: { select: { id: true, nombre: true } },
           detalles: {
@@ -176,6 +179,7 @@ export class ProductHistoryService {
         estadoNuevo: null,
         changes: null,
         reference: sale ? {
+          fechaNegocio: sale.fechaNegocio, esCorreccionCierre: sale.esCorreccionCierre, motivoCorreccion: sale.motivoCorreccion,
           type: 'VENTA', id: sale.id, label: `Venta ${sale.id.slice(0, 8)}`,
           metodoPago: sale.metodoPago, tipoVenta: sale.tipoVenta, cliente: sale.cliente?.nombre || null,
           cantidad: saleLine?.cantidad || movement.cantidad, precioUnitario: saleLine?.precioUnitario || null,

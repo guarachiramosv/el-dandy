@@ -1115,6 +1115,8 @@ function ProductHistoryItem({ event, unitLabel }: { event: ProductHistoryEvent; 
         {reference && (
           <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-gray-300">
             <p className="font-bold text-primary-light">{reference.label}</p>
+            {reference.fechaNegocio && <p className="mt-1 text-xs text-gray-300">Fecha de caja / reporte: {new Date(reference.fechaNegocio).toLocaleDateString("es-BO", { timeZone: "America/La_Paz" })}</p>}
+            {reference.esCorreccionCierre && <p className="mt-1 text-xs text-amber-300">Corrección de cierre: {reference.motivoCorreccion || "Sin motivo registrado"}</p>}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {reference.cliente && <span>Cliente: {reference.cliente}</span>}
               {reference.proveedor && <span>Proveedor: {reference.proveedor}</span>}

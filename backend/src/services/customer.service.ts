@@ -264,7 +264,7 @@ export class CustomerService {
       return tx.cuentaCobrar.update({
         where: { id: cuentaId },
         data: { montoPagado, saldo, estado },
-        include: { pagos: true, cliente: true, venta: true },
+        include: { pagos: true, cliente: { omit: { password: true } }, venta: true },
       });
     });
   }

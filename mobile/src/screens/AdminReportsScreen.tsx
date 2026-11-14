@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,9 +17,9 @@ import { colors } from '../theme';
 import { ProductInventoryReport, ReportPeriod, SalesHistoryReport, Session, Sucursal } from '../types';
 
 const today = new Date();
-const defaultDay = today.toISOString().slice(0, 10);
-const defaultMonth = today.toISOString().slice(0, 7);
-const defaultYear = String(today.getFullYear());
+const defaultDay = new Date(today.getTime() - 4 * 3600000).toISOString().slice(0, 10);
+const defaultMonth = defaultDay.slice(0, 7);
+const defaultYear = defaultDay.slice(0, 4);
 
 const periods: Array<{ value: Exclude<ReportPeriod, 'all'>; label: string }> = [
   { value: 'day', label: 'Dia' },
@@ -60,7 +61,8 @@ function getBranchStock(item: ProductInventoryReport['items'][number], branchNam
 function printHtml(report: SalesHistoryReport, inventory: ProductInventoryReport | null, branch: string) {
   const salesRows = report.ventas.flatMap((sale) =>
     (sale.detalles || []).map((detail) => ({
-      fecha: new Date(sale.createdAt).toLocaleString('es-BO'),
+      fecha: new Date(sale.fechaNegocio || sale.createdAt).toLocaleDateString('es-BO', { timeZone: 'America/La_Paz' }),
+      correccion: sale.esCorreccionCierre ? `Correccion de cierre. Registrada: ${new Date(sale.createdAt).toLocaleString('es-BO', { timeZone: 'America/La_Paz' })}. Motivo: ${sale.motivoCorreccion || ''}` : '',
       vendedor: sale.usuario?.nombre || 'Usuario',
       sucursal: branchNameFrom(sale),
       pago: paymentLabel(sale.tipoVenta, sale.metodoPago),
@@ -107,7 +109,7 @@ function printHtml(report: SalesHistoryReport, inventory: ProductInventoryReport
         <table>
           <thead><tr><th>Fecha</th><th>Vendedor</th><th>Sucursal</th><th>Pago</th><th>Codigo</th><th>Producto</th><th class="right">Cant.</th><th class="right">Total</th></tr></thead>
           <tbody>
-            ${salesRows.map((row) => `<tr><td>${escapeHtml(row.fecha)}</td><td>${escapeHtml(row.vendedor)}</td><td>${escapeHtml(row.sucursal)}</td><td>${escapeHtml(row.pago)}</td><td>${escapeHtml(row.codigo)}</td><td>${escapeHtml(row.producto)}</td><td class="right">${row.cantidad}</td><td class="right">${money(row.total)}</td></tr>`).join('')}
+            ${salesRows.map((row) => `<tr><td>${escapeHtml(row.fecha)}${row.correccion ? `<br/>${escapeHtml(row.correccion)}` : ''}</td><td>${escapeHtml(row.vendedor)}</td><td>${escapeHtml(row.sucursal)}</td><td>${escapeHtml(row.pago)}</td><td>${escapeHtml(row.codigo)}</td><td>${escapeHtml(row.producto)}</td><td class="right">${row.cantidad}</td><td class="right">${money(row.total)}</td></tr>`).join('')}
           </tbody>
         </table>
         <h2>Inventario por sucursal</h2>
@@ -139,7 +141,9 @@ export default function AdminReportsScreen({ session }: { session: Session }) {
   const value = useMemo(() => periodValue(period, day, month, year), [day, month, period, year]);
   const selectedBranch = sucursales.find((item) => item.id === sucursalId)?.nombre || 'Todas';
 
+  const requestId = useRef(0);
   const loadReports = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setError('');
     setLoading(true);
     try {
@@ -148,26 +152,39 @@ export default function AdminReportsScreen({ session }: { session: Session }) {
         getSalesHistoryReport(session.token, { period, value, sucursalId: sucursalId || undefined }),
         getProductInventoryReport(session.token, { period: 'all', sucursalId: sucursalId || undefined }),
       ]);
+      if (currentRequest !== requestId.current) return null;
       setSucursales(branches);
       setSalesReport(sales);
       setInventoryReport(inventory);
+      return { sales, inventory };
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudieron cargar los reportes.');
+      if (currentRequest === requestId.current) {
+        setSalesReport(null);
+        setInventoryReport(null);
+        setError(err instanceof Error ? err.message : 'No se pudieron cargar los reportes.');
+      }
+      return null;
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (currentRequest === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [period, session.token, sucursalId, value]);
 
   useEffect(() => {
-    loadReports();
+    void loadReports();
+    const listener = AppState.addEventListener('change', state => { if (state === 'active') void loadReports(); });
+    return () => { ++requestId.current; listener.remove(); };
   }, [loadReports]);
 
   const printReport = async () => {
     if (!salesReport) return;
     setPrinting(true);
     try {
-      await Print.printAsync({ html: printHtml(salesReport, inventoryReport, selectedBranch) });
+      const latest = await loadReports();
+      if (!latest) return;
+      await Print.printAsync({ html: printHtml(latest.sales, latest.inventory, selectedBranch) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo imprimir el reporte.');
     } finally {
@@ -270,6 +287,15 @@ export default function AdminReportsScreen({ session }: { session: Session }) {
             <Stat label="Queda QR" value={money(salesReport.totals.netoQr)} />
           </View>
 
+          <Section title="Correcciones de cierre">
+            {salesReport.ventas.filter(sale => sale.esCorreccionCierre).map(sale => (
+              <View key={sale.id} style={styles.noteCard}>
+                <Text style={styles.noteTitle}>{sale.usuario?.nombre || 'Vendedor'} · {money(sale.total)}</Text>
+                <Text style={styles.noteText}>Caja: {new Date(sale.fechaNegocio || sale.createdAt).toLocaleDateString('es-BO', { timeZone: 'America/La_Paz' })}. Registrada: {new Date(sale.createdAt).toLocaleString('es-BO', { timeZone: 'America/La_Paz' })}</Text>
+                <Text style={styles.noteText}>{sale.motivoCorreccion}</Text>
+              </View>
+            ))}
+          </Section>
           <Section title="Nota al cerrar caja">
             {salesReport.cierres.length > 0 ? salesReport.cierres.map((closing) => (
               <View key={closing.id} style={styles.noteCard}>

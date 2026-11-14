@@ -81,6 +81,9 @@ function getBusinessDay(dateValue?: string | null) {
   if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     const [year, month, day] = dateValue.split('-').map(Number);
     const start = new Date(Date.UTC(year, month - 1, day, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0));
+    if (start.getUTCFullYear() !== year || start.getUTCMonth() !== month - 1 || start.getUTCDate() !== day) {
+      throw Object.assign(new Error('Fecha invalida'), { status: 400 });
+    }
     const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
     return { start, end, label: dateValue };
   }
@@ -254,7 +257,7 @@ const saleVoidRequestInclude = {
 const saleInclude = {
   usuario: { select: { id: true, nombre: true, email: true } },
   sucursal: true,
-  cliente: true,
+  cliente: { omit: { password: true } },
   cuenta: { include: { pagos: true } },
   detalles: { include: { producto: true } },
   pagos: { orderBy: { createdAt: 'asc' as const } },
@@ -305,8 +308,9 @@ export class SaleService {
     });
   }
 
-  async getAll() {
+  async getAll(usuarioId?: string) {
     return prisma.venta.findMany({
+      where: usuarioId ? { usuarioId } : {},
       include: saleInclude,
       orderBy: { createdAt: 'desc' },
     });
@@ -344,6 +348,9 @@ export class SaleService {
 
       const today = getBusinessDay();
       const businessDay = getBusinessDay(data.fechaNegocio);
+      if (businessDay.start > today.start) {
+        throw Object.assign(new Error('No se pueden registrar ventas en una fecha futura.'), { status: 400 });
+      }
       const isHistoricalCorrection = businessDay.label !== today.label;
       if (!isHistoricalCorrection && !data.cierreCorregidoId) await assertPreviousCashClosed(tx, data.usuarioId, data.sucursalId, today.start);
       let correctionClosing: { id: string } | null = null;
@@ -563,7 +570,7 @@ export class SaleService {
           cuenta: { sucursalId: params.sucursalId },
         },
         include: {
-          cuenta: { include: { cliente: true, venta: true } },
+          cuenta: { include: { cliente: { omit: { password: true } }, venta: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),

@@ -206,6 +206,9 @@ export interface ProductHistoryEvent {
     subtotalLinea?: number | null;
     descuentoVenta?: number | null;
     totalVenta?: number | null;
+    fechaNegocio?: string;
+    esCorreccionCierre?: boolean;
+    motivoCorreccion?: string | null;
     totalCompra?: number | null;
     totalCompraReales?: number | null;
     notas?: string | null;

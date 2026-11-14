@@ -18,15 +18,18 @@ function parsePeriod(period: ReportPeriod, value?: string | null) {
   }
 
   const now = new Date();
-  const fallbackYear = now.getFullYear();
-  const fallbackMonth = now.getMonth() + 1;
-  const fallbackDay = now.getDate();
+  const boliviaNow = new Date(now.getTime() - BOLIVIA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const fallbackYear = boliviaNow.getUTCFullYear();
+  const fallbackMonth = boliviaNow.getUTCMonth() + 1;
+  const fallbackDay = boliviaNow.getUTCDate();
 
   let year = fallbackYear;
   let month = fallbackMonth;
   let day = fallbackDay;
 
   if (value) {
+    const pattern = period === 'year' ? /^\d{4}$/ : period === 'month' ? /^\d{4}-\d{2}$/ : /^\d{4}-\d{2}-\d{2}$/;
+    if (!pattern.test(value)) throw Object.assign(new Error('Periodo invalido'), { status: 400 });
     const parts = value.split('-').map(Number);
     if (period === 'year') {
       year = parts[0];
@@ -54,6 +57,10 @@ function parsePeriod(period: ReportPeriod, value?: string | null) {
       : period === 'month'
         ? new Date(Date.UTC(year, month - 1, 1, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0))
         : new Date(Date.UTC(year, month - 1, day, BOLIVIA_UTC_OFFSET_HOURS, 0, 0, 0));
+
+  if (start.getUTCFullYear() !== year || (period !== 'year' && start.getUTCMonth() !== month - 1) || (period === 'day' && start.getUTCDate() !== day)) {
+    throw Object.assign(new Error('Fecha invalida'), { status: 400 });
+  }
 
   const end =
     period === 'year'
@@ -232,7 +239,7 @@ export class ReportService {
       if (venta.tipoVenta === 'CREDITO') totals.totalCredito += venta.total;
       else addSalePaymentsToTotals(totals, venta);
 
-      const dayKey = boliviaDateLabel(venta.createdAt);
+      const dayKey = boliviaDateLabel(venta.fechaNegocio);
       const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
       day.ventas += 1;
       day.ingresos += venta.total;
@@ -282,7 +289,7 @@ export class ReportService {
 
     gastos.forEach((gasto) => {
       totals.totalGastos += gasto.monto;
-      const dayKey = boliviaDateLabel(gasto.createdAt);
+      const dayKey = boliviaDateLabel(gasto.fechaNegocio);
       const day = dailyMap.get(dayKey) || { fecha: dayKey, ventas: 0, ingresos: 0, costos: 0, gastos: 0, ganancia: 0 };
       day.gastos += gasto.monto;
       dailyMap.set(dayKey, day);
@@ -385,7 +392,7 @@ export class ReportService {
         include: {
           usuario: { select: { id: true, nombre: true, email: true, sucursal: true } },
           sucursal: true,
-          cliente: true,
+          cliente: { omit: { password: true } },
           detalles: {
             include: {
               producto: { include: { categoria: true, sucursal: true } },

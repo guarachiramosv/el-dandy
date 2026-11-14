@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import { getJwtSecret } from './lib/jwt-secret';
 import { prisma } from './lib/prisma';
 import categoryRoutes from './routes/category.routes';
 import productRoutes from './routes/product.routes';
@@ -25,14 +26,21 @@ import { requireAuth, requireAdmin } from './middlewares/auth';
 import { requestPerformance } from './middlewares/requestPerformance';
 
 dotenv.config();
+getJwtSecret();
 
 const app = express();
+// Render's reverse proxy supplies the client IP for authentication limits.
+if (process.env.RENDER) app.set('trust proxy', 1);
 
 app.use(cors({ origin: '*' }));
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(compression());
 app.use(requestPerformance);
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 app.use('/uploads', express.static('uploads'));
 
 // ─── Health ─────────────────────────────────────────────
@@ -44,7 +52,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
   } catch (e) {
     console.error('DB connection error:', e);
   }
-  res.json({ status: 'OK', databaseConnected: dbConnected, timestamp: new Date().toISOString() });
+  res.status(dbConnected ? 200 : 503).json({ status: dbConnected ? 'OK' : 'ERROR', databaseConnected: dbConnected, version: process.env.RENDER_GIT_COMMIT || null, timestamp: new Date().toISOString() });
 });
 
 app.get('/', (_req: Request, res: Response) => {

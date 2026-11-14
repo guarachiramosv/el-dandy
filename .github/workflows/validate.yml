@@ -1,0 +1,46 @@
+name: Validate sales, reports and security
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix backend
+      - run: npm test --prefix backend
+      - run: ./backend/node_modules/.bin/tsx --test frontend/tests/*.test.ts
+      - run: npm run build --prefix frontend
+      - run: npm audit --omit=dev --audit-level=moderate --prefix backend
+      - run: npm audit --omit=dev --audit-level=moderate --prefix frontend
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci --prefix mobile
+      - run: npx tsc --noEmit
+        working-directory: mobile
+      - run: npx expo export --platform android --output-dir ../tmp/mobile-export
+        working-directory: mobile
+        env:
+          EXPO_NO_TELEMETRY: 1
+      - run: npm audit --audit-level=moderate --prefix mobile

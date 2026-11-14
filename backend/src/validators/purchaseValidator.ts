@@ -7,7 +7,7 @@ export const createPurchaseSchema = z.object({
   notas: z.string().optional().nullable(),
   metodoPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'QR', 'TARJETA']).optional().nullable(),
   montoPagado: z.number().min(0, 'Monto pagado invalido').optional(),
-  fechaVencimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de vencimiento invalida').optional().nullable(),
+  fechaVencimiento: z.iso.date('Fecha invalida').optional().nullable(),
   comprobante: z.string().trim().max(160).optional().nullable(),
   tipoCambio: z.number().min(0).optional(),
   items: z.array(z.object({

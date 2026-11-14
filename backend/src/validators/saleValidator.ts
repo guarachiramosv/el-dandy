@@ -11,8 +11,8 @@ export const createSaleSchema = z.object({
   })).max(2).optional(),
   tipoVenta: z.enum(['CONTADO', 'CREDITO']).default('CONTADO'),
   descuento: z.number().min(0).default(0),
-  fechaVencimiento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de vencimiento invalida').optional().nullable(),
-  fechaNegocio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de negocio invalida').optional().nullable(),
+  fechaVencimiento: z.iso.date('Fecha invalida').optional().nullable(),
+  fechaNegocio: z.iso.date('Fecha invalida').optional().nullable(),
   cierreCorregidoId: z.string().uuid('Cierre de caja invalido').optional().nullable(),
   motivoCorreccion: z.string().trim().min(5, 'Explica el motivo de la correccion').max(300).optional().nullable(),
   items: z.array(
@@ -55,7 +55,7 @@ export const updateSalePaymentMethodSchema = z.object({
 });
 
 export const closeCashRegisterSchema = z.object({
-  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de cierre invalida').optional().nullable(),
+  fecha: z.iso.date('Fecha invalida').optional().nullable(),
   montoDeclarado: z.number().min(0, 'Monto declarado invalido'),
   notas: z.string().optional().nullable(),
   depositadoBanco: z.boolean().optional().default(false),
@@ -77,7 +77,7 @@ export const reviewCashClosingSchema = z.object({
 export const createCashExpenseSchema = z.object({
   usuarioId: z.string().uuid('Usuario invalido').optional(),
   sucursalId: z.string().uuid('Sucursal invalida').optional(),
-  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de gasto invalida').optional().nullable(),
+  fecha: z.iso.date('Fecha invalida').optional().nullable(),
   motivo: z.string().trim().min(2, 'Motivo requerido').max(160, 'Motivo demasiado largo'),
   monto: z.number().positive('Monto debe ser mayor a cero'),
   metodoPago: z.enum(['EFECTIVO', 'QR']),

@@ -1,6 +1,7 @@
 // src/controllers/auth.controller.ts
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../lib/jwt-secret';
 import { z } from 'zod';
 import { UserService } from '../services/user.service';
 import { CustomerService } from '../services/customer.service';
@@ -32,7 +33,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   }
   const token = jwt.sign(
     { id: user.id, role: user.role, sucursalId: user.sucursalId },
-    process.env.JWT_SECRET || 'dev-secret-change-me',
+    getJwtSecret(),
     { expiresIn: '8h' }
   );
   res.json({ success: true, data: { user, token } });
@@ -43,7 +44,7 @@ export const registerCustomer = asyncHandler(async (req: Request, res: Response)
   const customer = await customerService.register(parsed);
   const token = jwt.sign(
     { id: customer.id, role: 'CUSTOMER' },
-    process.env.JWT_SECRET || 'dev-secret-change-me',
+    getJwtSecret(),
     { expiresIn: '8h' }
   );
   res.status(201).json({ success: true, data: { customer, token } });
@@ -59,7 +60,7 @@ export const loginCustomer = asyncHandler(async (req: Request, res: Response) =>
   }
   const token = jwt.sign(
     { id: customer.id, role: 'CUSTOMER' },
-    process.env.JWT_SECRET || 'dev-secret-change-me',
+    getJwtSecret(),
     { expiresIn: '8h' }
   );
   res.json({ success: true, data: { customer, token } });

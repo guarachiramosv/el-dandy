@@ -7,7 +7,11 @@ const BOLIVIA_UTC_OFFSET_HOURS = 4;
 function getBusinessDay(dateValue?: string | null) {
   if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
     const [year, month, day] = dateValue.split('-').map(Number);
-    return { start: new Date(Date.UTC(year, month - 1, day, 4)) };
+    const start = new Date(Date.UTC(year, month - 1, day, 4));
+    if (start.getUTCFullYear() !== year || start.getUTCMonth() !== month - 1 || start.getUTCDate() !== day) {
+      throw Object.assign(new Error('Fecha invalida'), { status: 400 });
+    }
+    return { start };
   }
   const base = dateValue ? new Date(dateValue) : new Date();
   if (Number.isNaN(base.getTime())) {
@@ -74,7 +78,7 @@ const trabajoInclude = {
   seguroProducto: true,
   usuario: { select: { id: true, nombre: true, email: true } },
   sucursal: true,
-  venta: { include: { detalles: { include: { producto: true } }, cliente: true, pagos: true } },
+  venta: { include: { detalles: { include: { producto: true } }, cliente: { omit: { password: true } }, pagos: true } },
 } satisfies Prisma.RemachadoTrabajoInclude;
 
 export class RemachadoService {

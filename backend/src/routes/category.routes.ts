@@ -1,3 +1,4 @@
+import { requireAdmin } from '../middlewares/auth';
 import { Router } from 'express';
 import {
   getAllCategories,
@@ -11,8 +12,8 @@ const router = Router();
 
 router.get('/', getAllCategories);
 router.get('/:id', getCategoryById);
-router.post('/', createCategory);
-router.put('/:id', updateCategory);
-router.delete('/:id', deleteCategory);
+router.post('/', requireAdmin, createCategory);
+router.put('/:id', requireAdmin, updateCategory);
+router.delete('/:id', requireAdmin, deleteCategory);
 
 export default router;

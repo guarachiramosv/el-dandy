@@ -260,6 +260,9 @@ export type SalesHistoryReport = {
     metodoPago: string;
     tipoVenta: string;
     createdAt: string;
+    fechaNegocio?: string;
+    esCorreccionCierre?: boolean;
+    motivoCorreccion?: string | null;
     usuario?: ReportUser;
     sucursal?: { id: string; nombre: string };
     cliente?: { id: string; nombre: string } | null;
@@ -284,6 +287,7 @@ export type SalesHistoryReport = {
     monto: number;
     metodoPago: 'EFECTIVO' | 'QR';
     notas?: string | null;
+    fechaNegocio?: string;
     createdAt: string;
     usuario?: ReportUser;
     sucursal?: { id: string; nombre: string };
