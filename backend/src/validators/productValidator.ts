@@ -45,7 +45,7 @@ export const createProductSchema = z.object({
   compraInicial: purchaseInfoSchema.optional().nullable(),
 });
 
-export const updateProductSchema = createProductSchema.partial();
+export const updateProductSchema = createProductSchema.partial().extend({ stockEsperado: finiteNumber.min(0).optional() });
 
 export const addProductStockSchema = z.object({
   sucursalId: uuidLikeSchema,

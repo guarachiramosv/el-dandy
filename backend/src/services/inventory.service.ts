@@ -1,3 +1,5 @@
+import { requireValidStock, requireQuantityForUnit } from './inventory-safety';
+import { inventoryTransaction } from '../lib/inventory-transaction';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { StockService } from './stock.service';
@@ -161,7 +163,7 @@ export class InventoryService {
     usuarioId: string;
     notas?: string | null;
   }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const origen = await tx.producto.findUnique({ where: { id: data.productoOrigenId }, include: { stockSucursales: true } });
       const destino = await tx.producto.findUnique({ where: { id: data.productoDestinoId }, include: { stockSucursales: true } });
       if (!origen || !destino) throw Object.assign(new Error('Producto origen o destino no encontrado'), { status: 404 });
@@ -187,6 +189,8 @@ export class InventoryService {
         throw Object.assign(new Error(`Stock insuficiente en origen. Disponible: ${origenBranch.stock}`), { status: 400 });
       }
 
+      requireQuantityForUnit(data.cantidad, origen.unidadVenta);
+      requireQuantityForUnit(data.cantidad, destino.unidadVenta);
       const stockOrigenNuevo = origenBranch.stock - data.cantidad;
       const stockDestinoNuevo = destinoBranch.stock + data.cantidad;
 
@@ -265,16 +269,19 @@ export class InventoryService {
   }
 
   async adjust(data: { productoId: string; sucursalId?: string; cantidad: number; usuarioId: string; notas?: string | null }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const producto = await tx.producto.findUnique({
         where: { id: data.productoId },
         include: { stockSucursales: true },
       });
       if (!producto) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
+      if (!producto.activo || producto.estado !== 'ACTIVO') throw Object.assign(new Error('Restaura el producto antes de ajustar stock.'), { status: 409 });
       const sucursalId = data.sucursalId || producto.sucursalId;
       const branchStock = producto.stockSucursales.find((stock) => stock.sucursalId === sucursalId);
+      if (!branchStock?.activo || branchStock.estado !== 'ACTIVO') throw Object.assign(new Error('El producto no tiene inventario activo en esa sucursal.'), { status: 409 });
+      requireQuantityForUnit(data.cantidad, producto.unidadVenta);
       const stockAnterior = branchStock?.stock ?? (producto.sucursalId === sucursalId ? producto.stock : 0);
-      const stockNuevo = Math.max(stockAnterior + data.cantidad, 0);
+      const stockNuevo = requireValidStock(stockAnterior + data.cantidad);
       const appliedDelta = stockNuevo - stockAnterior;
       await tx.productoStockSucursal.upsert({
         where: { productoId_sucursalId: { productoId: producto.id, sucursalId } },

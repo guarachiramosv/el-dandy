@@ -13,7 +13,9 @@ export const getAllProducts = asyncHandler(async (req: Request, res: Response) =
     limit: Number(limit),
     search: search as string,
     status: status === 'inactive' || status === 'discontinued' || status === 'all' ? status : 'active',
-    sucursalId: typeof sucursalId === 'string' ? sucursalId : scope === 'branch' ? req.user?.sucursalId : undefined,
+    sucursalId: view === 'sale'
+      ? (req.user?.role === 'SELLER' ? req.user.sucursalId : typeof sucursalId === 'string' ? sucursalId : req.user?.sucursalId)
+      : typeof sucursalId === 'string' ? sucursalId : scope === 'branch' ? req.user?.sucursalId : undefined,
     view: view === 'sale' ? 'sale' : 'full',
   });
   res.json({ success: true, data: result });

@@ -25,14 +25,14 @@ export const productConditionClass = (condition?: string | null) =>
     : "border-green-500/40 bg-green-500/10 text-green-200";
 
 export function resolveAvailableStock(product: Product, branchId?: string | null) {
+  if (product.activo === false || (product.estado && product.estado !== "ACTIVO")) return 0;
   if (!branchId) return product.stock;
   const activeBranchStocks = product.stockSucursales?.filter(
     (item) => item.estado === "ACTIVO" && item.activo !== false,
   ) || [];
   const sellerBranchStock = activeBranchStocks.find((item) => item.sucursalId === branchId);
   if (sellerBranchStock) return sellerBranchStock.stock;
-  const productBranchStock = activeBranchStocks.find((item) => item.sucursalId === product.sucursalId);
-  return productBranchStock?.stock ?? product.stock;
+  return 0;
 }
 
 export interface SaleDraftValidationInput {

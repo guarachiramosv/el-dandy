@@ -1,3 +1,5 @@
+import { requireQuantityForUnit } from './inventory-safety';
+import { inventoryTransaction } from '../lib/inventory-transaction';
 // src/services/product.service.ts
 import { prisma } from '../lib/prisma';
 import { Prisma, ProductStatus, PurchaseOrigin } from '@prisma/client';
@@ -271,6 +273,9 @@ export class ProductService {
         ],
       });
     }
+    if (params.view === 'sale' && params.sucursalId) {
+      and.push({ stockSucursales: { some: { sucursalId: params.sucursalId, activo: true, estado: 'ACTIVO' } } });
+    }
     if (params.status === 'inactive') where.estado = 'INACTIVO';
     else if (params.status === 'discontinued') where.estado = 'DESCONTINUADO';
     else if (params.status !== 'all') where.estado = 'ACTIVO';
@@ -403,7 +408,8 @@ export class ProductService {
       createData.proveedorId = initialPurchase.proveedorId || null;
     }
 
-    return prisma.$transaction(async (tx) => {
+    requireQuantityForUnit(initialStock, data.unidadVenta || 'UNIDAD');
+    return inventoryTransaction(async (tx) => {
       if (initialPurchase?.proveedorId) {
         if (!usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra inicial'), { status: 401 });
         const provider = await tx.proveedor.findFirst({
@@ -501,53 +507,54 @@ export class ProductService {
     });
   }
 
-  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput & { deletedImageUrls?: string[] }, usuarioId?: string | null) {
-    const current = await prisma.producto.findUnique({
-      where: { id },
-      select: {
-        codigo: true,
-        codigoRepuesto: true,
-        descripcion: true,
-        descripcionDetallada: true,
-        marca: true,
-        condicion: true,
-        unidadVenta: true,
-        stockMinimo: true,
-        ubicacion: true,
-        activo: true,
-        estado: true,
-        precioCompra: true,
-        precioCompraReales: true,
-        tipoCambioCompra: true,
-        precioVenta: true,
-        imagen: true,
-        proveedorId: true,
-        categoriaId: true,
-        sucursalId: true,
-      },
-    });
-    if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
+  async update(id: string, data: Prisma.ProductoUncheckedUpdateInput & { deletedImageUrls?: string[]; stockEsperado?: number }, usuarioId?: string | null) {
+    return inventoryTransaction(async (tx) => {
+      const current = await tx.producto.findUnique({
+        where: { id },
+        select: {
+          codigo: true,
+          codigoRepuesto: true,
+          descripcion: true,
+          descripcionDetallada: true,
+          marca: true,
+          condicion: true,
+          unidadVenta: true,
+          stockMinimo: true,
+          ubicacion: true,
+          activo: true,
+          estado: true,
+          precioCompra: true,
+          precioCompraReales: true,
+          tipoCambioCompra: true,
+          precioVenta: true,
+          imagen: true,
+          proveedorId: true,
+          categoriaId: true,
+          sucursalId: true,
+        },
+      });
+      if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
 
-    const nextCodigo = typeof data.codigo === 'string' ? data.codigo.trim() : current.codigo;
-    const nextSucursalId = typeof data.sucursalId === 'string' ? data.sucursalId : current.sucursalId;
-    const nextStock = typeof data.stock === 'number' ? data.stock : undefined;
-    const nextUbicacion: string | null | undefined = typeof data.ubicacion === 'string'
-      ? data.ubicacion.trim() || null
-      : data.ubicacion === null
-        ? null
-        : undefined;
+      const nextCodigo = typeof data.codigo === 'string' ? data.codigo.trim() : current.codigo;
+      const nextSucursalId = typeof data.sucursalId === 'string' ? data.sucursalId : current.sucursalId;
+      const nextStock = typeof data.stock === 'number' ? data.stock : undefined;
+      const nextUbicacion: string | null | undefined = typeof data.ubicacion === 'string'
+        ? data.ubicacion.trim() || null
+        : data.ubicacion === null
+          ? null
+          : undefined;
 
-    if (typeof data.codigo === 'string') data.codigo = nextCodigo;
-    if (typeof data.codigoRepuesto === 'string') data.codigoRepuesto = data.codigoRepuesto.trim() || null;
-    if (typeof data.descripcionDetallada === 'string') data.descripcionDetallada = data.descripcionDetallada.trim() || null;
-    if (typeof data.marca === 'string') data.marca = data.marca.trim() || DEFAULT_PRODUCT_BRAND;
-    else if (data.marca === null) data.marca = DEFAULT_PRODUCT_BRAND;
-    if (nextCodigo !== current.codigo) {
-      await this.ensureUniqueCode(nextCodigo, id);
-    }
-    return prisma.$transaction(async (tx) => {
+      if (typeof data.codigo === 'string') data.codigo = nextCodigo;
+      if (typeof data.codigoRepuesto === 'string') data.codigoRepuesto = data.codigoRepuesto.trim() || null;
+      if (typeof data.descripcionDetallada === 'string') data.descripcionDetallada = data.descripcionDetallada.trim() || null;
+      if (typeof data.marca === 'string') data.marca = data.marca.trim() || DEFAULT_PRODUCT_BRAND;
+      else if (data.marca === null) data.marca = DEFAULT_PRODUCT_BRAND;
+      if (nextCodigo !== current.codigo) {
+        await this.ensureUniqueCode(nextCodigo, id);
+      }
       const updateData: any = { ...data };
       delete updateData.stock;
+      delete updateData.stockEsperado;
       delete updateData.deletedImageUrls;
       delete updateData.compraInicial;
       if (nextSucursalId !== current.sucursalId) delete updateData.ubicacion;
@@ -599,6 +606,13 @@ export class ProductService {
         });
         const stockAnterior = existingStock?.stock ?? 0;
         const stockNuevo = nextStock ?? stockAnterior;
+        if (nextStock !== undefined && stockNuevo !== stockAnterior && (!current.activo || current.estado !== 'ACTIVO' || (existingStock && (!existingStock.activo || existingStock.estado !== 'ACTIVO')))) {
+          throw Object.assign(new Error('Restaura el producto y su sucursal antes de ajustar stock.'), { status: 409 });
+        }
+        if (nextStock !== undefined && stockNuevo !== stockAnterior && (data.stockEsperado === undefined || Math.abs(data.stockEsperado - stockAnterior) > 0.000001)) {
+          throw Object.assign(new Error('El stock cambio desde que abriste el formulario. Actualiza el producto antes de confirmar un ajuste.'), { status: 409 });
+        }
+        requireQuantityForUnit(stockNuevo, updatedBase.unidadVenta);
         await tx.productoStockSucursal.upsert({
           where: { productoId_sucursalId: { productoId: id, sucursalId: nextSucursalId } },
           update: {
@@ -662,7 +676,7 @@ export class ProductService {
     usuarioId?: string | null;
     notas?: string | null;
   }) {
-    const product = await prisma.$transaction(async (tx) => {
+    const product = await inventoryTransaction(async (tx) => {
       const precioCompraUnitarioBs = data.precioCompraUnitarioReales > 0
         ? roundCurrency(data.precioCompraUnitarioReales * data.tipoCambio)
         : roundCurrency(data.precioCompraUnitario);
@@ -672,6 +686,7 @@ export class ProductService {
       });
       if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
       if (data.cantidad > 0) {
+        if (!current.activo || current.estado !== 'ACTIVO') throw Object.assign(new Error('Restaura el producto antes de agregar stock.'), { status: 409 });
         if (!data.usuarioId) throw Object.assign(new Error('Sesion requerida para registrar la compra'), { status: 401 });
         if (data.proveedorId) {
           const provider = await tx.proveedor.findFirst({
@@ -682,7 +697,11 @@ export class ProductService {
         }
       }
 
+      requireQuantityForUnit(data.cantidad, current.unidadVenta);
       const branchStock = current.stockSucursales.find((item) => item.sucursalId === data.sucursalId);
+      if (branchStock && (!branchStock.activo || branchStock.estado !== 'ACTIVO')) {
+        throw Object.assign(new Error('La sucursal del producto esta inactiva. Restaurala antes de agregar stock.'), { status: 409 });
+      }
       const stockAnterior = branchStock?.stock ?? 0;
       const stockNuevo = stockAnterior + data.cantidad;
       const fallbackUbicacion = current.sucursalId === data.sucursalId ? current.ubicacion : null;
@@ -775,7 +794,7 @@ export class ProductService {
   }
 
   async updateBranchStatus(id: string, sucursalId: string, estado: ProductStatus, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const current = await tx.producto.findUnique({ where: { id }, include: { stockSucursales: true } });
       if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
 
@@ -838,7 +857,7 @@ export class ProductService {
   async addImages(id: string, images: Array<{ url: string; publicId?: string; orden?: number }>, usuarioId?: string | null) {
     if (images.length === 0) return this.getById(id);
 
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const product = await tx.producto.findUnique({
         where: { id },
         select: { id: true, codigo: true, descripcion: true, sucursalId: true, imagen: true },
@@ -880,7 +899,7 @@ export class ProductService {
   }
 
   async delete(id: string, data: { motivo: string; sucursalId?: string | null; usuarioId?: string | null }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const current = await tx.producto.findUnique({
         where: { id },
         include: { stockSucursales: true },
@@ -932,28 +951,28 @@ export class ProductService {
   }
 
   async restore(id: string, usuarioId?: string | null) {
-    const current = await prisma.producto.findUnique({
-      where: { id },
-      select: { codigo: true, descripcion: true, sucursalId: true, stock: true, estado: true },
-    });
-    if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
+    return inventoryTransaction(async (tx) => {
+      const current = await tx.producto.findUnique({
+        where: { id },
+        select: { codigo: true, descripcion: true, sucursalId: true, stock: true, estado: true },
+      });
+      if (!current) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
 
-    const activeDuplicate = await prisma.producto.findFirst({
-      where: {
-        codigo: current.codigo,
-        id: { not: id },
-        estado: 'ACTIVO',
-      },
-      select: { descripcion: true },
-    });
-    if (activeDuplicate) {
-      throw Object.assign(
-        new Error(`No se puede restaurar porque ya existe un producto activo con el codigo ${current.codigo}. Agrega stock al producto activo.`),
-        { status: 409 }
-      );
-    }
+      const activeDuplicate = await tx.producto.findFirst({
+        where: {
+          codigo: current.codigo,
+          id: { not: id },
+          estado: 'ACTIVO',
+        },
+        select: { descripcion: true },
+      });
+      if (activeDuplicate) {
+        throw Object.assign(
+          new Error(`No se puede restaurar porque ya existe un producto activo con el codigo ${current.codigo}. Agrega stock al producto activo.`),
+          { status: 409 }
+        );
+      }
 
-    return prisma.$transaction(async (tx) => {
       await tx.productoStockSucursal.updateMany({
         where: { productoId: id },
         data: { activo: true, estado: 'ACTIVO' },
@@ -978,7 +997,7 @@ export class ProductService {
   }
 
   async discontinue(id: string, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const current = await tx.producto.findUnique({
         where: { id },
         select: { codigo: true, descripcion: true, sucursalId: true, stock: true, estado: true },

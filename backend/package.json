@@ -13,7 +13,8 @@
     "prisma:studio": "prisma studio",
     "db:test": "tsx src/dbTest.ts",
     "db:seed": "tsx src/seed.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:inventory": "tsx --test tests/inventory.integration.ts"
   },
   "keywords": [],
   "author": "",

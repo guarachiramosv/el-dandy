@@ -1,3 +1,5 @@
+import { resolveSaleStock, requireQuantityForUnit } from './inventory-safety';
+import { inventoryTransaction } from '../lib/inventory-transaction';
 import { assertPreviousCashClosed } from './cashClosingPolicy.service';
 import { CashClosingAction, CashClosingStatus, PaymentMethod, Prisma, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -72,10 +74,6 @@ type DailySummaryInput = {
 };
 
 const BOLIVIA_UTC_OFFSET_HOURS = 4;
-
-type ProductWithBranchStock = Prisma.ProductoGetPayload<{
-  include: { stockSucursales: true };
-}>;
 
 function getBusinessDay(dateValue?: string | null) {
   if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
@@ -229,25 +227,6 @@ function addSalePaymentsToTotals(
   });
 }
 
-function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId: string) {
-  const activeBranches = producto.stockSucursales.filter((stock) => stock.estado === 'ACTIVO' && stock.activo);
-  const requestedBranch = activeBranches.find((stock) => stock.sucursalId === requestedSucursalId);
-  if (requestedBranch) {
-    return { sucursalId: requestedBranch.sucursalId, availableStock: requestedBranch.stock };
-  }
-
-  const productBranch = activeBranches.find((stock) => stock.sucursalId === producto.sucursalId);
-  if (productBranch) {
-    return { sucursalId: productBranch.sucursalId, availableStock: productBranch.stock };
-  }
-
-  const branchWithStock = activeBranches.find((stock) => stock.stock > 0) || activeBranches[0];
-  if (branchWithStock) {
-    return { sucursalId: branchWithStock.sucursalId, availableStock: branchWithStock.stock };
-  }
-
-  return { sucursalId: producto.sucursalId, availableStock: producto.stock };
-}
 
 const saleVoidRequestInclude = {
   solicitante: { select: { id: true, nombre: true, email: true } },
@@ -285,7 +264,7 @@ export class SaleService {
 
     const paymentRows = buildSalePayments(venta.total, venta.tipoVenta, metodoPago, pagos);
 
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const cierre = await tx.cierreCaja.findFirst({
         where: {
           fecha: getBusinessDay(venta.fechaNegocio.toISOString()).start,
@@ -332,7 +311,7 @@ export class SaleService {
     const productIds = data.items.map((item) => item.productoId);
     const uniqueProductIds = Array.from(new Set(productIds));
 
-    const ventaId = await prisma.$transaction(async (tx) => {
+    const ventaId = await inventoryTransaction(async (tx) => {
       if (data.tipoVenta === 'CREDITO' && !data.clienteId) {
         throw Object.assign(new Error('Selecciona un cliente para venta a credito'), { status: 400 });
       }
@@ -413,6 +392,7 @@ export class SaleService {
         if (!producto) {
           throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
         }
+        requireQuantityForUnit(item.cantidad, producto.unidadVenta);
         const saleStock = resolveSaleStock(producto, data.sucursalId);
         saleStockMap.set(item.productoId, saleStock);
         if (saleStock.availableStock < item.cantidad) {
@@ -447,6 +427,7 @@ export class SaleService {
         throw Object.assign(new Error('El descuento no puede superar el subtotal de la venta.'), { status: 400 });
       }
       const total = Math.max(subtotal - data.descuento, 0);
+      if (total <= 0) throw Object.assign(new Error('El total de la venta debe ser mayor a cero.'), { status: 400 });
       const pagos = buildSalePayments(total, data.tipoVenta, data.metodoPago, data.pagos);
 
       const venta = await tx.venta.create({
@@ -786,7 +767,7 @@ export class SaleService {
     id: string,
     scope?: { usuarioId?: string | null; sucursalId?: string | null; role?: string | null },
   ) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const gasto = await tx.gastoCaja.findUnique({ where: { id } });
       if (!gasto) throw Object.assign(new Error('Gasto no encontrado'), { status: 404 });
 
@@ -815,7 +796,7 @@ export class SaleService {
   }
 
   async requestSaleVoid(id: string, motivo: string, user: InternalUserScope) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const venta = await tx.venta.findUnique({
         where: { id },
         include: {
@@ -856,7 +837,7 @@ export class SaleService {
   }
 
   async approveSaleVoidRequest(requestId: string, adminId: string) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const request = await tx.solicitudAnulacionVenta.findUnique({
         where: { id: requestId },
         include: { venta: true },
@@ -880,7 +861,7 @@ export class SaleService {
   }
 
   async deleteSale(id: string, motivo: string = 'Anulación de venta', actorId?: string | null) {
-    return prisma.$transaction((tx) => this.deleteSaleWithTransaction(tx, id, motivo, actorId));
+    return inventoryTransaction((tx) => this.deleteSaleWithTransaction(tx, id, motivo, actorId));
   }
 
   private async deleteSaleWithTransaction(tx: Prisma.TransactionClient, id: string, motivo: string, actorId?: string | null) {
@@ -912,7 +893,7 @@ export class SaleService {
           const movimiento = await tx.movimientoStock.findFirst({
             where: {
               referenciaId: venta.id,
-              referenciaTipo: 'VENTA',
+              referenciaTipo: { in: ['VENTA', 'REMACHADO'] },
               productoId: detalle.productoId
             }
           });
@@ -920,6 +901,7 @@ export class SaleService {
           const sucursalIdTarget = movimiento ? movimiento.sucursalId : venta.sucursalId;
           const targetStock = producto.stockSucursales.find(s => s.sucursalId === sucursalIdTarget);
           
+          if (!targetStock) throw Object.assign(new Error('No se encontro la sucursal del movimiento original. Revisa el inventario antes de anular.'), { status: 409 });
           if (targetStock) {
             const stockAnterior = targetStock.stock;
             const stockNuevo = stockAnterior + detalle.cantidad;
@@ -929,10 +911,8 @@ export class SaleService {
               data: { stock: stockNuevo }
             });
 
-            await tx.producto.update({
-              where: { id: detalle.productoId },
-              data: { stock: { increment: detalle.cantidad } }
-            });
+            const totalStock = await tx.productoStockSucursal.aggregate({ where: { productoId: detalle.productoId, activo: true, estado: 'ACTIVO' }, _sum: { stock: true } });
+            await tx.producto.update({ where: { id: detalle.productoId }, data: { stock: totalStock._sum.stock || 0 } });
 
             await tx.movimientoStock.create({
               data: {
@@ -1060,7 +1040,7 @@ export class SaleService {
         referenciaDeposito: data.depositadoBanco ? data.referenciaDeposito?.trim() || null : null,
       } satisfies Prisma.CierreCajaUncheckedCreateInput;
 
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const previous = await tx.cierreCaja.findUnique({
         where: {
           fecha_usuarioId_sucursalId: {
@@ -1148,7 +1128,7 @@ export class SaleService {
   }
 
   async approveCashClosing(data: ReviewCashClosingInput) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const closing = await tx.cierreCaja.findUnique({ where: { id: data.cierreId } });
       if (!closing) throw Object.assign(new Error('Cierre de caja no encontrado'), { status: 404 });
       const transition = await tx.cierreCaja.updateMany({
@@ -1181,7 +1161,7 @@ export class SaleService {
   }
 
   async observeCashClosing(data: ReviewCashClosingInput) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const closing = await tx.cierreCaja.findUnique({ where: { id: data.cierreId } });
       if (!closing) throw Object.assign(new Error('Cierre de caja no encontrado'), { status: 404 });
       const transition = await tx.cierreCaja.updateMany({

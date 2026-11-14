@@ -21,6 +21,7 @@ import {
   Sucursal,
 } from './types';
 import type { ReceiptSale } from './thermalReceipt';
+import { prepareInventoryOperation, completeInventoryOperation } from './inventoryOperation';
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'https://sistema-el-dandy.onrender.com/api').replace(/\/$/, '');
 
@@ -37,17 +38,20 @@ export type ProductImageUpload = {
 };
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+  const operation = await prepareInventoryOperation(path, options, token);
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(operation ? { 'Idempotency-Key': operation.key } : {}),
       ...options.headers,
     },
   });
 
   const body = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
+  if (body?.success || (response.status >= 400 && response.status < 500)) await completeInventoryOperation(operation);
   if (!response.ok || !body?.success) {
     throw new Error(body?.error || `Error de conexión (${response.status})`);
   }

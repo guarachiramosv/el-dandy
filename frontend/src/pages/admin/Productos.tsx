@@ -336,6 +336,10 @@ export default function Productos() {
         const withImage = imageFiles?.length ? (await uploadProductImages(created.id, imageFiles)).product : created;
         setProducts(prev => [withImage, ...prev]);
       } else if (modalMode === "EDIT" && selectedProduct) {
+        const branchId = productPayload.sucursalId || selectedProduct.sucursalId;
+        const stockEsperado = selectedProduct.stockSucursales?.find(branch => branch.sucursalId === branchId)?.stock ?? 0;
+        if (productPayload.stock === stockEsperado) delete productPayload.stock;
+        else productPayload.stockEsperado = stockEsperado;
         const updated = await updateProduct(selectedProduct.id, productPayload);
         const withImage = imageFiles?.length ? (await uploadProductImages(updated.id, imageFiles)).product : updated;
         setProducts(prev => prev.map(p => (p.id === withImage.id ? withImage : p)));

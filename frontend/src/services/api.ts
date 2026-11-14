@@ -1,5 +1,10 @@
 // src/services/api.ts
 import axios from 'axios';
+import { prepareInventoryOperation, completeInventoryOperation, type InventoryOperation } from '../utils/inventoryOperation';
+
+declare module 'axios' {
+  interface InternalAxiosRequestConfig { inventoryOperation?: InventoryOperation | null }
+}
 
 const DEFAULT_API_URL = 'https://sistema-el-dandy.onrender.com/api';
 
@@ -8,18 +13,26 @@ const api = axios.create({
 });
 
 // Request interceptor – could add auth token later
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem('authToken');
   if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (token && !config.headers['Idempotency-Key']) {
+    config.inventoryOperation = await prepareInventoryOperation(config.method || 'get', config.url || '', config.data, token, localStorage);
+    if (config.inventoryOperation) config.headers['Idempotency-Key'] = config.inventoryOperation.key;
   }
   return config;
 });
 
 // Response interceptor – unified error shape
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    completeInventoryOperation(response.config.inventoryOperation, localStorage);
+    return response;
+  },
   (error) => {
+    if (error.response && error.response.status < 500) completeInventoryOperation(error.config?.inventoryOperation, localStorage);
     if (error.response?.status === 401 && window.location.pathname !== '/login') {
       localStorage.removeItem('authToken');
       localStorage.removeItem('authUser');

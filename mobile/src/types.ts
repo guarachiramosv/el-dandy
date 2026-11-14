@@ -81,6 +81,7 @@ export type ProductInput = {
   condicion: 'NUEVO' | 'USADO';
   unidadVenta?: 'UNIDAD' | 'METRO';
   stock: number;
+  stockEsperado?: number;
   stockMinimo: number;
   ubicacion?: string | null;
   precioCompra: number;

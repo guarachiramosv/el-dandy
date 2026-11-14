@@ -1,3 +1,5 @@
+import { resolveSaleStock, requireValidStock, requireQuantityForUnit } from './inventory-safety';
+import { inventoryTransaction } from '../lib/inventory-transaction';
 import { assertPreviousCashClosed } from './cashClosingPolicy.service';
 import { CashClosingStatus, PaymentMethod, Prisma, RemachadoTrabajoTipo, SaleType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -46,30 +48,6 @@ function trabajoConfig(tipoTrabajo: RemachadoTrabajoTipo) {
   return { cantidadJuegos: 1, cantidadBalatas: 4, resortes: 4, gomas: 8, seguros: 2 };
 }
 
-type ProductWithBranchStock = Prisma.ProductoGetPayload<{
-  include: { stockSucursales: true };
-}>;
-
-function resolveSaleStock(producto: ProductWithBranchStock, requestedSucursalId: string) {
-  const activeBranches = producto.stockSucursales.filter((stock) => stock.estado === 'ACTIVO' && stock.activo);
-  const requestedBranch = activeBranches.find((stock) => stock.sucursalId === requestedSucursalId);
-  if (requestedBranch) {
-    return { sucursalId: requestedBranch.sucursalId, availableStock: requestedBranch.stock };
-  }
-
-  const productBranch = activeBranches.find((stock) => stock.sucursalId === producto.sucursalId);
-  if (productBranch) {
-    return { sucursalId: productBranch.sucursalId, availableStock: productBranch.stock };
-  }
-
-  const branchWithStock = activeBranches.find((stock) => stock.stock > 0) || activeBranches[0];
-  if (branchWithStock) {
-    return { sucursalId: branchWithStock.sucursalId, availableStock: branchWithStock.stock };
-  }
-
-  return { sucursalId: producto.sucursalId, availableStock: producto.stock };
-}
-
 const trabajoInclude = {
   medida: true,
   remache: true,
@@ -111,7 +89,7 @@ export class RemachadoService {
     remachesPorMedioJuego?: number;
     activo?: boolean;
   }, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const stockInicial = data.stockJuegos ?? 0;
       const medida = await tx.remachadoMedida.create({
         data: {
@@ -152,7 +130,7 @@ export class RemachadoService {
     remachesPorMedioJuego: number;
     activo: boolean;
   }>, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const current = await tx.remachadoMedida.findUnique({ where: { id } });
       if (!current) throw Object.assign(new Error('Medida no encontrada'), { status: 404 });
 
@@ -180,12 +158,12 @@ export class RemachadoService {
   }
 
   async adjustMedidaStock(id: string, data: { cantidadJuegos: number; usuarioId?: string | null; notas?: string | null }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const medida = await tx.remachadoMedida.findUnique({ where: { id } });
       if (!medida) throw Object.assign(new Error('Medida no encontrada'), { status: 404 });
 
       const stockAnterior = medida.stockJuegos;
-      const stockNuevo = Math.max(stockAnterior + data.cantidadJuegos, 0);
+      const stockNuevo = requireValidStock(stockAnterior + data.cantidadJuegos);
       await tx.remachadoMedida.update({ where: { id }, data: { stockJuegos: stockNuevo } });
       await tx.remachadoMovimiento.create({
         data: {
@@ -210,7 +188,7 @@ export class RemachadoService {
     stockMinimo?: number;
     activo?: boolean;
   }, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const stockInicial = data.stock ?? 0;
       const remache = await tx.remachadoRemache.create({
         data: {
@@ -245,7 +223,7 @@ export class RemachadoService {
     stockMinimo: number;
     activo: boolean;
   }>, usuarioId?: string | null) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const current = await tx.remachadoRemache.findUnique({ where: { id } });
       if (!current) throw Object.assign(new Error('Remache no encontrado'), { status: 404 });
 
@@ -274,12 +252,12 @@ export class RemachadoService {
   }
 
   async adjustRemacheStock(id: string, data: { cantidad: number; usuarioId?: string | null; notas?: string | null }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const remache = await tx.remachadoRemache.findUnique({ where: { id } });
       if (!remache) throw Object.assign(new Error('Remache no encontrado'), { status: 404 });
 
       const stockAnterior = remache.stock;
-      const stockNuevo = Math.max(stockAnterior + data.cantidad, 0);
+      const stockNuevo = requireValidStock(stockAnterior + data.cantidad);
       await tx.remachadoRemache.update({ where: { id }, data: { stock: stockNuevo } });
       await tx.remachadoMovimiento.create({
         data: {
@@ -323,7 +301,7 @@ export class RemachadoService {
     notas?: string | null;
     descuento?: number;
   }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       if (data.tipoVenta === 'CREDITO' && !data.clienteId) {
         throw Object.assign(new Error('Selecciona un cliente para venta a credito'), { status: 400 });
       }
@@ -436,6 +414,7 @@ export class RemachadoService {
         };
       });
 
+      if (total - (data.descuento || 0) <= 0) throw Object.assign(new Error('El total del trabajo debe ser mayor a cero.'), { status: 400 });
       if ((data.descuento || 0) > total) {
         throw Object.assign(new Error('El descuento no puede superar el total del trabajo.'), { status: 400 });
       }
@@ -489,6 +468,7 @@ export class RemachadoService {
         if (producto.unidadVenta !== 'UNIDAD') {
           throw Object.assign(new Error(`El accesorio ${producto.descripcion} debe venderse por unidad.`), { status: 400 });
         }
+        requireQuantityForUnit(accessory.cantidad, producto.unidadVenta);
         const saleStock = resolveSaleStock(producto, data.sucursalId);
         accessoryStockMap.set(accessory.productoId, saleStock);
         if (saleStock.availableStock < accessory.cantidad) {

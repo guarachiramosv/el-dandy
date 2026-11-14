@@ -809,3 +809,15 @@ model RemachadoMovimiento {
   @@index([trabajoId])
   @@index([createdAt])
 }
+
+// A successful inventory operation and its replay key commit in the same transaction.
+model OperacionInventario {
+  id String @id @default(uuid())
+  usuarioId String
+  clave String
+  hash String
+  resultado Json
+  createdAt DateTime @default(now())
+  @@unique([usuarioId, clave])
+  @@index([createdAt])
+}

@@ -1,11 +1,13 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { prisma } from './lib/prisma';
+import { seedCredentials } from './lib/seed-policy';
 
 const categories = ['Frenos', 'Motor', 'Filtros', 'Suspension', 'Aceites', 'Electrico'];
 const sucursales = ['Cochabamba', 'Santa Cruz'];
 
 async function main() {
+  const credentials = seedCredentials();
   for (const nombre of sucursales) {
     const existing = await prisma.sucursal.findFirst({ where: { nombre } });
     if (!existing) await prisma.sucursal.create({ data: { nombre, whatsapp: '+59177956268' } });
@@ -19,18 +21,12 @@ async function main() {
 
   const sucursal = await prisma.sucursal.findFirstOrThrow({ orderBy: { nombre: 'asc' } });
   const cochabamba = await prisma.sucursal.findFirstOrThrow({ where: { nombre: 'Cochabamba' } });
-  const password = await bcrypt.hash('Admin123', 10);
-  const sellerPassword = await bcrypt.hash('Seller123', 10);
+  const password = await bcrypt.hash(credentials.admin, 10);
+  const sellerPassword = await bcrypt.hash(credentials.seller, 10);
 
   await prisma.usuario.upsert({
     where: { email: 'admin@eldandy.com' },
-    update: {
-      nombre: 'Admin Principal',
-      password,
-      role: 'ADMIN',
-      activo: true,
-      sucursalId: sucursal.id,
-    },
+    update: {},
     create: {
       nombre: 'Admin Principal',
       email: 'admin@eldandy.com',
@@ -42,13 +38,7 @@ async function main() {
 
   await prisma.usuario.upsert({
     where: { email: 'vendedor@eldandy.com' },
-    update: {
-      nombre: 'Vendedor Cochabamba',
-      password: sellerPassword,
-      role: 'SELLER',
-      activo: true,
-      sucursalId: cochabamba.id,
-    },
+    update: {},
     create: {
       nombre: 'Vendedor Cochabamba',
       email: 'vendedor@eldandy.com',
@@ -59,7 +49,7 @@ async function main() {
     },
   });
 
-  console.log('Usuarios iniciales listos: admin@eldandy.com / Admin123 y vendedor@eldandy.com / Seller123');
+  console.log('Usuarios de desarrollo preparados. Las cuentas existentes conservan sus permisos y contrasenas.');
 }
 
 main()

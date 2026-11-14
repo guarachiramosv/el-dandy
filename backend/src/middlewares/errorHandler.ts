@@ -38,6 +38,10 @@ export const errorHandler = (
     });
   }
 
+  if (err.code === 'P2004') {
+    return res.status(409).json({ success: false, error: 'La operacion no cumple las reglas de integridad. No se modifico el inventario.' });
+  }
+
   if (err.clientVersion && status >= 500) {
     return res.status(503).json({
       success: false,

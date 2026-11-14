@@ -102,7 +102,7 @@ function productToForm(product: Product): FormState {
     marca: product.marca || '',
     condicion: product.condicion === 'USADO' ? 'USADO' : 'NUEVO',
     unidadVenta: product.unidadVenta === 'METRO' ? 'METRO' : 'UNIDAD',
-    stock: String(product.stock ?? 0),
+    stock: String(product.stockSucursales?.find(branch => branch.sucursalId === product.sucursalId)?.stock ?? 0),
     stockMinimo: String(product.stockMinimo ?? 5),
     ubicacion: product.ubicacion || '',
     precioCompra: String(product.precioCompra ?? ''),
@@ -405,8 +405,14 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     setError('');
     try {
       const input = formToInput(form);
+      const updates: Partial<ProductInput> = { ...input };
+      if (editingProduct) {
+        const expected = editingProduct.stockSucursales?.find(branch => branch.sucursalId === input.sucursalId)?.stock ?? 0;
+        if (updates.stock === expected) delete updates.stock;
+        else updates.stockEsperado = expected;
+      }
       let saved = editingProduct
-        ? await updateProduct(token, editingProduct.id, input)
+        ? await updateProduct(token, editingProduct.id, updates)
         : await createProduct(token, input);
       let uploadError = '';
 
@@ -766,7 +772,11 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                 {sucursales.map((sucursal) => (
                   <Pressable
                     key={sucursal.id}
-                    onPress={() => setForm((current) => ({ ...current, sucursalId: sucursal.id }))}
+                    onPress={() => setForm((current) => {
+                      if (current.sucursalId === sucursal.id) return current;
+                      const branch = editingProduct?.stockSucursales?.find(item => item.sucursalId === sucursal.id);
+                      return { ...current, sucursalId: sucursal.id, ...(editingProduct ? { stock: String(branch?.stock ?? 0), ubicacion: branch?.ubicacion || '' } : {}) };
+                    })}
                     style={[styles.choiceButton, form.sucursalId === sucursal.id && styles.choiceButtonActive]}
                   >
                     <Text style={[styles.choiceText, form.sucursalId === sucursal.id && styles.choiceTextActive]}>
@@ -777,7 +787,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
               </ScrollView>
 
               <Field label="Ubicacion / Estante" value={form.ubicacion} onChangeText={(value) => setForm((current) => ({ ...current, ubicacion: value }))} />
-              <Field label={`${editingProduct ? 'Stock Total' : 'Stock Inicial'} ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stock} onChangeText={(value) => setForm((current) => ({ ...current, stock: value }))} />
+              <Field label={`${editingProduct ? 'Stock sucursal' : 'Stock Inicial'} ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stock} onChangeText={(value) => setForm((current) => ({ ...current, stock: value }))} />
               <Field label={`Stock Minimo ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stockMinimo} onChangeText={(value) => setForm((current) => ({ ...current, stockMinimo: value }))} />
               <Field label="Precio de Compra" keyboardType="decimal-pad" value={form.precioCompra} onChangeText={(value) => setForm((current) => ({ ...current, precioCompra: value }))} />
               <Field label="Precio de Venta" keyboardType="decimal-pad" value={form.precioVenta} onChangeText={(value) => setForm((current) => ({ ...current, precioVenta: value }))} />

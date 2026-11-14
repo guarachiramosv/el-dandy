@@ -1,3 +1,5 @@
+import { requireQuantityForUnit } from './inventory-safety';
+import { inventoryTransaction } from '../lib/inventory-transaction';
 import { PaymentMethod, Prisma, PurchaseOrigin } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { StockService } from './stock.service';
@@ -15,7 +17,7 @@ export class PurchaseService {
   }
 
   async addPayment(compraId: string, data: { monto: number; metodoPago: PaymentMethod; notas?: string | null; usuarioId: string }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const compra = await tx.compra.findUnique({ where: { id: compraId } });
       if (!compra) throw Object.assign(new Error('Compra no encontrada'), { status: 404 });
       if (compra.estado === 'ANULADA') throw Object.assign(new Error('No se puede pagar una compra anulada'), { status: 409 });
@@ -71,7 +73,7 @@ export class PurchaseService {
     tipoCambio?: number;
     items: { productoId: string; cantidad: number; precioUnitario: number; precioUnitarioReales?: number }[];
   }) {
-    return prisma.$transaction(async (tx) => {
+    return inventoryTransaction(async (tx) => {
       const compra = await purchaseRecordService.create(tx, {
         proveedorId: data.proveedorId,
         sucursalId: data.sucursalId,
@@ -93,6 +95,10 @@ export class PurchaseService {
         });
         if (!producto) throw Object.assign(new Error('Producto no encontrado'), { status: 404 });
         const branchStock = producto.stockSucursales.find((stock) => stock.sucursalId === data.sucursalId);
+        requireQuantityForUnit(item.cantidad, producto.unidadVenta);
+        if (!producto.activo || producto.estado !== 'ACTIVO' || (branchStock && (!branchStock.activo || branchStock.estado !== 'ACTIVO'))) {
+          throw Object.assign(new Error('Restaura el producto y la sucursal antes de registrar la compra.'), { status: 409 });
+        }
         const stockAnterior = branchStock?.stock ?? (producto.sucursalId === data.sucursalId ? producto.stock : 0);
         const stockNuevo = stockAnterior + item.cantidad;
         await tx.productoStockSucursal.upsert({

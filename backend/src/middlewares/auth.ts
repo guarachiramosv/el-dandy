@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { getJwtSecret } from '../lib/jwt-secret';
+import { withInventoryRequest } from '../lib/inventory-request';
 
 export type AuthUser = {
   id: string;
@@ -37,7 +38,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     });
     if (!user?.activo) return res.status(401).json({ success: false, error: 'Sesion invalida o usuario inactivo' });
     req.user = { id: user.id, role: user.role, sucursalId: user.sucursalId };
-    return next();
+    return withInventoryRequest(req, next);
   } catch (error) {
     if (!(error instanceof jwt.JsonWebTokenError)) return next(error);
     return res.status(401).json({ success: false, error: 'Sesion invalida o expirada' });

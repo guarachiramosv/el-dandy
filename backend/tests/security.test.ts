@@ -12,6 +12,11 @@ import providerRoutes from '../src/routes/provider.routes';
 import sucursalRoutes from '../src/routes/sucursal.routes';
 import uploadRoutes from '../src/routes/upload.routes';
 import reportRoutes from '../src/routes/report.routes';
+import productRoutes from '../src/routes/product.routes';
+import inventoryRoutes from '../src/routes/inventory.routes';
+import remachadoRoutes from '../src/routes/remachado.routes';
+import purchaseRoutes from '../src/routes/purchase.routes';
+import { seedCredentials } from '../src/lib/seed-policy';
 import { errorHandler } from '../src/middlewares/errorHandler';
 
 process.env.JWT_SECRET = 'isolated-test-secret-never-used-in-production';
@@ -51,13 +56,17 @@ test('seller cannot change catalogs, branches, upload product images or read adm
   const original = prisma.usuario.findUnique;
   (prisma.usuario as any).findUnique = async () => ({ id: userId, role: 'SELLER', sucursalId: 'branch', activo: true });
   const app = express();
+  app.use('/products', requireAuth, productRoutes);
+  app.use('/inventory', requireAuth, inventoryRoutes);
+  app.use('/remachado', requireAuth, remachadoRoutes);
+  app.use('/purchases', requireAuth, purchaseRoutes);
   app.use('/categories', requireAuth, categoryRoutes);
   app.use('/providers', requireAuth, providerRoutes);
   app.use('/branches', requireAuth, sucursalRoutes);
   app.use('/uploads', requireAuth, uploadRoutes);
   app.use('/reports', requireAuth, requireAdmin, reportRoutes);
   try { await withServer(app, async base => {
-    for (const [method, path] of [['POST','/categories'],['PUT','/categories/id'],['DELETE','/categories/id'],['POST','/providers'],['PUT','/providers/id'],['DELETE','/providers/id'],['POST','/branches'],['PUT','/branches/id'],['DELETE','/branches/id'],['POST','/uploads/products/id/image'],['POST','/uploads/products/id/images'],['GET','/reports/sales-history']]) {
+    for (const [method, path] of [['POST','/products'],['PUT','/products/id'],['PATCH','/products/id/stock'],['PATCH','/products/id/branches/branch/status'],['DELETE','/products/id'],['PATCH','/products/id/restore'],['PATCH','/products/id/discontinue'],['POST','/inventory/adjustments'],['POST','/inventory/transfers'],['POST','/remachado/medidas'],['PATCH','/remachado/medidas/id'],['POST','/remachado/medidas/id/stock'],['POST','/remachado/remaches'],['PATCH','/remachado/remaches/id'],['POST','/remachado/remaches/id/stock'],['POST','/purchases'],['POST','/categories'],['PUT','/categories/id'],['DELETE','/categories/id'],['POST','/providers'],['PUT','/providers/id'],['DELETE','/providers/id'],['POST','/branches'],['PUT','/branches/id'],['DELETE','/branches/id'],['POST','/uploads/products/id/image'],['POST','/uploads/products/id/images'],['GET','/reports/sales-history']]) {
       assert.equal((await fetch(base + path, { method, headers: { Authorization: `Bearer ${token()}` } })).status, 403, `${method} ${path}`);
     }
   }); } finally { prisma.usuario.findUnique = original; }
@@ -90,4 +99,10 @@ test('missing or public default JWT secret fails closed', () => {
     process.env.JWT_SECRET = 'dev-secret-change-me';
     assert.throws(getJwtSecret);
   } finally { process.env.JWT_SECRET = original; }
+});
+
+test('demo account initialization cannot run in production or reset public default passwords', () => {
+  assert.throws(() => seedCredentials({ NODE_ENV: 'production' }), /produccion/);
+  assert.throws(() => seedCredentials({ RENDER: 'true' }), /produccion/);
+  assert.throws(() => seedCredentials({ NODE_ENV: 'development', SEED_ADMIN_PASSWORD: 'short', SEED_SELLER_PASSWORD: 'short' }), /12 caracteres/);
 });

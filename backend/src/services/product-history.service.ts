@@ -54,7 +54,7 @@ export class ProductHistoryService {
     ]);
 
     const saleIds = movements
-      .filter((item) => item.referenciaTipo === 'VENTA' && item.referenciaId)
+      .filter((item) => ['VENTA', 'REMACHADO'].includes(item.referenciaTipo || '') && item.referenciaId)
       .map((item) => item.referenciaId!);
     const purchaseIds = movements
       .filter((item) => item.referenciaTipo === 'COMPRA' && item.referenciaId)

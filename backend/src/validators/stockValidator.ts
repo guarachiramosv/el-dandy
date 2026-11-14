@@ -13,7 +13,7 @@ export const transferStockSchema = z.object({
 export const adjustStockSchema = z.object({
   productoId: z.string().uuid('Producto invalido'),
   sucursalId: z.string().uuid('Sucursal invalida').optional(),
-  cantidad: z.number(),
+  cantidad: z.number().refine(value => value !== 0, 'La cantidad no puede ser cero'),
   usuarioId: z.string().uuid('Usuario invalido'),
   notas: z.string().optional().nullable(),
 });
