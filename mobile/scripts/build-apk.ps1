@@ -41,7 +41,7 @@ if (-not $env:EXPO_PUBLIC_API_URL -or $env:EXPO_PUBLIC_API_URL -match '192\.168\
 Push-Location $projectRoot
 try {
   # Sincroniza recursos nativos como el icono de instalación en cada APK.
-  & "npx.cmd" expo prebuild --platform android --no-install
+  & "node.exe" (Join-Path $projectRoot "node_modules\expo\bin\cli") prebuild --platform android --no-install
   if ($LASTEXITCODE -ne 0) {
     throw "Expo prebuild fallo con codigo $LASTEXITCODE."
   }
