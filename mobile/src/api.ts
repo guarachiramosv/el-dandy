@@ -9,6 +9,8 @@ import {
   PaginatedProducts,
   Product,
   ProductInput,
+  Provider,
+  StockAdditionInput,
   ProductInventoryReport,
   ProductStatusFilter,
   ReportPeriod,
@@ -174,6 +176,14 @@ export function getCategories(token: string) {
 
 export function getSucursales(token: string) {
   return request<Sucursal[]>('/sucursales', {}, token);
+}
+
+export function getProviders(token: string) {
+  return request<Provider[]>('/providers', {}, token);
+}
+
+export function addProductStock(token: string, id: string, input: StockAdditionInput) {
+  return request<Product>(`/products/${id}/stock`, { method: 'PATCH', body: JSON.stringify(input) }, token);
 }
 
 export function createProduct(token: string, input: ProductInput) {

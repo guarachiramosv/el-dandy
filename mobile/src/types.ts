@@ -26,6 +26,9 @@ export type Product = {
   estado?: ProductStatus;
   ubicacion?: string | null;
   precioCompra?: number;
+  precioCompraReales?: number;
+  tipoCambioCompra?: number;
+  proveedorId?: string | null;
   precioVenta: number;
   imagen?: string | null;
   imagenes?: ProductImage[];
@@ -73,6 +76,9 @@ export type Sucursal = {
   whatsapp?: string | null;
 };
 
+export type Provider = { id: string; nombre: string; activo?: boolean };
+export type StockAdditionInput = { sucursalId: string; cantidad: number; ubicacion?: string | null; proveedorId?: string | null; precioCompraUnitario: number; precioCompraUnitarioReales: number; tipoCambio: number; comprobante?: string | null; notas?: string | null };
+
 export type ProductInput = {
   codigo?: string | null;
   codigoRepuesto?: string | null;
@@ -85,6 +91,10 @@ export type ProductInput = {
   stockMinimo: number;
   ubicacion?: string | null;
   precioCompra: number;
+  precioCompraReales?: number;
+  tipoCambioCompra?: number;
+  proveedorId?: string | null;
+  compraInicial?: { cantidad: number; proveedorId?: string | null; precioCompraUnitario: number; precioCompraUnitarioReales: number; tipoCambio: number; comprobante?: string | null; notas?: string | null } | null;
   precioVenta: number;
   categoriaId: string;
   sucursalId: string;

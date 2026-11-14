@@ -22,6 +22,7 @@ import {
   getAdminProductsPage,
   getCategories,
   getSucursales,
+  getProviders,
   updateProduct,
   uploadProductImage,
   uploadProductImages,
@@ -32,12 +33,16 @@ import {
   Category,
   Product,
   ProductInput,
+  Provider,
   ProductStatusFilter,
   Session,
   Sucursal,
 } from '../types';
 import * as ImagePicker from 'expo-image-picker';
 import ImageViewer from './ImageViewer';
+import AddStockModal from '../components/AddStockModal';
+import PurchaseFields from '../components/PurchaseFields';
+import { availableTotal, branchStocks as stockByBranch, decimal, emptyPurchase, purchaseCost, purchaseFromProduct, validatePurchase, type PurchaseDraft } from '../domain/adminInventory';
 
 type FormState = {
   codigo: string;
@@ -49,7 +54,7 @@ type FormState = {
   stock: string;
   stockMinimo: string;
   ubicacion: string;
-  precioCompra: string;
+  compra: PurchaseDraft;
   precioVenta: string;
   categoriaId: string;
   sucursalId: string;
@@ -67,7 +72,7 @@ const emptyForm: FormState = {
   stock: '0',
   stockMinimo: '5',
   ubicacion: '',
-  precioCompra: '',
+  compra: emptyPurchase,
   precioVenta: '',
   categoriaId: '',
   sucursalId: '',
@@ -105,7 +110,7 @@ function productToForm(product: Product): FormState {
     stock: String(product.stockSucursales?.find(branch => branch.sucursalId === product.sucursalId)?.stock ?? 0),
     stockMinimo: String(product.stockMinimo ?? 5),
     ubicacion: product.ubicacion || '',
-    precioCompra: String(product.precioCompra ?? ''),
+    compra: purchaseFromProduct(product),
     precioVenta: String(product.precioVenta ?? ''),
     categoriaId: product.categoriaId || product.categoria?.id || '',
     sucursalId: product.sucursalId || product.sucursal?.id || '',
@@ -142,7 +147,9 @@ function uploadFromAsset(asset: ImagePicker.ImagePickerAsset): ProductImageUploa
   };
 }
 
-function formToInput(form: FormState): ProductInput {
+function formToInput(form: FormState, isNew = false): ProductInput {
+  const cost = purchaseCost(form.compra);
+  const quantity = decimal(form.stock);
   return {
     codigo: form.codigo.trim() || null,
     codigoRepuesto: form.codigoRepuesto.trim() || null,
@@ -153,7 +160,11 @@ function formToInput(form: FormState): ProductInput {
     stock: Number(form.stock.replace(',', '.')),
     stockMinimo: Number(form.stockMinimo.replace(',', '.')),
     ubicacion: form.ubicacion.trim() || null,
-    precioCompra: Number(form.precioCompra.replace(',', '.')),
+    precioCompra: cost.unitBs,
+    precioCompraReales: cost.unitReales,
+    tipoCambioCompra: cost.exchangeRate,
+    proveedorId: form.compra.providerId || null,
+    compraInicial: isNew && quantity > 0 ? { cantidad: quantity, proveedorId: form.compra.providerId || null, precioCompraUnitario: cost.unitBs, precioCompraUnitarioReales: cost.unitReales, tipoCambio: cost.exchangeRate, comprobante: form.compra.receipt.trim() || null, notas: form.compra.notes.trim() || null } : undefined,
     precioVenta: Number(form.precioVenta.replace(',', '.')),
     categoriaId: form.categoriaId,
     sucursalId: form.sucursalId,
@@ -185,6 +196,10 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [stockProduct, setStockProduct] = useState<Product | null>(null);
+  const [stockBranch, setStockBranch] = useState('');
+  const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ProductStatusFilter>('active');
   const [selectedSucursalId, setSelectedSucursalId] = useState('');
@@ -216,10 +231,12 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   const defaultSucursalId = sucursales[0]?.id || '';
 
   const loadCatalogs = useCallback(async () => {
-    const [nextCategories, nextSucursales] = await Promise.all([
+    const [nextCategories, nextSucursales, nextProviders] = await Promise.all([
       getCategories(token),
       getSucursales(token),
+      getProviders(token),
     ]);
+    setProviders(nextProviders.filter(provider => provider.activo !== false));
     setCategories(nextCategories);
     setSucursales(nextSucursales);
     setForm((current) => ({
@@ -295,7 +312,8 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     setEditingProduct(product);
     setSelectedImages([]);
     setError('');
-    setForm(productToForm(product));
+    const branchId = selectedSucursalId || product.sucursalId;
+    setForm(productToForm({ ...product, sucursalId: branchId }));
     setModalOpen(true);
   };
 
@@ -323,7 +341,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   };
 
   const validate = () => {
-    const input = formToInput(form);
+    const input = formToInput(form, !editingProduct);
     if (!input.descripcion) {
       return 'Descripcion es requerida.';
     }
@@ -342,6 +360,8 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     if (input.unidadVenta !== 'METRO' && !Number.isInteger(input.stockMinimo)) {
       return 'Stock minimo por unidad debe ser entero. Para decimales elige venta por metro.';
     }
+    const purchaseError = validatePurchase(form.compra);
+    if (purchaseError) return purchaseError;
     if (!Number.isFinite(input.precioCompra) || input.precioCompra <= 0) {
       return 'Precio de compra debe ser mayor a 0.';
     }
@@ -404,7 +424,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
     setSaving(true);
     setError('');
     try {
-      const input = formToInput(form);
+      const input = formToInput(form, !editingProduct);
       const updates: Partial<ProductInput> = { ...input };
       if (editingProduct) {
         const expected = editingProduct.stockSucursales?.find(branch => branch.sucursalId === input.sucursalId)?.stock ?? 0;
@@ -470,14 +490,12 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
   };
 
   const renderProduct = ({ item }: { item: Product }) => {
-    const lowStock = item.stock <= (item.stockMinimo || 5);
+    const lowStock = availableTotal(item) <= (item.stockMinimo ?? 5);
     const inactive = item.estado === 'INACTIVO';
     const discontinued = item.estado === 'DESCONTINUADO';
     const imageUrl = productImageUrl(productImageUrls(item)[0]);
     const unitLabel = item.unidadVenta === 'METRO' ? 'm' : 'u';
-    const branchStocks = item.stockSucursales?.length
-      ? item.stockSucursales
-      : [{ sucursalId: item.sucursalId, sucursal: item.sucursal, stock: item.stock, ubicacion: item.ubicacion }];
+    const branchStocks = stockByBranch(item, sucursales);
 
     return (
       <View style={styles.card}>
@@ -515,22 +533,25 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
         </View>
         <View style={styles.stockRow}>
           <Text style={[styles.stock, lowStock && styles.stockLow]}>
-            Stock total {item.stock} {unitLabel} / min. {item.stockMinimo}
+            Disponible total {availableTotal(item)} {unitLabel} / min. {item.stockMinimo}
           </Text>
           <Text style={styles.cost}>Compra {money(item.precioCompra)}</Text>
         </View>
         <View style={styles.branchStockGrid}>
           {branchStocks.map((branch) => (
-            <View key={`${item.id}-${branch.sucursalId}`} style={styles.branchStockPill}>
-              <Text style={styles.branchStockName}>{branch.sucursal?.nombre || 'Sucursal'}</Text>
+            <View key={`${item.id}-${branch.id}`} style={styles.branchStockPill}>
+              <Text style={styles.branchStockName}>{branch.nombre}</Text>
               <Text style={styles.branchStockValue}>
                 {branch.stock} {unitLabel}
               </Text>
+              {!branch.registered && <Text style={styles.branchStockShelf}>Sin stock registrado</Text>}
+              {branch.registered && !branch.active && <Text style={styles.stockLow}>Fuera de venta</Text>}
               {!!branch.ubicacion && <Text style={styles.branchStockShelf}>Est. {branch.ubicacion}</Text>}
             </View>
           ))}
         </View>
         <View style={styles.actions}>
+          {!inactive && !discontinued && <Pressable onPress={() => { setError(''); setSuccess(''); setStockBranch(selectedSucursalId || session.user.sucursalId || item.sucursalId); setStockProduct(item); }} style={styles.newButton}><Text style={styles.newButtonText}>+ Agregar stock</Text></Pressable>}
           <Pressable onPress={() => openView(item)} style={styles.secondaryAction}>
             <Text style={styles.secondaryActionText}>Ver</Text>
           </Pressable>
@@ -552,7 +573,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
       <View style={[styles.titleRow, compactLayout && styles.titleRowCompact]}>
         <View style={[styles.titleTextWrap, compactLayout && styles.titleTextWrapCompact]}>
           <Text style={styles.heading}>Productos</Text>
-          <Text style={styles.caption}>Vista admin para consulta y CRUD.</Text>
+          <Text style={styles.caption}>Stock por sucursal y compras en Bs o R$.</Text>
         </View>
         <Pressable onPress={openCreate} style={[styles.newButton, compactLayout && styles.newButtonCompact]}>
           <Text style={styles.newButtonText}>Nuevo</Text>
@@ -621,6 +642,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
       </ScrollView>
 
       {!!catalogWarning && <Text style={styles.warning}>{catalogWarning}</Text>}
+      {!!success && <Text style={{ color: colors.success, marginVertical: 8 }}>{success}</Text>}
       {!!error && <Text style={styles.error}>{error}</Text>}
 
       {loading ? (
@@ -789,7 +811,7 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
               <Field label="Ubicacion / Estante" value={form.ubicacion} onChangeText={(value) => setForm((current) => ({ ...current, ubicacion: value }))} />
               <Field label={`${editingProduct ? 'Stock sucursal' : 'Stock Inicial'} ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stock} onChangeText={(value) => setForm((current) => ({ ...current, stock: value }))} />
               <Field label={`Stock Minimo ${form.unidadVenta === 'METRO' ? '(metros)' : '(unidades)'}`} keyboardType={form.unidadVenta === 'METRO' ? 'decimal-pad' : 'number-pad'} value={form.stockMinimo} onChangeText={(value) => setForm((current) => ({ ...current, stockMinimo: value }))} />
-              <Field label="Precio de Compra" keyboardType="decimal-pad" value={form.precioCompra} onChangeText={(value) => setForm((current) => ({ ...current, precioCompra: value }))} />
+              <PurchaseFields value={form.compra} onChange={compra => setForm(current => ({ ...current, compra }))} providers={providers} quantity={editingProduct ? undefined : decimal(form.stock)} details={!editingProduct} disabled={saving} />
               <Field label="Precio de Venta" keyboardType="decimal-pad" value={form.precioVenta} onChangeText={(value) => setForm((current) => ({ ...current, precioVenta: value }))} />
 
               <View style={styles.modalActions}>
@@ -805,6 +827,13 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {stockProduct && <AddStockModal product={stockProduct} branches={sucursales} providers={providers} initialBranch={stockBranch} token={token}
+        onClose={() => setStockProduct(null)} onSaved={saved => {
+          setProducts(current => current.map(item => item.id === saved.id ? saved : item));
+          setViewProduct(current => current?.id === saved.id ? saved : current);
+          setStockProduct(null); setSuccess('Ingreso de stock registrado correctamente.');
+        }} />}
 
       <Modal animationType="slide" transparent visible={!!viewProduct} onRequestClose={() => setViewProduct(null)}>
         <View style={styles.modalOverlay}>
@@ -840,8 +869,15 @@ export default function AdminProductsScreen({ session }: { session: Session }) {
                   <Detail label="Condicion" value={viewProduct.condicion} />
                   <Detail label="Unidad de venta" value={viewProduct.unidadVenta === 'METRO' ? 'Por metro' : 'Por unidad'} />
                   <Detail label="Ubicacion / Estante" value={viewProduct.ubicacion || 'Sin ubicacion'} />
-                  <Detail label="Stock" value={`${viewProduct.stock} ${viewProduct.unidadVenta === 'METRO' ? 'metros' : 'unidades'}`} />
+                  <Detail label="Disponible total" value={`${availableTotal(viewProduct)} ${viewProduct.unidadVenta === 'METRO' ? 'metros' : 'unidades'}`} />
                   <Detail label="Stock minimo" value={`${viewProduct.stockMinimo} ${viewProduct.unidadVenta === 'METRO' ? 'metros' : 'unidades'}`} />
+                  <View style={styles.branchStockGrid}>{stockByBranch(viewProduct, sucursales).map(branch => <View key={branch.id} style={styles.branchStockPill}>
+                    <Text style={styles.branchStockName}>{branch.nombre}</Text><Text style={styles.branchStockValue}>{branch.stock} {viewProduct.unidadVenta === 'METRO' ? 'm' : 'u'}</Text>
+                    {!branch.registered && <Text style={styles.branchStockShelf}>Sin stock registrado</Text>}
+                    {branch.registered && !branch.active && <Text style={styles.stockLow}>Fuera de venta</Text>}
+                    {!!branch.ubicacion && <Text style={styles.branchStockShelf}>Est. {branch.ubicacion}</Text>}
+                  </View>)}</View>
+                  {!!viewProduct.precioCompraReales && <Detail label="Compra unitaria en reales" value={`R$ ${viewProduct.precioCompraReales.toFixed(2)} · 1 R$ = Bs ${viewProduct.tipoCambioCompra || 0}`} />}
                   <Detail label="Precio compra" value={money(viewProduct.precioCompra)} />
                   <Detail label="Precio venta" value={money(viewProduct.precioVenta)} />
                   <Detail label="Categoria" value={viewProduct.categoria?.nombre || 'Sin categoria'} />
@@ -1016,7 +1052,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 10,
     borderWidth: 1,
-    minWidth: 132,
+    flexBasis: '46%',
+    flexGrow: 1,
+    minWidth: 120,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },

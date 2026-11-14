@@ -24,6 +24,7 @@ jobs:
       - run: npm run build --prefix backend
       - run: npm test --prefix backend
       - run: ./backend/node_modules/.bin/tsx --test frontend/tests/*.test.ts
+      - run: ./backend/node_modules/.bin/tsx --test mobile/tests/*.test.ts
       - run: npm run build --prefix frontend
       - run: npm audit --omit=dev --audit-level=moderate --prefix backend
       - run: npm audit --omit=dev --audit-level=moderate --prefix frontend
