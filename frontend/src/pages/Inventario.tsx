@@ -28,6 +28,11 @@ const sellerShelf = (product: Product, sucursalId?: string) => {
   const branch = product.stockSucursales?.find((item) => item.sucursalId === sucursalId);
   return inventoryShelf(branch?.ubicacion || (product.sucursalId === sucursalId ? product.ubicacion : null));
 };
+const sellerBranchName = (product: Product, user?: ReturnType<typeof getCurrentUser>) =>
+  user?.sucursal?.nombre ||
+  product.stockSucursales?.find((branch) => branch.sucursalId === user?.sucursalId)?.sucursal?.nombre ||
+  (product.sucursalId === user?.sucursalId ? product.sucursal?.nombre : null) ||
+  "Sin sucursal";
 const salePriceValue = (item: { precioVenta?: number | null; precio?: number | null }) => {
   const value = item.precioVenta ?? item.precio ?? 0;
   const numericValue = Number(value);
@@ -647,7 +652,7 @@ export default function Inventario() {
                         </td>
                       )}
                       <td className="p-3 text-gray-300">
-                        <span className="block">{isSeller ? user?.sucursal?.nombre || "Sin sucursal" : product.sucursal?.nombre}</span>
+                        <span className="block">{isSeller ? sellerBranchName(product, user) : product.sucursal?.nombre}</span>
                       </td>
                       <td className="p-3">
                         <span className="inline-flex rounded-lg border border-primary/30 bg-primary/10 px-3 py-1 text-sm font-bold text-primary-light">
