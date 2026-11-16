@@ -599,6 +599,7 @@ export default function Inventario() {
                   <th className="p-3">Img</th>
                   <th className="p-3">Codigo</th>
                   <th className="p-3">Producto</th>
+                  {isSeller && <th className="p-3">Condicion</th>}
                   <th className="p-3">Sucursal</th>
                   <th className="p-3">Estante</th>
                   {isSeller ? (
@@ -638,6 +639,13 @@ export default function Inventario() {
                         <p className="font-semibold text-white">{product.descripcion}</p>
                         <p className="text-sm text-gray-500">{product.marca} · {product.categoria?.nombre}</p>
                       </td>
+                      {isSeller && (
+                        <td className="p-3">
+                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${product.condicion === "USADO" ? "border-amber-500/40 bg-amber-500/10 text-amber-200" : "border-green-500/40 bg-green-500/10 text-green-200"}`}>
+                            {product.condicion === "USADO" ? "Usado" : "Nuevo"}
+                          </span>
+                        </td>
+                      )}
                       <td className="p-3 text-gray-300">
                         <span className="block">{isSeller ? user?.sucursal?.nombre || "Sin sucursal" : product.sucursal?.nombre}</span>
                       </td>
